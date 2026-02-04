@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.ref_id",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "ref_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.08,
+  "distinct_count": 37425,
+  "sample_values": [
+    "69286a847ace503b4203e2fb",
+    "692836567ace503b4201c1c7",
+    "69281fbc7ace503b42009562",
+    "69276ce87ace503b42fc0741",
+    "693dde029e0f8b18c523710b"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "column:test_2_1.consent_consent",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "consent_consent",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 40.83,
+  "distinct_count": 1,
+  "sample_values": [
+    "1.0"
+  ],
+  "semantic_hints": []
+}

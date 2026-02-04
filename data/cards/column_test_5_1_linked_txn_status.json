@@ -1,0 +1,16 @@
+{
+  "id": "column:test_5_1.linked_txn_status",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "linked_txn_status",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.2,
+  "distinct_count": 2,
+  "sample_values": [
+    "SUCCESS",
+    "FAILED"
+  ],
+  "semantic_hints": [
+    "status"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "column:test_3_1.platform_charges",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "platform_charges",
+  "duckdb_type": "BIGINT",
+  "null_pct": 0.0,
+  "distinct_count": 1,
+  "sample_values": [
+    "0"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

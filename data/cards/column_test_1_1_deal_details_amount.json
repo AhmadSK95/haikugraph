@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1.deal_details_amount",
+  "card_type": "column",
+  "table": "test_1_1",
+  "column": "deal_details_amount",
+  "duckdb_type": "DOUBLE",
+  "null_pct": 65.09,
+  "distinct_count": 144,
+  "sample_values": [
+    "1630.0",
+    "28395.0",
+    "6550.0",
+    "1115147912293.0",
+    "8000.0"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

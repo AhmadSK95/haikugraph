@@ -1,0 +1,35 @@
+{
+  "id": "relation:test_1_1.customer_id~test_2_1.customer_id",
+  "card_type": "relation",
+  "left_table": "test_1_1",
+  "right_table": "test_2_1",
+  "left_col": "customer_id",
+  "right_col": "customer_id",
+  "confidence": 0.85,
+  "evidence": {
+    "left_distinct": 2633,
+    "right_distinct": 18066,
+    "left_null_pct": 0.0,
+    "right_null_pct": 0.0
+  },
+  "notes": "probed: key_l2r=100.0% key_r2l=18.8% row_l=100.0% row_r=34.6% card=many_to_many",
+  "probe": {
+    "left_rows": 100000,
+    "right_rows": 76583,
+    "left_distinct_keys": 2633,
+    "right_distinct_keys": 18066,
+    "left_null_pct": 0.0,
+    "right_null_pct": 0.0,
+    "left_dup_ratio": 37.98,
+    "right_dup_ratio": 4.24,
+    "left_sampled": false,
+    "right_sampled": false,
+    "key_coverage_distinct_left_to_right": 100.0,
+    "key_coverage_distinct_right_to_left": 18.83,
+    "row_joinable_pct_left": 100.0,
+    "row_joinable_pct_right": 34.64,
+    "orphan_key_pct_left": 0.0,
+    "orphan_key_pct_right": 81.17,
+    "estimated_cardinality": "many_to_many"
+  }
+}

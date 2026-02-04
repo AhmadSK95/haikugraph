@@ -1,0 +1,17 @@
+{
+  "id": "column:test_2_1.txn_lock_locked_by",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "txn_lock_locked_by",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 96.46,
+  "distinct_count": 9,
+  "sample_values": [
+    "AGENT(59685216731995)",
+    "84753058166262",
+    "AGENT(72881196502648)",
+    "66134899948750",
+    "40383978721112"
+  ],
+  "semantic_hints": []
+}

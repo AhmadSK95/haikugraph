@@ -1,0 +1,17 @@
+{
+  "id": "column:test_1_1.document_requirement_list_document_type",
+  "card_type": "column",
+  "table": "test_1_1",
+  "column": "document_requirement_list_document_type",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 1.11,
+  "distinct_count": 29,
+  "sample_values": [
+    "SUPPORTING_ACCOMODATION_DOCUMENT1",
+    "LOAN_DISBURSEMENT_LETTER",
+    "ADDITIONAL_DOC_2",
+    "FEE_BREAKDOWN",
+    "ADDITIONAL_DOC_4"
+  ],
+  "semantic_hints": []
+}

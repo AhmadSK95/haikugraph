@@ -1,0 +1,35 @@
+{
+  "id": "relation:test_1_1.sha_id~test_2_1.sha_id",
+  "card_type": "relation",
+  "left_table": "test_1_1",
+  "right_table": "test_2_1",
+  "left_col": "sha_id",
+  "right_col": "sha_id",
+  "confidence": 0.05,
+  "evidence": {
+    "left_distinct": 19750,
+    "right_distinct": 55372,
+    "left_null_pct": 0.0,
+    "right_null_pct": 0.0
+  },
+  "notes": "probed: key_l2r=12.8% key_r2l=5.1% row_l=3.1% row_r=4.1% card=unknown",
+  "probe": {
+    "left_rows": 100000,
+    "right_rows": 76583,
+    "left_distinct_keys": 19750,
+    "right_distinct_keys": 55372,
+    "left_null_pct": 0.0,
+    "right_null_pct": 0.0,
+    "left_dup_ratio": 5.06,
+    "right_dup_ratio": 1.38,
+    "left_sampled": false,
+    "right_sampled": false,
+    "key_coverage_distinct_left_to_right": 12.85,
+    "key_coverage_distinct_right_to_left": 5.1,
+    "row_joinable_pct_left": 3.07,
+    "row_joinable_pct_right": 4.06,
+    "orphan_key_pct_left": 87.15,
+    "orphan_key_pct_right": 94.9,
+    "estimated_cardinality": "unknown"
+  }
+}

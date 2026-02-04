@@ -1,0 +1,15 @@
+{
+  "id": "column:test_3_1.from_currency",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "from_currency",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 1,
+  "sample_values": [
+    "INR"
+  ],
+  "semantic_hints": [
+    "currency_code"
+  ]
+}

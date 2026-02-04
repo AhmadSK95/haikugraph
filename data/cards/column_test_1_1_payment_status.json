@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1.payment_status",
+  "card_type": "column",
+  "table": "test_1_1",
+  "column": "payment_status",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 46.08,
+  "distinct_count": 5,
+  "sample_values": [
+    "FAILED",
+    "SUCCESS",
+    "VALIDATION_FAILED",
+    "NOT_STARTED",
+    "CANCELLED"
+  ],
+  "semantic_hints": [
+    "status"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "column:test_5_1.value_date",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "value_date",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 112,
+  "sample_values": [
+    "2026-01-26T00:00:00.000Z",
+    "2025-10-23T00:00:00.000Z",
+    "2026-01-14T00:00:00.000Z",
+    "2026-01-07T00:00:00.000Z",
+    "2026-01-06T00:00:00.000Z"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

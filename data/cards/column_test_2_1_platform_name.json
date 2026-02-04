@@ -1,0 +1,17 @@
+{
+  "id": "column:test_2_1.platform_name",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "platform_name",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 15.96,
+  "distinct_count": 9,
+  "sample_values": [
+    "B2C-APP",
+    "B2B",
+    "B2C-WEB-ZOLVE",
+    "B2C-WEB-AMBER",
+    "B2C-SPECIAL-OFFER"
+  ],
+  "semantic_hints": []
+}

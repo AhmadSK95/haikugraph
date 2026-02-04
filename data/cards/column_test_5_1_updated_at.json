@@ -1,0 +1,19 @@
+{
+  "id": "column:test_5_1.updated_at",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "updated_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 791,
+  "sample_values": [
+    "2025-12-01 15:21:15.517000+00:00",
+    "2025-09-30 17:50:18.873000+00:00",
+    "2025-11-28 17:52:05.690000+00:00",
+    "2025-11-21 18:33:15.641000+00:00",
+    "2025-12-11 14:51:11.153000+00:00"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

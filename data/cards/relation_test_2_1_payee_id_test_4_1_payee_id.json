@@ -1,0 +1,35 @@
+{
+  "id": "relation:test_2_1.payee_id~test_4_1.payee_id",
+  "card_type": "relation",
+  "left_table": "test_2_1",
+  "right_table": "test_4_1",
+  "left_col": "payee_id",
+  "right_col": "payee_id",
+  "confidence": 0.98,
+  "evidence": {
+    "left_distinct": 2754,
+    "right_distinct": 2455,
+    "left_null_pct": 30.56,
+    "right_null_pct": 0.0
+  },
+  "notes": "probed: key_l2r=99.7% key_r2l=99.6% row_l=69.4% row_r=99.6% card=many_to_one",
+  "probe": {
+    "left_rows": 76583,
+    "right_rows": 2457,
+    "left_distinct_keys": 2754,
+    "right_distinct_keys": 2754,
+    "left_null_pct": 30.56,
+    "right_null_pct": 0.0,
+    "left_dup_ratio": 27.81,
+    "right_dup_ratio": 0.89,
+    "left_sampled": false,
+    "right_sampled": false,
+    "key_coverage_distinct_left_to_right": 99.71,
+    "key_coverage_distinct_right_to_left": 99.59,
+    "row_joinable_pct_left": 69.41,
+    "row_joinable_pct_right": 99.59,
+    "orphan_key_pct_left": 0.29,
+    "orphan_key_pct_right": 0.41,
+    "estimated_cardinality": "many_to_one"
+  }
+}

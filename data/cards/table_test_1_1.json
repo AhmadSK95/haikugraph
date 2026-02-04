@@ -1,0 +1,48 @@
+{
+  "id": "table:test_1_1",
+  "card_type": "table",
+  "table": "test_1_1",
+  "grain": "one row = transaction / transaction-related record",
+  "primary_key_candidates": [
+    "sha_id",
+    "customer_id",
+    "transaction_id"
+  ],
+  "time_cols": [
+    "created_at"
+  ],
+  "money_cols": [
+    "payment_amount",
+    "deal_details_amount"
+  ],
+  "entity_cols": [
+    "sha_id",
+    "customer_id",
+    "transaction_id",
+    "payee_id",
+    "document_requirement_list_requirement_id",
+    "document_requirement_list_document_type",
+    "document_requiremen_list_document_id",
+    "eta_destination_type",
+    "quote_quote_id",
+    "deal_details_deal_id"
+  ],
+  "status_cols": [
+    "document_requirement_list_verification_status",
+    "document_requirement_list_status",
+    "eta_status",
+    "payment_status",
+    "payment_account_status",
+    "quote_status",
+    "deal_details_status"
+  ],
+  "suggested_metrics": [
+    "count(test_1_1) -- row count",
+    "sum(payment_amount) -- total payment_amount",
+    "sum(deal_details_amount) -- total deal_details_amount"
+  ],
+  "gotchas": [
+    "sparse_table_many_nulls: 13 cols >50% null"
+  ],
+  "joins_suspected": 7
+}

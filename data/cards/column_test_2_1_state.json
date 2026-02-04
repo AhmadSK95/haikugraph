@@ -1,0 +1,19 @@
+{
+  "id": "column:test_2_1.state",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "state",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 15,
+  "sample_values": [
+    "ST-TRANSACTION-PAYMENT-FAILED",
+    "ST-TRANSACTION-CONFIRMED",
+    "ST-TRANSACTION-CUSTOMER-REFUNDED",
+    "ST-TRANSACTION-REFUND-REQUESTED",
+    "ST-TRANSACTION-DOCS_REUPLOAD_REQUIRED"
+  ],
+  "semantic_hints": [
+    "geography"
+  ]
+}

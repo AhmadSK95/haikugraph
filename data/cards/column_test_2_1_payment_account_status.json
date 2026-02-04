@@ -1,0 +1,17 @@
+{
+  "id": "column:test_2_1.payment_account_status",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "payment_account_status",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 34.71,
+  "distinct_count": 3,
+  "sample_values": [
+    "UPI_VERIFIED",
+    "BANK_VERIFIED",
+    "MANUAL_VERIFIED"
+  ],
+  "semantic_hints": [
+    "status"
+  ]
+}

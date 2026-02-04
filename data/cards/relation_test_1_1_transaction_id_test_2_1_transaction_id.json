@@ -1,0 +1,35 @@
+{
+  "id": "relation:test_1_1.transaction_id~test_2_1.transaction_id",
+  "card_type": "relation",
+  "left_table": "test_1_1",
+  "right_table": "test_2_1",
+  "left_col": "transaction_id",
+  "right_col": "transaction_id",
+  "confidence": 0.85,
+  "evidence": {
+    "left_distinct": 5760,
+    "right_distinct": 25056,
+    "left_null_pct": 0.0,
+    "right_null_pct": 0.0
+  },
+  "notes": "probed: key_l2r=100.0% key_r2l=14.5% row_l=100.0% row_r=12.2% card=many_to_many",
+  "probe": {
+    "left_rows": 100000,
+    "right_rows": 76583,
+    "left_distinct_keys": 5760,
+    "right_distinct_keys": 25056,
+    "left_null_pct": 0.0,
+    "right_null_pct": 0.0,
+    "left_dup_ratio": 17.36,
+    "right_dup_ratio": 3.06,
+    "left_sampled": false,
+    "right_sampled": false,
+    "key_coverage_distinct_left_to_right": 100.0,
+    "key_coverage_distinct_right_to_left": 14.5,
+    "row_joinable_pct_left": 100.0,
+    "row_joinable_pct_right": 12.15,
+    "orphan_key_pct_left": 0.0,
+    "orphan_key_pct_right": 85.5,
+    "estimated_cardinality": "many_to_many"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "column:test_3_1.total_gst",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "total_gst",
+  "duckdb_type": "DOUBLE",
+  "null_pct": 0.0,
+  "distinct_count": 38458,
+  "sample_values": [
+    "206.82",
+    "427.27333",
+    "530.046088",
+    "482.604345",
+    "280.841358"
+  ],
+  "semantic_hints": []
+}

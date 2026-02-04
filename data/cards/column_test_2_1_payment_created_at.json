@@ -1,0 +1,19 @@
+{
+  "id": "column:test_2_1.payment_created_at",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "payment_created_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 97.76,
+  "distinct_count": 727,
+  "sample_values": [
+    "2026-01-03 23:48:31.330000+00:00",
+    "2026-01-21 17:27:54.540000+00:00",
+    "2025-12-26 00:45:15.404000+00:00",
+    "2026-01-16 17:51:53.049000+00:00",
+    "2026-01-16 14:05:45.510000+00:00"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

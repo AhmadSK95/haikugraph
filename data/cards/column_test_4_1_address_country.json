@@ -1,0 +1,19 @@
+{
+  "id": "column:test_4_1.address_country",
+  "card_type": "column",
+  "table": "test_4_1",
+  "column": "address_country",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 69,
+  "sample_values": [
+    "ERITREA",
+    "DENMARK",
+    "BAHAMAS",
+    "MARTINIQUE",
+    "LATVIA"
+  ],
+  "semantic_hints": [
+    "geography"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.total_amount_to_be_paid",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "total_amount_to_be_paid",
+  "duckdb_type": "DOUBLE",
+  "null_pct": 0.0,
+  "distinct_count": 52877,
+  "sample_values": [
+    "197939.552813",
+    "9426.76",
+    "10074.48",
+    "9428.41",
+    "240065.342184"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

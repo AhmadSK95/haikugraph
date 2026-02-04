@@ -1,0 +1,19 @@
+{
+  "id": "column:test_2_1.mt103_document_id",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "mt103_document_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 59.7,
+  "distinct_count": 2490,
+  "sample_values": [
+    "6899ed0bd1ffaed62204d3fe",
+    "68f101dcae6a2cf048fb6a87",
+    "68adb56a1c8078ad589aed72",
+    "696a5166043f6586f65276f3",
+    "68e7c75dc8a97a77c0f5920e"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

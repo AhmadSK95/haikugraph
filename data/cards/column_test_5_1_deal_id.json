@@ -1,0 +1,19 @@
+{
+  "id": "column:test_5_1.deal_id",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "deal_id",
+  "duckdb_type": "BIGINT",
+  "null_pct": 0.0,
+  "distinct_count": 791,
+  "sample_values": [
+    "15179632",
+    "13980066",
+    "14740145",
+    "15402548",
+    "13585338"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

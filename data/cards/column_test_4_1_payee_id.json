@@ -1,0 +1,19 @@
+{
+  "id": "column:test_4_1.payee_id",
+  "card_type": "column",
+  "table": "test_4_1",
+  "column": "payee_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 2455,
+  "sample_values": [
+    "payee_riYaZqSQi0QI",
+    "payee_SQ7Tm4ExwA0n",
+    "payee_QstKVyoP2Yij",
+    "payee_ipiz9upl5Fee",
+    "payee_WHavLpCH2AUC"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1.quote_quote_id",
+  "card_type": "column",
+  "table": "test_1_1",
+  "column": "quote_quote_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 5964,
+  "sample_values": [
+    "REMQUOTE17620533970756005QS",
+    "REMQUOTE17620983071475136DQ",
+    "REMQUOTE17492141107519321IK",
+    "REMQUOTE17492183585401095DM",
+    "REMQUOTE17491613348112705XS"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

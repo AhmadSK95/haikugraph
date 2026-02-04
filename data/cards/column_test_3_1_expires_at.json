@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.expires_at",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "expires_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 76430,
+  "sample_values": [
+    "2025-11-27 20:47:50.730000+00:00",
+    "2025-11-27 15:00:38.875000+00:00",
+    "2025-11-27 13:56:15.088000+00:00",
+    "2025-12-14 01:57:03.325000+00:00",
+    "2025-11-27 02:31:18.673000+00:00"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

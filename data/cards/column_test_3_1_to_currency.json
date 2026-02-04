@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.to_currency",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "to_currency",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 13,
+  "sample_values": [
+    "JPY",
+    "HKD",
+    "AED",
+    "AUD",
+    "ZAR"
+  ],
+  "semantic_hints": [
+    "currency_code"
+  ]
+}

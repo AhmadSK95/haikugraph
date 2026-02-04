@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.total_additional_charges",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "total_additional_charges",
+  "duckdb_type": "DOUBLE",
+  "null_pct": 0.0,
+  "distinct_count": 46896,
+  "sample_values": [
+    "1841.9665",
+    "1145.987",
+    "4536.68536",
+    "1926.03431",
+    "1150.47"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

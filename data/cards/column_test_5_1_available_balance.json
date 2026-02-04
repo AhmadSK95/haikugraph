@@ -1,0 +1,19 @@
+{
+  "id": "column:test_5_1.available_balance",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "available_balance",
+  "duckdb_type": "BIGINT",
+  "null_pct": 0.0,
+  "distinct_count": 22,
+  "sample_values": [
+    "0",
+    "307",
+    "24000",
+    "500",
+    "3830"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

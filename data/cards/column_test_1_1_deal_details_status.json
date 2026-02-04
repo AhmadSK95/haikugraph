@@ -1,0 +1,18 @@
+{
+  "id": "column:test_1_1.deal_details_status",
+  "card_type": "column",
+  "table": "test_1_1",
+  "column": "deal_details_status",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 64.96,
+  "distinct_count": 4,
+  "sample_values": [
+    "SUCCESS",
+    "FAILED",
+    "INIATED",
+    "PROCESSED"
+  ],
+  "semantic_hints": [
+    "status"
+  ]
+}

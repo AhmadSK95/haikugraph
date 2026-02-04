@@ -1,0 +1,16 @@
+{
+  "id": "column:test_5_1.status",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "status",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 2,
+  "sample_values": [
+    "ACTIVE",
+    "INACTIVE"
+  ],
+  "semantic_hints": [
+    "status"
+  ]
+}

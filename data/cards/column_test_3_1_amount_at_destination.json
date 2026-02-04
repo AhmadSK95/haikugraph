@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.amount_at_destination",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "amount_at_destination",
+  "duckdb_type": "BIGINT",
+  "null_pct": 0.0,
+  "distinct_count": 4356,
+  "sample_values": [
+    "750",
+    "5000",
+    "1600",
+    "50",
+    "2900"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

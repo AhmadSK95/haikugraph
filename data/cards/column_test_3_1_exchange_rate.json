@@ -1,0 +1,17 @@
+{
+  "id": "column:test_3_1.exchange_rate",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "exchange_rate",
+  "duckdb_type": "DOUBLE",
+  "null_pct": 0.0,
+  "distinct_count": 31126,
+  "sample_values": [
+    "117.9863",
+    "121.1882",
+    "85.5004",
+    "8.8601",
+    "24.023"
+  ],
+  "semantic_hints": []
+}

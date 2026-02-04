@@ -1,0 +1,14 @@
+{
+  "id": "column:test_4_1.type",
+  "card_type": "column",
+  "table": "test_4_1",
+  "column": "type",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 2,
+  "sample_values": [
+    "INDIVIDUAL",
+    "CORPORATE"
+  ],
+  "semantic_hints": []
+}

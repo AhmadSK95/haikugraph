@@ -1,0 +1,17 @@
+{
+  "id": "column:test_5_1.linked_txn_txnid",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "linked_txn_txnid",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.2,
+  "distinct_count": 1416,
+  "sample_values": [
+    "REMTXN17694192653686869TU",
+    "REMTXN17562337696053571IR",
+    "REMTXN17592698427582162WO",
+    "REMTXN17591595103822258YW",
+    "REMTXN17608645239142986RH"
+  ],
+  "semantic_hints": []
+}

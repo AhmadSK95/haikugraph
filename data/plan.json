@@ -1,0 +1,45 @@
+{
+  "ambiguities": [],
+  "constraints": [],
+  "entities_detected": [
+    {
+      "confidence": 0.9,
+      "mapped_to": [
+        "test_2_1.refund_agent_id",
+        "test_2_1.refund_refund_charges",
+        "test_2_1.refund_refund_id",
+        "test_2_1.refund_refund_initiated_at",
+        "test_2_1.refund_refund_initiated_by",
+        "test_2_1.refund_refund_mode"
+      ],
+      "name": "refund"
+    }
+  ],
+  "intent": {
+    "confidence": 0.65,
+    "type": "lookup"
+  },
+  "join_paths": [],
+  "metrics_requested": [],
+  "original_question": "Show refunds by platform",
+  "plan_confidence": 0.82,
+  "subquestions": [
+    {
+      "columns": [
+        "refund_agent_id",
+        "refund_refund_charges",
+        "refund_refund_id",
+        "refund_refund_initiated_at",
+        "refund_refund_initiated_by",
+        "refund_refund_mode"
+      ],
+      "confidence": 0.9,
+      "description": "Analyze refund",
+      "id": "SQ1",
+      "required_joins": [],
+      "tables": [
+        "test_2_1"
+      ]
+    }
+  ]
+}

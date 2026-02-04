@@ -1,0 +1,17 @@
+{
+  "id": "column:test_2_1.doc_reject_count",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "doc_reject_count",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.03,
+  "distinct_count": 13,
+  "sample_values": [
+    "0.0",
+    "14.0",
+    "8.0",
+    "2.0",
+    "6.0"
+  ],
+  "semantic_hints": []
+}

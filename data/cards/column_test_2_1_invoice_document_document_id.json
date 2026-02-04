@@ -1,0 +1,19 @@
+{
+  "id": "column:test_2_1.invoice_document_document_id",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "invoice_document_document_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 59.61,
+  "distinct_count": 1974,
+  "sample_values": [
+    "68c2c8efdfd48334c4104207",
+    "68b571581c8078ad589b1280",
+    "68c3c538dfd48334c4104726",
+    "687fa9c3d9d007b6624ce2f2",
+    "68ff5d62ae6a2cf048fbaf73"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

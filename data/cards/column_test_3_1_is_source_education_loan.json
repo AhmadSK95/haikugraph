@@ -1,0 +1,14 @@
+{
+  "id": "column:test_3_1.is_source_education_loan",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "is_source_education_loan",
+  "duckdb_type": "BOOLEAN",
+  "null_pct": 0.0,
+  "distinct_count": 2,
+  "sample_values": [
+    "False",
+    "True"
+  ],
+  "semantic_hints": []
+}

@@ -1,0 +1,17 @@
+{
+  "id": "column:test_2_1.refund_refund_charges",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "refund_refund_charges",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 95.59,
+  "distinct_count": 3,
+  "sample_values": [
+    "0.0",
+    "2.0",
+    "7585.0"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

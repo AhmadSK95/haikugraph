@@ -1,0 +1,19 @@
+{
+  "id": "column:test_2_1.sha_id",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "sha_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 55372,
+  "sample_values": [
+    "007cb37cf98b3f75e36e8b99c505855de7199a53",
+    "3c90ca2bd2ae5e95fcea4ef4e2c592caf32d5824",
+    "b503704ff07bf04d307028a29d3efb8cd3c9b778",
+    "6f805b44c4792ef4c02efb7e25e6829bbab22d0f",
+    "66c442b5cbd35918959d74970c7e0f174d678d6e"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

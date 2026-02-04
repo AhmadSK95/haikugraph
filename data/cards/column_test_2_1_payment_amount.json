@@ -1,0 +1,19 @@
+{
+  "id": "column:test_2_1.payment_amount",
+  "card_type": "column",
+  "table": "test_2_1",
+  "column": "payment_amount",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 35.86,
+  "distinct_count": 6249,
+  "sample_values": [
+    "36651.25759",
+    "40981.93",
+    "42543.82",
+    "900901.0",
+    "9282.12"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

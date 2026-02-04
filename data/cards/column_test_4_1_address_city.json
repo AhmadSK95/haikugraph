@@ -1,0 +1,19 @@
+{
+  "id": "column:test_4_1.address_city",
+  "card_type": "column",
+  "table": "test_4_1",
+  "column": "address_city",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 967,
+  "sample_values": [
+    "Guildford",
+    "Croix",
+    "Stratford",
+    "STOCKPORT",
+    "Vilnius"
+  ],
+  "semantic_hints": [
+    "geography"
+  ]
+}

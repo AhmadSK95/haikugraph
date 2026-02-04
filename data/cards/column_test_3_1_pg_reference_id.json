@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.pg_reference_id",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "pg_reference_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 88.6,
+  "distinct_count": 9484,
+  "sample_values": [
+    "REMPG17453982148014758YQ",
+    "REMPG17657169761435659BB",
+    "REMPG17520462853185885GZ",
+    "REMPG17571469685155095NA",
+    "REMPG17571757012969865UM"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

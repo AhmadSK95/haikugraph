@@ -1,0 +1,17 @@
+{
+  "id": "column:test_5_1.rate",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "rate",
+  "duckdb_type": "DOUBLE",
+  "null_pct": 0.0,
+  "distinct_count": 788,
+  "sample_values": [
+    "9.4843",
+    "88.8284",
+    "116.1562",
+    "60.1053",
+    "120.7936"
+  ],
+  "semantic_hints": []
+}

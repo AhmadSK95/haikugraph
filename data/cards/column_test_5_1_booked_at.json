@@ -1,0 +1,19 @@
+{
+  "id": "column:test_5_1.booked_at",
+  "card_type": "column",
+  "table": "test_5_1",
+  "column": "booked_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 791,
+  "sample_values": [
+    "2026-01-27 16:18:05.276000+00:00",
+    "2026-01-27 16:21:05.751000+00:00",
+    "2025-11-28 17:50:46.578000+00:00",
+    "2025-11-28 12:28:15.781000+00:00",
+    "2026-01-22 16:10:01.858000+00:00"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

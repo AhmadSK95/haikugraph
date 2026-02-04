@@ -1,0 +1,19 @@
+{
+  "id": "column:test_4_1.created_at",
+  "card_type": "column",
+  "table": "test_4_1",
+  "column": "created_at",
+  "duckdb_type": "TIMESTAMP",
+  "null_pct": 0.0,
+  "distinct_count": 284,
+  "sample_values": [
+    "2025-12-02 00:00:00",
+    "2025-05-02 00:00:00",
+    "2025-06-28 00:00:00",
+    "2025-10-17 00:00:00",
+    "2025-12-18 00:00:00"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

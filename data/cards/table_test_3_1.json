@@ -1,0 +1,45 @@
+{
+  "id": "table:test_3_1",
+  "card_type": "table",
+  "table": "test_3_1",
+  "grain": "one row = quote",
+  "primary_key_candidates": [
+    "quote_id"
+  ],
+  "time_cols": [
+    "created_at"
+  ],
+  "money_cols": [
+    "amount_at_source",
+    "amount_at_destination",
+    "exchange_rate",
+    "tcs",
+    "swift_charges",
+    "platform_charges",
+    "total_gst",
+    "total_additional_charges",
+    "total_amount_to_be_paid",
+    "amount_with_mark_up",
+    "amount_without_markup",
+    "forex_markup"
+  ],
+  "entity_cols": [
+    "pg_reference_id",
+    "quote_id",
+    "ref_id",
+    "purpose_code",
+    "from_currency",
+    "to_currency"
+  ],
+  "status_cols": [
+    "status"
+  ],
+  "suggested_metrics": [
+    "count(test_3_1) -- row count",
+    "sum(amount_at_source) -- total amount_at_source",
+    "sum(amount_at_destination) -- total amount_at_destination",
+    "sum(exchange_rate) -- total exchange_rate"
+  ],
+  "gotchas": [],
+  "joins_suspected": 0
+}

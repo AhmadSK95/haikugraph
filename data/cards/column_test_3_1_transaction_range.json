@@ -1,0 +1,17 @@
+{
+  "id": "column:test_3_1.transaction_range",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "transaction_range",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 6,
+  "sample_values": [
+    "Less than 10L including current order",
+    "More than 10L including current order",
+    "Less than 7L including current order",
+    "NOT APPLICABLE",
+    "More than 7L including current order"
+  ],
+  "semantic_hints": []
+}

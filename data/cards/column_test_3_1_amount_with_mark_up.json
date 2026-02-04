@@ -1,0 +1,19 @@
+{
+  "id": "column:test_3_1.amount_with_mark_up",
+  "card_type": "column",
+  "table": "test_3_1",
+  "column": "amount_with_mark_up",
+  "duckdb_type": "DOUBLE",
+  "null_pct": 0.0,
+  "distinct_count": 62393,
+  "sample_values": [
+    "67269.525",
+    "409925.086",
+    "58.750889",
+    "8987.92",
+    "592869.0"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

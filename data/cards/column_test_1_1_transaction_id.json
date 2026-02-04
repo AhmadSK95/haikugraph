@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1.transaction_id",
+  "card_type": "column",
+  "table": "test_1_1",
+  "column": "transaction_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 5760,
+  "sample_values": [
+    "REMTXN17620916394466538WH",
+    "REMTXN17492181022476628BE",
+    "REMTXN17491970321328880WP",
+    "REMTXN17620633096367918QC",
+    "REMTXN17492204714137544UP"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}
