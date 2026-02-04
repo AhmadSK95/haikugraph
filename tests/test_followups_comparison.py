@@ -87,9 +87,12 @@ def test_comparison_followup_full_chain():
         if c.get("type") == "time" and c.get("applies_to") == "SQ2_comparison"
     ]
     assert len(plan_time_constraints) == 1
-    assert "previous_month" in plan_time_constraints[0]["expression"], (
-        "Original constraint should reference previous_month"
-    )
+    assert (
+        plan_time_constraints[0].get("applies_to") == "SQ2_comparison"
+    ), "Time constraint must be scoped to SQ2_comparison"
+    assert (
+        "previous_month" in plan_time_constraints[0]["expression"]
+    ), "Original constraint should reference previous_month"
 
 
 def test_comparison_to_previous_year():
@@ -125,9 +128,12 @@ def test_comparison_to_previous_year():
         if c.get("type") == "time" and c.get("applies_to") == "SQ2_comparison"
     ]
     assert len(plan_time_constraints) == 1
-    assert "previous_year" in plan_time_constraints[0]["expression"], (
-        "Original constraint should reference previous_year"
-    )
+    assert (
+        plan_time_constraints[0].get("applies_to") == "SQ2_comparison"
+    ), "Time constraint must be scoped to SQ2_comparison"
+    assert (
+        "previous_year" in plan_time_constraints[0]["expression"]
+    ), "Original constraint should reference previous_year"
 
 
 def test_comparison_vs_pattern():
