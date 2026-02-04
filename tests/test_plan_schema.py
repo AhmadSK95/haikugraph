@@ -389,7 +389,8 @@ def test_constraint_applies_to_invalid_subquestion_fails():
     # Check error message contains the invalid ID and valid IDs
     error_str = " ".join(errors)
     assert "SQ_DOES_NOT_EXIST" in error_str
-    assert "SQ1" in error_str or "SQ2" in error_str
+    assert "Valid IDs:" in error_str
+    assert "SQ1" in error_str and "SQ2" in error_str
 
     with pytest.raises(ValueError, match="applies_to.*SQ_DOES_NOT_EXIST"):
         validate_plan_or_raise(invalid_plan)
@@ -443,6 +444,29 @@ def test_constraint_without_applies_to_passes():
 
     # Should not raise
     validate_plan_or_raise(valid_plan)
+
+
+def test_duplicate_subquestion_ids_fails():
+    """Test that duplicate subquestion IDs fail validation."""
+    invalid_plan = {
+        "original_question": "Test question",
+        "subquestions": [
+            {"id": "SQ1", "tables": ["orders"]},
+            {"id": "SQ2", "tables": ["customers"]},
+            {"id": "SQ1", "tables": ["products"]},  # Duplicate SQ1
+        ],
+    }
+
+    is_valid, errors = validate_plan(invalid_plan)
+    assert not is_valid, "Plan with duplicate subquestion IDs should fail"
+    # Check error message contains the duplicate ID
+    error_str = " ".join(errors)
+    assert "Duplicate subquestion IDs" in error_str
+    assert "SQ1" in error_str
+    assert "unique" in error_str.lower()
+
+    with pytest.raises(ValueError, match="Duplicate subquestion IDs.*SQ1"):
+        validate_plan_or_raise(invalid_plan)
 
 
 if __name__ == "__main__":

@@ -197,6 +197,24 @@ class Plan(BaseModel):
     model_config = {"extra": "allow"}  # Allow unknown fields (for evolution)
 
     @model_validator(mode="after")
+    def validate_subquestion_ids_unique(self) -> "Plan":
+        """Validate that subquestion IDs are unique."""
+        sq_ids = [sq.id for sq in self.subquestions]
+        if len(sq_ids) != len(set(sq_ids)):
+            # Find duplicates
+            seen = set()
+            duplicates = set()
+            for sq_id in sq_ids:
+                if sq_id in seen:
+                    duplicates.add(sq_id)
+                seen.add(sq_id)
+            raise ValueError(
+                f"Duplicate subquestion IDs found: {sorted(duplicates)}. "
+                f"All subquestion IDs must be unique."
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_constraint_applies_to(self) -> "Plan":
         """Validate that constraint applies_to references valid subquestion IDs."""
         if not self.constraints:
