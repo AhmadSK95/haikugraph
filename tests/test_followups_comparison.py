@@ -80,11 +80,16 @@ def test_comparison_followup_full_chain():
     time_constraints_sq2 = [c for c in meta2["constraints_applied"] if c.get("type") == "time"]
     assert len(time_constraints_sq2) == 1, "Comparison period should have exactly 1 time constraint"
     # Check the plan's original constraint (before SQL translation)
-    plan_time_constraints = [c for c in patched_plan["constraints"] if c.get("type") == "time"]
+    # Filter by both type AND applies_to to be resilient to future default time filters
+    plan_time_constraints = [
+        c
+        for c in patched_plan["constraints"]
+        if c.get("type") == "time" and c.get("applies_to") == "SQ2_comparison"
+    ]
     assert len(plan_time_constraints) == 1
-    assert (
-        "previous_month" in plan_time_constraints[0]["expression"]
-    ), "Original constraint should reference previous_month"
+    assert "previous_month" in plan_time_constraints[0]["expression"], (
+        "Original constraint should reference previous_month"
+    )
 
 
 def test_comparison_to_previous_year():
@@ -113,11 +118,16 @@ def test_comparison_to_previous_year():
     time_constraints = [c for c in meta2["constraints_applied"] if c.get("type") == "time"]
     assert len(time_constraints) == 1, "Should have one time constraint"
     # Check the plan's original constraint (before SQL translation)
-    plan_time_constraints = [c for c in patched_plan["constraints"] if c.get("type") == "time"]
+    # Filter by both type AND applies_to to be resilient to future default time filters
+    plan_time_constraints = [
+        c
+        for c in patched_plan["constraints"]
+        if c.get("type") == "time" and c.get("applies_to") == "SQ2_comparison"
+    ]
     assert len(plan_time_constraints) == 1
-    assert (
-        "previous_year" in plan_time_constraints[0]["expression"]
-    ), "Original constraint should reference previous_year"
+    assert "previous_year" in plan_time_constraints[0]["expression"], (
+        "Original constraint should reference previous_year"
+    )
 
 
 def test_comparison_vs_pattern():
