@@ -168,12 +168,14 @@ def narrate_results(
                 "error": result["error"][:200]  # Truncate long errors
             })
     
-    # Never narrate if execution failed
+    # Use LLM to explain failures in user-friendly way with suggestions
     if failed_subquestions:
-        error_lines = ["Query execution failed:\n"]
-        for failed in failed_subquestions:
-            error_lines.append(f"  • {failed['id']}: {failed['error']}")
-        return "\n".join(error_lines)
+        return _narrate_failure(
+            original_question=original_question,
+            failed_subquestions=failed_subquestions,
+            plan=plan,
+            max_retries=max_retries
+        )
     
     # Allow override from environment
     max_retries = int(os.environ.get("HG_NARRATOR_MAX_RETRIES", str(max_retries)))
@@ -264,6 +266,119 @@ def narrate_results(
     
     # Should not reach here
     raise ValueError("Unexpected error in narration")
+
+
+def _narrate_failure(
+    original_question: str,
+    failed_subquestions: list[dict],
+    plan: dict,
+    max_retries: int = 1,
+) -> str:
+    """Use LLM to explain query failures in user-friendly language.
+    
+    This function converts technical error messages into plain English
+    and suggests alternative questions based on available data.
+    
+    Args:
+        original_question: User's original question
+        failed_subquestions: List of failed subquestion dicts with id and error
+        plan: The plan that was executed
+        max_retries: Maximum repair attempts
+    
+    Returns:
+        User-friendly error explanation with suggestions
+    """
+    # Extract table names from plan
+    tables_used = []
+    for sq in plan.get("subquestions", []):
+        tables_used.extend(sq.get("tables", []))
+    tables_used = list(set(tables_used))
+    
+    # Build error context
+    error_details = []
+    for failed in failed_subquestions:
+        error_msg = failed["error"]
+        error_details.append(f"- {error_msg}")
+    
+    error_summary = "\n".join(error_details)
+    
+    # Failure explanation prompt
+    failure_prompt = f"""The user asked: "{original_question}"
+
+The query failed with these errors:
+{error_summary}
+
+Tables involved: {', '.join(tables_used) if tables_used else 'unknown'}
+
+Your task:
+1. Explain what went wrong in simple, non-technical language
+2. Identify the likely issue (missing column, wrong table, data type mismatch, etc.)
+3. Suggest 2-3 alternative questions the user could try based on the tables available
+
+Rules:
+- Use plain English, avoid technical jargon like "column", "table", "SQL"
+- Be helpful and constructive, not apologetic
+- Frame suggestions as "You could try asking..."
+- Keep it concise (2-3 sentences for explanation + bullet list of suggestions)
+
+Output format (JSON only):
+{{
+  "text": "<explanation>\n\nYou could try asking:\n- <suggestion 1>\n- <suggestion 2>\n- <suggestion 3>"
+}}
+
+Generate the explanation now. Output ONLY the JSON object."""
+    
+    messages = [
+        {"role": "system", "content": NARRATOR_SYSTEM_PROMPT},
+        {"role": "user", "content": failure_prompt},
+    ]
+    
+    # Retry loop
+    for attempt in range(max_retries + 1):
+        try:
+            response = call_llm(messages, role="narrator")
+            narration_dict = _parse_json_strict(response)
+            text = narration_dict.get("text")
+            
+            if not text or not isinstance(text, str):
+                raise ValueError("Missing or invalid 'text' field")
+            
+            return text.strip()
+            
+        except Exception as e:
+            if attempt < max_retries:
+                # Repair attempt
+                repair_prompt = NARRATOR_REPAIR_PROMPT_TEMPLATE.format(
+                    previous_output=response if 'response' in locals() else "<no output>",
+                    errors=str(e),
+                )
+                messages = [
+                    {"role": "system", "content": NARRATOR_SYSTEM_PROMPT},
+                    {"role": "user", "content": repair_prompt},
+                ]
+                continue
+            else:
+                # Fallback to basic error message if LLM fails
+                error_lines = ["I couldn't answer your question because:"]
+                for failed in failed_subquestions:
+                    # Extract key part of error
+                    error = failed["error"]
+                    if "does not have a column" in error:
+                        # Extract column name from error
+                        parts = error.split('"')
+                        if len(parts) >= 2:
+                            col_name = parts[-2]
+                            error_lines.append(f"- The data doesn't include information about '{col_name}'")
+                    elif "Binder Error" in error:
+                        error_lines.append("- The query referenced data that doesn't exist")
+                    else:
+                        error_lines.append(f"- Technical issue: {error[:100]}")
+                
+                error_lines.append("\nTry asking about different aspects of your data.")
+                return "\n".join(error_lines)
+    
+    # Should not reach here
+    return "I couldn't answer your question due to a data structure mismatch."
 
 
 def _build_comparison_summary(comparison: dict) -> str:

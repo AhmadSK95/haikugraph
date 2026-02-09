@@ -1,32 +1,32 @@
 {
   "applied_resolutions_summary": [],
-  "executed_at": "2026-02-09T14:36:49.508989Z",
-  "final_summary": "Answered: \"what is the revenue split by platform in the month of December\" | Executed 1 subquestion(s) | 1 failed | Total rows retrieved: 0",
-  "original_question": "what is the revenue split by platform in the month of December",
+  "executed_at": "2026-02-09T16:41:32.150470Z",
+  "final_summary": "Answered: \"what is the revenue split by department in December\" | Executed 1 subquestion(s) | Total rows retrieved: 1",
+  "original_question": "what is the revenue split by department in December",
   "resolutions": [],
   "subquestion_results": [
     {
-      "columns": [],
+      "columns": [
+        "purpose_code",
+        "sum_amount_at_destination"
+      ],
       "description": "",
-      "error": "Binder Error: Table \"test_3_1\" does not have a column named \"platform_name\"\n\nCandidate bindings: : \"platform_charges\"\n\nLINE 1: ... EXTRACT(MONTH FROM \"test_3_1\".\"created_at\") = 12 GROUP BY \"test_3_1\".\"platform_name\" ORDER BY \"test_3_1\".\"platform_name...\n                                                                      ^",
       "id": "SQ1",
       "metadata": {
-        "constraints_applied": [
-          {
-            "column": "created_at",
-            "expression": "EXTRACT(MONTH FROM \"test_3_1\".\"created_at\") = 12",
-            "month": 12,
-            "type": "time_month"
-          }
-        ],
+        "constraints_applied": [],
         "joins_used": [],
         "resolutions": [],
         "resolutions_applied": []
       },
-      "preview_rows": [],
-      "row_count": 0,
-      "sql": "SELECT \"test_3_1\".\"platform_name\", SUM(TRY_CAST(\"test_3_1\".\"amount_at_destination\" AS DOUBLE)) AS \"sum_amount_at_destination\" FROM \"test_3_1\" WHERE EXTRACT(MONTH FROM \"test_3_1\".\"created_at\") = 12 GROUP BY \"test_3_1\".\"platform_name\" ORDER BY \"test_3_1\".\"platform_name\"",
-      "status": "failed"
+      "preview_rows": [
+        {
+          "purpose_code": "student",
+          "sum_amount_at_destination": 549154524.0
+        }
+      ],
+      "row_count": 1,
+      "sql": "SELECT \"test_3_1\".\"purpose_code\", SUM(TRY_CAST(\"test_3_1\".\"amount_at_destination\" AS DOUBLE)) AS \"sum_amount_at_destination\" FROM \"test_3_1\" GROUP BY \"test_3_1\".\"purpose_code\" ORDER BY \"test_3_1\".\"purpose_code\"",
+      "status": "success"
     }
   ]
 }

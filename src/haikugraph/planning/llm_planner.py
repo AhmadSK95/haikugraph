@@ -99,7 +99,14 @@ Rules for Plan JSON:
         ]
       }}
     - WRONG: {{"group_by": [{{"type": "time_bucket", "grain": "month", "col": "created_at"}}]}} when question asks for "split by platform"
-14. Column names must be simple identifiers - NO spaces, NO SQL keywords like DISTINCT
+14. CRITICAL - Only answer what was asked:
+    - Create ONLY the subquestions needed to answer the user's question
+    - DO NOT add extra subquestions for related/tangential data
+    - DO NOT fetch data from unrelated tables
+    - Example: "revenue by platform" → ONLY query platform+revenue, DO NOT add customer addresses
+    - Example: "count transactions" → ONLY count, DO NOT add revenue or customer details
+    - Keep it minimal - one subquestion unless comparison or multi-step calculation required
+15. Column names must be simple identifiers - NO spaces, NO SQL keywords like DISTINCT
 
 EXAMPLE for "What is total revenue?":
 {{
