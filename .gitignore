@@ -41,3 +41,7 @@ htmlcov/
 # Ruff
 .ruff_cache/
 .DS_Store
+
+# Data directory (user-specific data, databases, profiles)
+data/
+!data/.gitkeep
