@@ -87,7 +87,7 @@ def run_question_through_cli(
             raise ValueError(f"Unknown planner: {planner}")
         
         # Run command
-        result = subprocess.run(
+        proc_result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -120,7 +120,7 @@ def run_question_through_cli(
                     error = f"Failed to parse result.json: {e}"
         
         # Extract SQL from stdout or result
-        sql = extract_sql_from_output(result.stdout, result_data)
+        sql = extract_sql_from_output(proc_result.stdout, result_data)
         
         # Extract metadata
         intent_type = None
@@ -144,16 +144,16 @@ def run_question_through_cli(
                     break
         
         # Check for errors
-        if result.exit_code != 0:
-            error = result.stderr or "Command failed with non-zero exit code"
-        elif "❌" in result.stdout or "Error" in result.stdout:
-            error = extract_error_from_output(result.stdout)
+        if proc_result.returncode != 0:
+            error = proc_result.stderr or "Command failed with non-zero exit code"
+        elif "❌" in proc_result.stdout or "Error" in proc_result.stdout:
+            error = extract_error_from_output(proc_result.stdout)
         
         return CLITestResult(
             question=question,
-            exit_code=result.exit_code,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            exit_code=proc_result.returncode,
+            stdout=proc_result.stdout,
+            stderr=proc_result.stderr,
             plan=plan,
             sql=sql,
             result=result_data,

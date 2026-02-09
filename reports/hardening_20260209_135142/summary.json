@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-02-09T13:51:47.554951",
+  "planner": "deterministic",
+  "total_questions": 20,
+  "passed": 0,
+  "failed": 20,
+  "pass_rate": 0.0,
+  "failure_buckets": {
+    "group_by_over_aggregation": 20
+  },
+  "db_path": "data/haikugraph.duckdb",
+  "output_dir": "reports/hardening_20260209_135142"
+}
