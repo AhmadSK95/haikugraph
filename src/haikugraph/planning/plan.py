@@ -43,10 +43,17 @@ def build_plan(question: str, graph: dict, cards: dict) -> dict:
         for ref in metric["mapped_columns"]:
             if "." in ref:
                 context_tables.add(ref.split(".")[0])
+    
+    # Determine primary table (first from metrics, then entities)
+    primary_table = None
+    if metrics and metrics[0]["mapped_columns"]:
+        primary_table = metrics[0]["mapped_columns"][0].split(".")[0]
+    elif entities and entities[0]["mapped_to"]:
+        primary_table = entities[0]["mapped_to"][0].split(".")[0]
 
     # Detect constraints (filters) - context-aware
     constraints = detect_constraints(
-        question_lower, cards, context_tables, intent, metrics, entities
+        question_lower, cards, context_tables, intent, metrics, entities, primary_table
     )
 
     # Build subquestions with group_by support
@@ -308,8 +315,13 @@ def detect_constraints(
     intent: dict,
     metrics: list,
     entities: list,
+    primary_table: str = None,
 ) -> list[dict]:
-    """Detect filter constraints with context-aware status column selection."""
+    """Detect filter constraints with context-aware status column selection.
+    
+    Args:
+        primary_table: The primary table being queried (from metrics/entities), used to prioritize columns
+    """
     constraints = []
 
     # Status constraints - context-aware
@@ -373,21 +385,44 @@ def detect_constraints(
         }[month_name]
         
         # Find timestamp column in context tables
+        # Prioritize: primary_table > created_at > updated_at > other timestamps
+        timestamp_candidates = []
         for col_card in cards.get("column_cards", []):
             if "timestamp" in col_card.get("semantic_hints", []):
                 table = col_card.get("table", "")
-                if table in context_tables or not context_tables:
-                    col = col_card.get("column", "")
-                    constraints.append({
-                        "type": "time_month",
-                        "expression": f"{table}.{col} month={month_num}",
-                        "month": month_num,
-                        "month_name": month_name,
-                        "column": col,
-                        "table": table,
-                        "confidence": 0.9,
-                    })
-                    break
+                # Skip if we have context tables and this isn't one of them
+                if context_tables and table not in context_tables:
+                    continue
+                col = col_card.get("column", "")
+                # Score columns by preference
+                score = 0
+                if col == "created_at":
+                    score = 3
+                elif col == "updated_at":
+                    score = 2
+                elif "created" in col:
+                    score = 1
+                # STRONG preference for primary table if specified
+                if primary_table and table == primary_table:
+                    score += 100
+                # Bonus if table is in context
+                elif table in context_tables:
+                    score += 10
+                timestamp_candidates.append((score, table, col))
+        
+        if timestamp_candidates:
+            # Pick highest scoring timestamp column
+            timestamp_candidates.sort(reverse=True)
+            _, table, col = timestamp_candidates[0]
+            constraints.append({
+                "type": "time_month",
+                "expression": f"{table}.{col} month={month_num}",
+                "month": month_num,
+                "month_name": month_name,
+                "column": col,
+                "table": table,
+                "confidence": 0.9,
+            })
     
     # Time constraints - symbolic (today, yesterday, etc.)
     time_keywords = ["today", "yesterday", "week", "year", "recent"]
