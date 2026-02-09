@@ -1,44 +1,74 @@
 {
-  "ambiguities": [],
-  "constraints": [],
+  "ambiguities": [
+    {
+      "confidence": 0.85,
+      "issue": "Entity 'transaction' found in multiple tables",
+      "options": [
+        "test_1_1_merged",
+        "test_3_1"
+      ],
+      "recommended": "test_1_1_merged"
+    }
+  ],
+  "constraints": [
+    {
+      "column": "a2_form_created_at",
+      "confidence": 0.9,
+      "expression": "test_1_1_merged.a2_form_created_at month=12",
+      "month": 12,
+      "month_name": "december",
+      "table": "test_1_1_merged",
+      "type": "time_month"
+    }
+  ],
   "entities_detected": [
     {
       "confidence": 0.9,
       "mapped_to": [
-        "test_2_1.refund_agent_id",
-        "test_2_1.refund_refund_charges",
-        "test_2_1.refund_refund_id",
-        "test_2_1.refund_refund_initiated_at",
-        "test_2_1.refund_refund_initiated_by",
-        "test_2_1.refund_refund_mode"
+        "test_1_1_merged.transaction_id",
+        "test_3_1.transaction_range"
       ],
-      "name": "refund"
+      "name": "transaction"
     }
   ],
   "intent": {
     "confidence": 0.65,
-    "type": "lookup"
+    "type": "metric"
   },
   "join_paths": [],
-  "metrics_requested": [],
-  "original_question": "Show refunds by platform",
-  "plan_confidence": 0.82,
+  "metrics_requested": [
+    {
+      "aggregation": "count_distinct",
+      "confidence": 0.8,
+      "mapped_columns": [
+        "test_1_1_merged.transaction_id"
+      ],
+      "name": "count_distinct_transaction_id"
+    }
+  ],
+  "original_question": "how many transactions in December by platform",
+  "plan_confidence": 0.76,
   "subquestions": [
     {
+      "aggregations": [
+        {
+          "agg": "count_distinct",
+          "col": "transaction_id"
+        }
+      ],
       "columns": [
-        "refund_agent_id",
-        "refund_refund_charges",
-        "refund_refund_id",
-        "refund_refund_initiated_at",
-        "refund_refund_initiated_by",
-        "refund_refund_mode"
+        "transaction_id",
+        "platform_name"
       ],
       "confidence": 0.9,
-      "description": "Analyze refund",
+      "description": "Analyze transaction with count_distinct",
+      "group_by": [
+        "platform_name"
+      ],
       "id": "SQ1",
       "required_joins": [],
       "tables": [
-        "test_2_1"
+        "test_1_1_merged"
       ]
     }
   ]

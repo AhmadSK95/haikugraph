@@ -7,11 +7,11 @@
   "null_pct": 0.24,
   "distinct_count": 808,
   "sample_values": [
-    "California",
-    "BALI",
-    "FLEMISH BRABANT",
-    "\u00cele-de-france",
-    "Vilnius"
+    "pa",
+    "HESSE",
+    "Virginia",
+    "\u00cele de France",
+    "Test"
   ],
   "semantic_hints": [
     "geography"

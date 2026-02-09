@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.document_requirement_list_verification_created_at",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "document_requirement_list_verification_created_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 79.66,
+  "distinct_count": 2026,
+  "sample_values": [
+    "2026-01-05T04:00:34.493Z",
+    "2026-01-07T05:36:35.852Z",
+    "2026-01-05T04:03:19.849Z",
+    "2026-01-07T05:36:21.404Z",
+    "2025-08-12T09:22:51.048Z"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

@@ -7,9 +7,9 @@
   "null_pct": 88.6,
   "distinct_count": 3,
   "sample_values": [
+    "INITIATED",
     "SUCCESS",
-    "FAILED",
-    "INITIATED"
+    "FAILED"
   ],
   "semantic_hints": [
     "status"

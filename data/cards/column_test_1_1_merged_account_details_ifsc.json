@@ -1,0 +1,14 @@
+{
+  "id": "column:test_1_1_merged.account_details_ifsc",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "account_details_ifsc",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 100.0,
+  "distinct_count": 2,
+  "sample_values": [
+    "UTIB0005492",
+    "UTIB0002177"
+  ],
+  "semantic_hints": []
+}

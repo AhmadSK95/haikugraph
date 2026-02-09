@@ -1,0 +1,83 @@
+{
+  "original_question": "what is the revenue split by platform in the month of December",
+  "subquestions": [
+    {
+      "aggregations": [
+        {
+          "agg": "sum",
+          "col": "platform_charges"
+        },
+        {
+          "agg": "sum",
+          "col": "swift_charges"
+        },
+        {
+          "agg": "sum",
+          "col": "amount_at_destination"
+        }
+      ],
+      "columns": [
+        "platform_charges",
+        "swift_charges",
+        "amount_at_destination"
+      ],
+      "constraints": [
+        {
+          "applies_to": "SQ1_current",
+          "expression": "this_month",
+          "type": "time"
+        },
+        {
+          "column": "expires_at",
+          "expression": "test_3_1.expires_at month=12",
+          "month": 12,
+          "table": "test_3_1",
+          "type": "time_month"
+        }
+      ],
+      "id": "SQ1_current",
+      "tables": [
+        "test_3_1"
+      ]
+    },
+    {
+      "aggregations": [
+        {
+          "agg": "sum",
+          "col": "platform_charges"
+        },
+        {
+          "agg": "sum",
+          "col": "swift_charges"
+        },
+        {
+          "agg": "sum",
+          "col": "amount_at_destination"
+        }
+      ],
+      "columns": [
+        "platform_charges",
+        "swift_charges",
+        "amount_at_destination"
+      ],
+      "constraints": [
+        {
+          "applies_to": "SQ2_comparison",
+          "expression": "previous_month",
+          "type": "time"
+        },
+        {
+          "column": "expires_at",
+          "expression": "test_3_1.expires_at month=11",
+          "month": 11,
+          "table": "test_3_1",
+          "type": "time_month"
+        }
+      ],
+      "id": "SQ2_comparison",
+      "tables": [
+        "test_3_1"
+      ]
+    }
+  ]
+}

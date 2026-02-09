@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.invoice_document_created_at",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "invoice_document_created_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 81.15,
+  "distinct_count": 1805,
+  "sample_values": [
+    "2025-09-11 16:28:40.495000+00:00",
+    "2025-09-01 20:18:09.385000+00:00",
+    "2025-12-04 16:15:37.324000+00:00",
+    "2025-09-09 15:54:44.533000+00:00",
+    "2025-09-01 20:21:30.267000+00:00"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

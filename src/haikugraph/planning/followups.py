@@ -31,16 +31,8 @@ def classify_followup(new_question: str, prev_question: str, prev_plan: dict) ->
     new_lower = new_question.lower().strip()
     prev_lower = prev_question.lower().strip()
 
-    # Check if it's clearly a new independent question
-    if _is_new_question(new_lower, prev_lower):
-        return {
-            "is_followup": False,
-            "type": "new_question",
-            "confidence": 0.9,
-            "patches": [],
-        }
-
-    # Try to detect follow-up patterns
+    # Try to detect follow-up patterns first
+    # (check patterns before _is_new_question so strong patterns override)
     patches = []
     followup_type = None
     confidence = 0.0
@@ -83,13 +75,37 @@ def classify_followup(new_question: str, prev_question: str, prev_plan: dict) ->
         if not followup_type:
             followup_type = "comparison"
         confidence = max(confidence, 0.85)
+    
+    # 6. Reference word patterns (same, it, that, those)
+    reference_match = _detect_reference_words(new_lower)
+    if reference_match:
+        patches.append({"type": "reference", "value": reference_match})
+        if not followup_type:
+            followup_type = "reference"
+        confidence = max(confidence, 0.9)
+    
+    # 7. Metric change patterns (volume, amount, sum)
+    metric_match = _detect_metric_change(new_lower)
+    if metric_match:
+        patches.append({"type": "metric_change", "value": metric_match})
+        if not followup_type:
+            followup_type = "metric_change"
+        confidence = max(confidence, 0.85)
 
-    # If no patterns matched, not a follow-up
+    # If no patterns matched, check if it's a new independent question
     if not patches:
+        if _is_new_question(new_lower, prev_lower):
+            return {
+                "is_followup": False,
+                "type": "new_question",
+                "confidence": 0.9,
+                "patches": [],
+            }
+        # No patterns and not clearly new - uncertain case
         return {
             "is_followup": False,
             "type": "new_question",
-            "confidence": 0.8,
+            "confidence": 0.6,
             "patches": [],
         }
 
@@ -101,7 +117,7 @@ def classify_followup(new_question: str, prev_question: str, prev_plan: dict) ->
     }
 
 
-def patch_plan(prev_plan: dict, classification: dict, new_question: str) -> dict:
+def patch_plan(prev_plan: dict, classification: dict, new_question: str, cards: dict = None, use_llm: bool = False) -> dict:
     """
     Apply patches to previous plan based on classification.
 
@@ -115,6 +131,8 @@ def patch_plan(prev_plan: dict, classification: dict, new_question: str) -> dict
         prev_plan: Previous plan dict
         classification: Classification from classify_followup
         new_question: The new question text
+        cards: Optional cards dict for schema lookup
+        use_llm: Whether to use LLM resolver for unmapped columns
 
     Returns:
         Patched plan dict
@@ -142,11 +160,21 @@ def patch_plan(prev_plan: dict, classification: dict, new_question: str) -> dict
         elif patch_type == "filter_refine":
             _apply_filter_refine(patched, value)
         elif patch_type == "groupby_change":
-            _apply_groupby_change(patched, value)
+            _apply_groupby_change(patched, value, cards)
         elif patch_type == "limit_change":
             _apply_limit_change(patched, value)
         elif patch_type == "comparison":
             _apply_comparison(patched, value)
+        elif patch_type == "reference":
+            # Reference words carry forward all context - no changes needed
+            # The patched plan already has all constraints from prev_plan
+            pass
+        elif patch_type == "metric_change":
+            _apply_metric_change(patched, value, cards)
+    
+    # If LLM is enabled, resolve any unmapped columns in group_by
+    if use_llm and cards:
+        _resolve_unmapped_columns_with_llm(patched, new_question, cards, classification)
 
     return patched
 
@@ -298,12 +326,13 @@ def _detect_filter_refine(text: str) -> dict[str, Any] | None:
 
 def _detect_groupby_change(text: str) -> dict[str, Any] | None:
     """Detect groupby change patterns."""
-    # Pattern: "by <column>", "group by <column>", "breakdown by <column>"
+    # Pattern: "by <column>", "group by <column>", "breakdown by <column>", "split by <column>"
     patterns = [
-        r"breakdown\s+by\s+(\w+)",
-        r"group\s+by\s+(\w+)",
-        r"\bby\s+(\w+)$",  # "by month" at end
-        r"\bby\s+(\w+)\b",  # "by month" anywhere
+        r"breakdown\s+by\s+(?:each\s+)?(\w+)",  # "breakdown by each platform"
+        r"split\s+by\s+(?:each\s+)?(\w+)",       # "split by each platform"
+        r"group\s+by\s+(?:each\s+)?(\w+)",       # "group by each platform"
+        r"\bby\s+(?:each\s+)?(\w+)$",            # "by each month" at end
+        r"\bby\s+(?:each\s+)?(\w+)\??",          # "by each month" anywhere
     ]
 
     for pattern in patterns:
@@ -359,6 +388,55 @@ def _detect_comparison(text: str) -> dict[str, Any] | None:
             else:
                 return {"compare_to": "previous_period"}
 
+    return None
+
+
+def _detect_reference_words(text: str) -> dict[str, Any] | None:
+    """Detect reference words that indicate carrying forward context.
+    
+    Patterns:
+    - "for the same" / "of the same" / "in the same"
+    - "for it" / "for that" / "for those" / "for these"
+    - "that" / "those" / "these" (standalone)
+    """
+    reference_patterns = [
+        r"(?:for|of|in)\s+the\s+same",
+        r"for\s+(?:it|that|those|these)",
+        r"\b(?:that|those|these|it)\b",
+    ]
+    
+    for pattern in reference_patterns:
+        if re.search(pattern, text):
+            return {"carry_forward": True, "type": "context_reference"}
+    
+    return None
+
+
+def _detect_metric_change(text: str) -> dict[str, Any] | None:
+    """Detect metric change patterns.
+    
+    Patterns:
+    - "volume" / "total amount" / "sum" → SUM aggregation
+    - "average" / "mean" → AVG aggregation
+    - "maximum" / "max" → MAX aggregation
+    - "minimum" / "min" → MIN aggregation
+    """
+    # Sum patterns
+    if re.search(r"\b(?:volume|total\s+(?:amount|value|sum)|sum)\b", text):
+        return {"new_aggregation": "sum", "metric_type": "money_or_numeric"}
+    
+    # Average patterns
+    if re.search(r"\b(?:average|mean|avg)\b", text):
+        return {"new_aggregation": "avg", "metric_type": "money_or_numeric"}
+    
+    # Max patterns
+    if re.search(r"\b(?:maximum|max|highest|largest)\b", text):
+        return {"new_aggregation": "max", "metric_type": "money_or_numeric"}
+    
+    # Min patterns
+    if re.search(r"\b(?:minimum|min|lowest|smallest)\b", text):
+        return {"new_aggregation": "min", "metric_type": "money_or_numeric"}
+    
     return None
 
 
@@ -429,8 +507,14 @@ def _apply_filter_refine(plan: dict, value: dict) -> None:
     plan["constraints"].append({"type": "filter", "expression": expression})
 
 
-def _apply_groupby_change(plan: dict, value: dict) -> None:
-    """Apply groupby change to plan subquestions."""
+def _apply_groupby_change(plan: dict, value: dict, cards: dict = None) -> None:
+    """Apply groupby change to plan subquestions.
+    
+    Args:
+        plan: Plan dict to modify
+        value: Groupby value dict with 'column'
+        cards: Optional cards dict for column lookup
+    """
     column = value.get("column", "")
     if not column:
         return
@@ -441,7 +525,31 @@ def _apply_groupby_change(plan: dict, value: dict) -> None:
         return
 
     sq = subquestions[0]
-    sq["group_by"] = [column]
+    primary_table = sq.get("tables", [None])[0]
+    
+    # Try to resolve column name if it doesn't exist in schema
+    resolved_column = column
+    if cards and primary_table:
+        # Check if column exists in table
+        column_cards = cards.get("column_cards", [])
+        table_columns = [cc["column"] for cc in column_cards if cc["table"] == primary_table]
+        
+        if column not in table_columns:
+            # Column doesn't exist - try to find similar columns
+            # Look for columns containing the keyword
+            candidates = [col for col in table_columns if column.lower() in col.lower()]
+            if candidates:
+                resolved_column = candidates[0]
+                # Store the resolution for later LLM enhancement
+                value["needs_llm_resolution"] = True
+                value["original_column"] = column
+                value["candidates"] = candidates
+    
+    sq["group_by"] = [resolved_column]
+    
+    # Add column to columns list if not present
+    if resolved_column not in sq.get("columns", []):
+        sq["columns"].append(resolved_column)
 
     # Ensure aggregations exist
     if not sq.get("aggregations"):
@@ -460,7 +568,11 @@ def _apply_limit_change(plan: dict, value: dict) -> None:
 
 
 def _apply_comparison(plan: dict, value: dict) -> None:
-    """Apply comparison by adding a second subquestion for comparison period."""
+    """Apply comparison by adding a second subquestion for comparison period.
+    
+    CRITICAL: Creates symmetric time constraints for BOTH subquestions to prevent
+    the bug where comparison queries return identical results.
+    """
     compare_to = value.get("compare_to", "previous_period")
 
     subquestions = plan.get("subquestions", [])
@@ -483,16 +595,30 @@ def _apply_comparison(plan: dict, value: dict) -> None:
     comparison_sq["id"] = "SQ2_comparison"
     comparison_sq["description"] = f"{comparison_sq.get('description', '')} ({compare_to})"
 
-    # Add time constraint for comparison period
+    # Initialize constraints list if not present
     if "constraints" not in plan:
         plan["constraints"] = []
 
     # Infer time column from subquestion
     time_col = _infer_time_column(current_sq)
 
-    # Note: Currently executor does not support applies_to scoping
-    # This is a forward-compatibility marker for future enhancement
-    # For now, comparison queries should be handled by separate execution
+    # Determine current period based on comparison period
+    current_period = _infer_current_period(compare_to)
+    
+    # CRITICAL: Add scoped time constraint for BOTH subquestions
+    # This ensures each subquestion has its own time scope, preventing
+    # the bug where both queries run over the same data
+    
+    # Add constraint for current period (SQ1_current)
+    plan["constraints"].append(
+        {
+            "type": "time",
+            "expression": f"{primary_table}.{time_col} in {current_period}",
+            "applies_to": "SQ1_current",
+        }
+    )
+    
+    # Add constraint for comparison period (SQ2_comparison)
     plan["constraints"].append(
         {
             "type": "time",
@@ -504,6 +630,31 @@ def _apply_comparison(plan: dict, value: dict) -> None:
     # Add comparison subquestion if not already present
     if len(subquestions) == 1:
         plan["subquestions"].append(comparison_sq)
+
+
+def _infer_current_period(compare_to: str) -> str:
+    """Infer current period expression based on comparison period.
+    
+    Args:
+        compare_to: Comparison period (e.g., 'previous_month', 'previous_year')
+        
+    Returns:
+        Current period expression (e.g., 'this_month', 'this_year')
+    """
+    # Map comparison periods to their current equivalents
+    period_map = {
+        "previous_month": "this_month",
+        "previous_year": "this_year",
+        "previous_week": "this_week",
+        "previous_day": "today",
+        "previous_quarter": "this_quarter",
+        "previous_period": "current_period",
+        "last_month": "this_month",
+        "last_year": "this_year",
+        "last_week": "this_week",
+    }
+    
+    return period_map.get(compare_to, "current_period")
 
 
 def _remove_time_phrases(text: str) -> str:
@@ -524,6 +675,152 @@ def _remove_time_phrases(text: str) -> str:
         cleaned = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
 
     return cleaned.strip()
+
+
+def _apply_metric_change(plan: dict, value: dict, cards: dict = None) -> None:
+    """Apply metric/aggregation change to plan.
+    
+    Args:
+        plan: Plan dict to modify
+        value: Metric change value dict with 'new_aggregation' and 'metric_type'
+        cards: Optional cards dict to look up schema columns
+    """
+    new_agg = value.get("new_aggregation", "sum")
+    metric_type = value.get("metric_type", "money_or_numeric")
+    
+    subquestions = plan.get("subquestions", [])
+    if not subquestions:
+        return
+    
+    sq = subquestions[0]
+    primary_table = sq.get("tables", [None])[0]
+    if not primary_table:
+        return
+    
+    # Find appropriate column for the new aggregation
+    # For money/numeric metrics, look for amount/value columns
+    target_col = None
+    
+    if metric_type == "money_or_numeric":
+        # Try to find money columns from table cards if available
+        if cards:
+            table_cards = cards.get("table_cards", [])
+            for tc in table_cards:
+                if tc.get("table") == primary_table:
+                    money_cols = tc.get("money_cols", [])
+                    if money_cols:
+                        # Prefer payment_amount, then deal_amount, then first available
+                        for preferred in ["payment_amount", "deal_details_amount", "amount"]:
+                            if preferred in money_cols:
+                                target_col = f"{primary_table}.{preferred}"
+                                break
+                        if not target_col:
+                            target_col = f"{primary_table}.{money_cols[0]}"
+                    break
+        
+        # Fallback: look in existing columns
+        if not target_col:
+            columns = sq.get("columns", [])
+            for col in columns:
+                col_lower = col.lower()
+                if any(keyword in col_lower for keyword in ["amount", "value", "price", "cost", "payment"]):
+                    target_col = f"{primary_table}.{col}"
+                    break
+    
+    if not target_col:
+        return
+    
+    # Extract just the column name for aggregation
+    col_name = target_col.split(".")[-1] if "." in target_col else target_col
+    
+    # Update aggregations
+    sq["aggregations"] = [{"agg": new_agg, "col": col_name}]
+    
+    # Add the column to columns list if not present
+    if col_name not in sq.get("columns", []):
+        sq["columns"].append(col_name)
+    
+    # Update metrics_requested in plan
+    if "metrics_requested" in plan and plan["metrics_requested"]:
+        plan["metrics_requested"][0]["aggregation"] = new_agg
+        plan["metrics_requested"][0]["mapped_columns"] = [target_col]
+
+
+def _resolve_unmapped_columns_with_llm(plan: dict, new_question: str, cards: dict, classification: dict) -> None:
+    """Use LLM to resolve unmapped column names in group_by.
+    
+    Args:
+        plan: Patched plan dict
+        new_question: The followup question
+        cards: Cards dict
+        classification: Classification result
+    """
+    from haikugraph.llm.router import call_llm
+    
+    subquestions = plan.get("subquestions", [])
+    if not subquestions:
+        return
+    
+    sq = subquestions[0]
+    group_by = sq.get("group_by", [])
+    if not group_by:
+        return
+    
+    primary_table = sq.get("tables", [None])[0]
+    if not primary_table:
+        return
+    
+    # Check if any group_by columns need resolution
+    column_cards = cards.get("column_cards", [])
+    table_columns = [cc["column"] for cc in column_cards if cc["table"] == primary_table]
+    
+    unmapped = [col for col in group_by if col not in table_columns]
+    if not unmapped:
+        return
+    
+    # Build LLM prompt to resolve column names
+    columns_list = "\n".join([f"  - {col}" for col in table_columns[:50]])
+    
+    prompt = f"""You are mapping a user's grouping dimension to actual database columns.
+
+USER QUESTION: "{new_question}"
+USER WANTS TO GROUP BY: {unmapped[0]}
+
+AVAILABLE COLUMNS IN TABLE {primary_table}:
+{columns_list}
+
+Your task: Find the best matching column for "{unmapped[0]}".
+
+IMPORTANT:
+- Return ONLY the exact column name, nothing else
+- If no good match exists, return "NONE"
+- Consider semantic meaning (e.g., "platform" might map to "type", "channel", "method")
+
+RESPOND WITH ONLY THE COLUMN NAME:"""
+    
+    try:
+        response = call_llm([
+            {"role": "system", "content": "You are a precise column name resolver. Output only the exact column name or NONE."},
+            {"role": "user", "content": prompt}
+        ], role="planner", max_tokens=50)
+        
+        resolved = response.strip()
+        
+        if resolved and resolved != "NONE" and resolved in table_columns:
+            # Update group_by with resolved column
+            sq["group_by"] = [resolved]
+            
+            # Update columns list
+            if resolved not in sq.get("columns", []):
+                sq["columns"].append(resolved)
+            
+            # Remove old unmapped column
+            if unmapped[0] in sq.get("columns", []):
+                sq["columns"].remove(unmapped[0])
+    
+    except Exception as e:
+        # If LLM resolution fails, keep the original (might fail at execution)
+        pass
 
 
 def _infer_time_column(subquestion: dict) -> str:

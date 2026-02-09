@@ -1,0 +1,17 @@
+{
+  "id": "relation:test_1_1_merged.payee_id~test_4_1.payee_id",
+  "card_type": "relation",
+  "left_table": "test_1_1_merged",
+  "right_table": "test_4_1",
+  "left_col": "payee_id",
+  "right_col": "payee_id",
+  "confidence": 0.95,
+  "evidence": {
+    "left_distinct": 2754,
+    "right_distinct": 2455,
+    "left_null_pct": 39.44,
+    "right_null_pct": 0.0
+  },
+  "notes": "needs_probe_join_coverage",
+  "probe": null
+}

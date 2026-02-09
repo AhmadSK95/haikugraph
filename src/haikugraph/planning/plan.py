@@ -32,7 +32,7 @@ def build_plan(question: str, graph: dict, cards: dict) -> dict:
     entities = detect_entities(question_lower, graph, cards)
 
     # Detect requested metrics WITH table qualification
-    metrics = detect_metrics(question_lower, cards, question)
+    metrics = detect_metrics(question_lower, cards, question, entities)
 
     # Get context tables from entities and metrics
     context_tables = set()
@@ -58,7 +58,7 @@ def build_plan(question: str, graph: dict, cards: dict) -> dict:
     join_paths = find_join_paths(subquestions, graph)
 
     # Detect ambiguities
-    ambiguities = detect_ambiguities(entities, metrics, subquestions, cards)
+    ambiguities = detect_ambiguities(entities, metrics, subquestions, cards, question, constraints)
 
     # Calculate overall plan confidence
     plan_confidence = calculate_plan_confidence(
@@ -166,8 +166,15 @@ def detect_entities(question: str, graph: dict, cards: dict) -> list[dict]:
     return entities
 
 
-def detect_metrics(question: str, cards: dict, original_question: str) -> list[dict]:
-    """Detect metric requests with table-qualified columns and better ranking."""
+def detect_metrics(question: str, cards: dict, original_question: str, entities: list = None) -> list[dict]:
+    """Detect metric requests with table-qualified columns and better ranking.
+    
+    Args:
+        question: Lowercase question text
+        cards: Schema cards
+        original_question: Original question (for keyword matching)
+        entities: Detected entities (for COUNT metric resolution)
+    """
     metrics = []
 
     # Aggregation patterns
@@ -188,7 +195,24 @@ def detect_metrics(question: str, cards: dict, original_question: str) -> list[d
 
     for agg_type, patterns in agg_patterns.items():
         if any(re.search(p, question) for p in patterns):
-            # Score all candidate columns
+            # For COUNT, prefer ID columns from entities, not money columns
+            if agg_type == "count" and entities:
+                # Use entity columns (like transaction_id)
+                # IMPORTANT: Use DISTINCT to count unique entities, not all rows
+                # (handles cases where one entity has multiple related rows)
+                entity = entities[0]
+                for ref in entity["mapped_to"]:
+                    table, col = ref.split(".")
+                    metrics.append({
+                        "name": f"count_distinct_{col}",
+                        "mapped_columns": [ref],
+                        "aggregation": "count_distinct",  # Use count_distinct aggregation
+                        "confidence": 0.8,
+                    })
+                    break  # Just use first entity column
+                break  # Done with this agg type
+            
+            # For SUM/AVG/etc., score all candidate columns
             candidates = []
             for col_card in cards.get("column_cards", []):
                 col_name = col_card.get("column", "").lower()
@@ -243,6 +267,38 @@ def detect_metrics(question: str, cards: dict, original_question: str) -> list[d
                 break  # Only one metric per agg type
 
     return metrics
+
+
+def extract_time_periods(question: str) -> tuple[str, str] | None:
+    """Extract two time periods from comparison questions.
+    
+    Returns:
+        Tuple of (period1, period2) or None if not a time comparison
+    """
+    # Month patterns: "September 2025 vs October 2025"
+    month_pattern = r"(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})"
+    months = re.findall(month_pattern, question.lower())
+    
+    if len(months) >= 2:
+        month1, year1 = months[0]
+        month2, year2 = months[1]
+        return (f"{month1}_{year1}", f"{month2}_{year2}")
+    
+    # Year patterns: "2024 vs 2025"
+    year_pattern = r"\b(20\d{2})\b"
+    years = re.findall(year_pattern, question)
+    
+    if len(years) >= 2:
+        return (f"year_{years[0]}", f"year_{years[1]}")
+    
+    # Relative periods: "this month vs last month"
+    if re.search(r"this\s+month.*(?:vs|versus).*last\s+month", question):
+        return ("this_month", "last_month")
+    
+    if re.search(r"this\s+year.*(?:vs|versus).*last\s+year", question):
+        return ("this_year", "last_year")
+    
+    return None
 
 
 def detect_constraints(
@@ -304,9 +360,38 @@ def detect_constraints(
                 )
                 break
 
-    # Time constraints - symbolic
-    time_keywords = ["today", "yesterday", "week", "month", "year", "recent"]
-    if any(kw in question for kw in time_keywords):
+    # Time constraints - specific months
+    month_pattern = r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b"
+    month_match = re.search(month_pattern, question)
+    
+    if month_match:
+        month_name = month_match.group(1)
+        month_num = {
+            "january": 1, "february": 2, "march": 3, "april": 4,
+            "may": 5, "june": 6, "july": 7, "august": 8,
+            "september": 9, "october": 10, "november": 11, "december": 12
+        }[month_name]
+        
+        # Find timestamp column in context tables
+        for col_card in cards.get("column_cards", []):
+            if "timestamp" in col_card.get("semantic_hints", []):
+                table = col_card.get("table", "")
+                if table in context_tables or not context_tables:
+                    col = col_card.get("column", "")
+                    constraints.append({
+                        "type": "time_month",
+                        "expression": f"{table}.{col} month={month_num}",
+                        "month": month_num,
+                        "month_name": month_name,
+                        "column": col,
+                        "table": table,
+                        "confidence": 0.9,
+                    })
+                    break
+    
+    # Time constraints - symbolic (today, yesterday, etc.)
+    time_keywords = ["today", "yesterday", "week", "year", "recent"]
+    if any(kw in question for kw in time_keywords) and not month_match:
         for col_card in cards.get("column_cards", []):
             if "timestamp" in col_card.get("semantic_hints", []):
                 table = col_card.get("table", "")
@@ -319,6 +404,37 @@ def detect_constraints(
                     }
                 )
                 break
+    
+    # Column value constraints (e.g., "with mt103", "where status = X")
+    # Look for patterns like "with <value>" or "where <column> <value>"
+    value_patterns = [
+        r"\bwith\s+(\w+)",
+        r"\bhas\s+(\w+)",
+        r"\bcontaining\s+(\w+)",
+    ]
+    
+    for pattern in value_patterns:
+        match = re.search(pattern, question)
+        if match:
+            value = match.group(1)
+            
+            # Find columns that might contain this value
+            # Look for columns with similar names or in the context
+            for col_card in cards.get("column_cards", []):
+                col_name = col_card.get("column", "").lower()
+                table = col_card.get("table", "")
+                
+                # Check if value appears in column name (e.g., mt103 -> mt103_document_id)
+                if value in col_name:
+                    constraints.append({
+                        "type": "value_filter",
+                        "expression": f"{table}.{col_card['column']} IS NOT NULL",
+                        "value": value,
+                        "column": col_card['column'],
+                        "table": table,
+                        "confidence": 0.8,
+                    })
+                    break
 
     return constraints
 
@@ -335,6 +451,53 @@ def build_subquestions(
     """Build executable subquestions with group_by support for breakdown queries."""
     subquestions = []
 
+    # Check if this is a comparison query
+    if intent["type"] == "comparison":
+        time_periods = extract_time_periods(question)
+        
+        if time_periods and metrics:
+            # Build two subquestions for comparison
+            period1, period2 = time_periods
+            
+            # Get metric details
+            metric = metrics[0]
+            table_name = metric["mapped_columns"][0].split(".")[0]
+            col_name = metric["mapped_columns"][0].split(".")[1]
+            
+            # Find timestamp column in this table
+            timestamp_col = None
+            for col_card in cards.get("column_cards", []):
+                if (col_card.get("table") == table_name and 
+                    "timestamp" in col_card.get("semantic_hints", [])):
+                    timestamp_col = col_card.get("column")
+                    break
+            
+            # Create SQ1_current (first period)
+            subquestions.append({
+                "id": "SQ1_current",
+                "description": f"Compute {metric['aggregation']}({col_name}) for {period1}",
+                "tables": [table_name],
+                "columns": [col_name],
+                "aggregations": [{"agg": metric["aggregation"], "col": col_name}],
+                "time_filter": {"column": timestamp_col, "period": period1} if timestamp_col else None,
+                "required_joins": [],
+                "confidence": metric["confidence"],
+            })
+            
+            # Create SQ2_comparison (second period)
+            subquestions.append({
+                "id": "SQ2_comparison",
+                "description": f"Compute {metric['aggregation']}({col_name}) for {period2}",
+                "tables": [table_name],
+                "columns": [col_name],
+                "aggregations": [{"agg": metric["aggregation"], "col": col_name}],
+                "time_filter": {"column": timestamp_col, "period": period2} if timestamp_col else None,
+                "required_joins": [],
+                "confidence": metric["confidence"],
+            })
+            
+            return subquestions
+    
     # Check if this is a breakdown/aggregation query
     has_breakdown = intent["type"] in ["breakdown", "metric"] and (
         re.search(r"\bby\b|\bper\b", question)
@@ -415,11 +578,14 @@ def build_subquestions(
                 if col_ref.startswith(table_name + "."):
                     columns.append(col_ref.split(".")[1])
 
-            # Add metric columns if from same table
+            # Check if we have metrics for this table
+            aggregations = []
             for metric in metrics:
                 for mcol in metric["mapped_columns"]:
                     if mcol.startswith(table_name + "."):
-                        columns.append(mcol.split(".")[1])
+                        col = mcol.split(".")[1]
+                        columns.append(col)
+                        aggregations.append({"agg": metric["aggregation"], "col": col})
 
             # Remove duplicates and sort
             columns = _sorted_unique(columns)
@@ -428,16 +594,20 @@ def build_subquestions(
             if metrics:
                 description += f" with {metrics[0]['aggregation']}"
 
-            subquestions.append(
-                {
-                    "id": f"SQ{sq_id}",
-                    "description": description,
-                    "tables": [table_name],
-                    "columns": columns[:10],  # Limit columns
-                    "required_joins": [],
-                    "confidence": round(min(entity["confidence"], 0.9), 2),
-                }
-            )
+            sq_dict = {
+                "id": f"SQ{sq_id}",
+                "description": description,
+                "tables": [table_name],
+                "columns": columns[:10],  # Limit columns
+                "required_joins": [],
+                "confidence": round(min(entity["confidence"], 0.9), 2),
+            }
+            
+            # Add aggregations if present
+            if aggregations:
+                sq_dict["aggregations"] = aggregations
+            
+            subquestions.append(sq_dict)
             sq_id += 1
 
     # If no subquestions yet but have metrics
@@ -547,21 +717,66 @@ def bfs_shortest_path(start: str, end: str, adj: dict) -> list[str] | None:
 
 
 def detect_ambiguities(
-    entities: list, metrics: list, subquestions: list, cards: dict
+    entities: list, metrics: list, subquestions: list, cards: dict, question: str = "", constraints: list = None
 ) -> list[dict]:
-    """Detect ambiguous mappings that need clarification."""
+    """Detect ambiguous mappings that need clarification.
+    
+    Args:
+        entities: Detected entities
+        metrics: Detected metrics
+        subquestions: Built subquestions
+        cards: Schema cards
+        question: Original question (used to detect explicit table references)
+        constraints: Detected constraints (for context-aware resolution)
+    """
     ambiguities = []
+    
+    if constraints is None:
+        constraints = []
+
+    # Get metric tables and constraint tables for context-aware resolution
+    metric_tables = set()
+    for metric in metrics:
+        for mcol in metric["mapped_columns"]:
+            if "." in mcol:
+                metric_tables.add(mcol.split(".")[0])
+    
+    constraint_tables = set()
+    for constraint in constraints:
+        if "table" in constraint:
+            constraint_tables.add(constraint["table"])
+    
+    # Combine for total context
+    context_tables = metric_tables | constraint_tables
 
     # Check for multi-table entity mappings
     for entity in entities:
         tables = _sorted_unique(ref.split(".")[0] for ref in entity["mapped_to"])
         if len(tables) > 1:
+            # Check if user explicitly mentioned a table in the question
+            recommended = _find_explicit_table_reference(question.lower(), tables)
+            if not recommended:
+                # Prefer tables that contain the metrics or constraints being queried
+                if context_tables:
+                    matching = [t for t in tables if t in context_tables]
+                    if matching:
+                        recommended = matching[0]
+                        confidence = 0.85  # High confidence based on context
+                    else:
+                        recommended = tables[0]  # First alphabetically as fallback
+                        confidence = 0.6
+                else:
+                    recommended = tables[0]  # First alphabetically as fallback
+                    confidence = 0.6
+            else:
+                confidence = 0.9  # High confidence when explicitly mentioned
+            
             ambiguities.append(
                 {
                     "issue": f"Entity '{entity['name']}' found in multiple tables",
                     "options": tables,
-                    "recommended": tables[0],  # First alphabetically
-                    "confidence": 0.6,
+                    "recommended": recommended,
+                    "confidence": confidence,
                 }
             )
 
@@ -581,16 +796,41 @@ def detect_ambiguities(
 
         unique_tables = _sorted_unique(matching_tables)
         if len(unique_tables) > 1:
+            # Check if user explicitly mentioned a table in the question
+            recommended = _find_explicit_table_reference(question.lower(), unique_tables)
+            if not recommended:
+                recommended = unique_tables[0]  # First alphabetically as fallback
+                confidence = 0.6
+            else:
+                confidence = 0.9  # High confidence when explicitly mentioned
+            
             ambiguities.append(
                 {
                     "issue": f"Multiple tables contain {metric['mapped_columns'][0]}",
                     "options": unique_tables,
-                    "recommended": unique_tables[0],
-                    "confidence": 0.6,
+                    "recommended": recommended,
+                    "confidence": confidence,
                 }
             )
 
     return ambiguities
+
+
+def _find_explicit_table_reference(question: str, table_options: list[str]) -> str | None:
+    """Check if user explicitly mentioned one of the table options in their question.
+    
+    Args:
+        question: Lowercase question text
+        table_options: List of possible table names
+    
+    Returns:
+        Table name if found, None otherwise
+    """
+    for table in table_options:
+        # Check for exact table name or common patterns like "from table_name"
+        if table.lower() in question:
+            return table
+    return None
 
 
 def calculate_plan_confidence(

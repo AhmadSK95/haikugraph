@@ -4,11 +4,18 @@ import copy
 import re
 from datetime import datetime
 from pathlib import Path
+import json
+from haikugraph.execution.type_detector import (
+    get_column_info,
+    get_sql_cast_expression,
+    detect_column_type
+)
 
 import duckdb
 
 from haikugraph.planning.ambiguity import validate_no_unresolved_ambiguities
 from haikugraph.planning.schema import validate_plan_or_raise
+from haikugraph.execution.comparison import extract_comparison_from_results, ComparisonResult
 
 
 def execute_plan(plan: dict, db_path: Path) -> dict:
@@ -55,15 +62,25 @@ def execute_plan(plan: dict, db_path: Path) -> dict:
 
     conn.close()
 
-    # Generate final summary
-    final_summary = generate_summary(plan, subquestion_results)
+    # A11: Extract and normalize comparison if this is a comparison query
+    # This MUST happen before narration to enforce structural correctness
+    comparison_result = None
+    try:
+        comparison_result = extract_comparison_from_results(resolved_plan, subquestion_results)
+    except ValueError as e:
+        # Comparison extraction failed - this is a fatal error for comparison queries
+        # Include the error in final_summary so narrator can report it
+        final_summary = f"Comparison extraction failed: {e}"
+    else:
+        # Generate final summary (only if comparison extraction succeeded or not a comparison)
+        final_summary = generate_summary(plan, subquestion_results)
 
     # Generate human-readable applied resolutions summary
     applied_resolutions_summary = summarize_applied_resolutions(
         resolved_plan.get("resolutions_applied", [])
     )
 
-    return {
+    result = {
         "original_question": plan.get("original_question", ""),
         "executed_at": datetime.utcnow().isoformat() + "Z",
         "resolutions": resolutions,
@@ -71,6 +88,13 @@ def execute_plan(plan: dict, db_path: Path) -> dict:
         "subquestion_results": subquestion_results,
         "final_summary": final_summary,
     }
+    
+    # A11: Include normalized comparison result if present
+    # This provides a first-class comparison structure for the narrator
+    if comparison_result is not None:
+        result["comparison"] = comparison_result.model_dump()
+    
+    return result
 
 
 def execute_subquestion(sq: dict, plan: dict, conn) -> dict:
@@ -95,9 +119,17 @@ def execute_subquestion(sq: dict, plan: dict, conn) -> dict:
 
     try:
         # Build SQL for this subquestion
-        sql, build_metadata = build_sql(sq, plan)
+        sql, build_metadata = build_sql(sq, plan, conn)
         # Merge build_metadata into metadata
         metadata.update(build_metadata)
+        
+        # DEBUG: Log generated SQL
+        print(f"\n{'='*80}")
+        print(f"EXECUTING SQL for subquestion {sq.get('id', 'unknown')}:")
+        print(f"{'='*80}")
+        print(f"Subquestion: {sq}")
+        print(f"\nGenerated SQL:\n{sql}")
+        print(f"{'='*80}\n")
 
         # Execute query
         result = conn.execute(sql).fetchall()
@@ -133,13 +165,72 @@ def execute_subquestion(sq: dict, plan: dict, conn) -> dict:
         }
 
 
-def build_sql(sq: dict, plan: dict) -> tuple[str, dict]:
+def _strip_sql_literals(sql: str) -> str:
+    """Cheap scrub of literals/identifiers to reduce false FROM matches.
+    - Replaces single-quoted strings (including escaped '' inside) with ''
+    - Replaces double-quoted identifiers (including escaped "") with ""
+    Note: Not a full SQL parser; intended for simple guard only.
+    """
+    # Single-quoted string literals: '...'
+    sql = re.sub(r"'([^']|'')*'", "''", sql)
+    # Double-quoted identifiers: "..."
+    sql = re.sub(r'"([^"]|"")*"', '""', sql)
+    return sql
+
+
+def get_timestamp_expression(table: str, col: str, conn) -> str:
+    """
+    Get a timestamp expression that works with DuckDB date_trunc.
+    
+    DuckDB's date_trunc requires DATE/TIMESTAMP types, but columns may be VARCHAR.
+    This utility introspects the column type and returns an appropriate expression:
+    - If TIMESTAMP/DATE: use column as-is
+    - If VARCHAR: wrap with TRY_CAST(col AS TIMESTAMP)
+    
+    Args:
+        table: Table name
+        col: Column name
+        conn: DuckDB connection
+    
+    Returns:
+        SQL expression that evaluates to a timestamp
+    """
+    try:
+        # Query DuckDB catalog to get column type
+        type_query = f"""
+            SELECT data_type 
+            FROM information_schema.columns 
+            WHERE table_name = '{table}' AND column_name = '{col}'
+        """
+        result = conn.execute(type_query).fetchone()
+        
+        if result:
+            data_type = result[0].upper()
+            
+            # If already a timestamp/date type, use as-is
+            if any(t in data_type for t in ['TIMESTAMP', 'DATE', 'TIME']):
+                return f'"{table}"."{col}"'
+            
+            # If VARCHAR/TEXT, wrap with TRY_CAST
+            if any(t in data_type for t in ['VARCHAR', 'TEXT', 'CHAR']):
+                return f'TRY_CAST("{table}"."{col}" AS TIMESTAMP)'
+        
+        # Default: assume it's a timestamp column (for compatibility)
+        return f'"{table}"."{col}"'
+        
+    except Exception:
+        # If schema introspection fails, use TRY_CAST as safe default
+        return f'TRY_CAST("{table}"."{col}" AS TIMESTAMP)'
+
+
+def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
     """
     Build SQL query for a subquestion.
 
     Args:
         sq: Subquestion dict
         plan: Full plan for context
+        conn: Optional DuckDB connection for schema introspection
 
     Returns:
         Tuple of (sql_string, metadata_dict)
@@ -158,34 +249,117 @@ def build_sql(sq: dict, plan: dict) -> tuple[str, dict]:
     primary_table = tables[0]
 
     # Build SELECT clause
-    if group_by and aggregations:
-        # Grouped query
+    if aggregations:
+        # Aggregation query (with or without GROUP BY)
         select_parts = []
+        time_bucket_exprs = []  # Track time bucket expressions for GROUP BY
 
-        # Add group by columns
-        for col in sorted(group_by):
-            select_parts.append(f'"{primary_table}"."{col}"')
+        # Add group by columns if present
+        if group_by:
+            for col_spec in group_by:
+                # Support both simple strings and dict specs for time bucketing
+                if isinstance(col_spec, dict):
+                    # Time bucket: {"type": "time_bucket", "grain": "month", "col": "date_col"}
+                    if col_spec.get("type") == "time_bucket":
+                        grain = col_spec.get("grain", "month")
+                        col_name = col_spec["col"]
+                        bucket_alias = f"{grain}"
+                        
+                        # Get timestamp expression (handles VARCHAR columns)
+                        if conn:
+                            ts_expr = get_timestamp_expression(primary_table, col_name, conn)
+                        else:
+                            ts_expr = f'"{primary_table}"."{col_name}"'
+                        
+                # DuckDB date_trunc function with COALESCE for NULL handling
+                        # Use COALESCE to show NULL timestamps as 'Unknown' or keep as NULL for counting
+                        bucket_expr = f"date_trunc('{grain}', {ts_expr})"
+                        select_parts.append(f'{bucket_expr} AS "{bucket_alias}"')
+                        time_bucket_exprs.append((bucket_alias, bucket_expr))
+                    else:
+                        # Unknown dict type, skip
+                        pass
+                elif isinstance(col_spec, str):
+                    # Simple column name
+                    select_parts.append(f'"{primary_table}"."{col_spec}"')
+                else:
+                    # Unknown type, skip
+                    pass
 
         # Add aggregations with safe type casting
         for agg_spec in aggregations:
             agg_func = agg_spec["agg"].upper()
             agg_col = agg_spec["col"]
-            alias = f"{agg_spec['agg']}_{agg_col}"
-            # Use TRY_CAST to DOUBLE for numeric aggregations (handles non-numeric gracefully)
-            if agg_func in ("SUM", "AVG", "MIN", "MAX"):
-                col_expr = f'TRY_CAST("{primary_table}"."{agg_col}" AS DOUBLE)'
+            is_distinct = agg_spec.get("distinct", False)
+            
+            # Build alias
+            if is_distinct:
+                alias = f"{agg_spec['agg']}_distinct_{agg_col}"
             else:
+                alias = f"{agg_spec['agg']}_{agg_col}"
+            
+            # Handle count_distinct as alias for count with distinct=true
+            if agg_func == "COUNT_DISTINCT":
+                agg_func = "COUNT"
+                is_distinct = True
+            
+            # Build column expression with improved type detection
+            if agg_func in ("SUM", "AVG", "MIN", "MAX"):
+                if conn:
+                    # Use improved type detection
+                    declared_type, semantic_type = get_column_info(conn, primary_table, agg_col)
+                    col_expr = get_sql_cast_expression(
+                        primary_table, 
+                        agg_col, 
+                        semantic_type,
+                        declared_type
+                    )
+                else:
+                    # Fallback: detect from name only
+                    semantic_type = detect_column_type(agg_col, "VARCHAR")
+                    if semantic_type == "timestamp":
+                        col_expr = f'TRY_CAST("{primary_table}"."{agg_col}" AS TIMESTAMP)'
+                    else:
+                        col_expr = f'TRY_CAST("{primary_table}"."{agg_col}" AS DOUBLE)'
+            else:
+                # COUNT - just column reference
                 col_expr = f'"{primary_table}"."{agg_col}"'
-            select_parts.append(f'{agg_func}({col_expr}) AS "{alias}"')
+            
+            # Apply DISTINCT if requested (typically for COUNT)
+            if is_distinct:
+                agg_expr = f'{agg_func}(DISTINCT {col_expr})'
+            else:
+                agg_expr = f'{agg_func}({col_expr})'
+            
+            select_parts.append(f'{agg_expr} AS "{alias}"')
 
         select_clause = "SELECT " + ", ".join(select_parts)
     else:
-        # Regular select
+        # Regular select with smart casting for display
         if columns:
-            select_parts = [f'"{primary_table}"."{col}"' for col in sorted(columns)]
-            select_clause = "SELECT " + ", ".join(select_parts[:50])  # Limit columns
+            select_parts = []
+            for col in sorted(columns)[:50]:  # Limit columns
+                if conn:
+                    # Apply smart casting for known types
+                    declared_type, semantic_type = get_column_info(conn, primary_table, col)
+                    
+                    # For regular SELECTs, we want to preserve original data
+                    # but cast numeric/timestamp columns for better display
+                    if semantic_type in ("timestamp", "numeric_amount", "numeric_rate", "numeric_decimal"):
+                        cast_expr = get_sql_cast_expression(
+                            primary_table, col, semantic_type, declared_type
+                        )
+                        select_parts.append(f'{cast_expr} AS "{col}"')
+                    else:
+                        # Keep as-is (identifiers, text, booleans)
+                        select_parts.append(f'"{primary_table}"."{col}"')
+                else:
+                    select_parts.append(f'"{primary_table}"."{col}"')
+            
+            select_clause = "SELECT " + ", ".join(select_parts)
         else:
-            select_clause = f'SELECT * FROM "{primary_table}"'
+            # SELECT * without FROM in clause (FROM added separately below)
+            select_clause = "SELECT *"
 
     # Build FROM clause with joins if needed
     from_clause = f'FROM "{primary_table}"'
@@ -216,28 +390,114 @@ def build_sql(sq: dict, plan: dict) -> tuple[str, dict]:
 
     # Build WHERE clause from constraints
     where_clauses = []
+    
+    # Handle time_filter from comparison subquestions
+    time_filter = sq.get("time_filter")
+    if time_filter and time_filter.get("column"):
+        time_col = time_filter["column"]
+        period = time_filter["period"]
+        
+        # Get timestamp expression with proper casting
+        if conn:
+            ts_expr = get_timestamp_expression(primary_table, time_col, conn)
+        else:
+            ts_expr = f'TRY_CAST("{primary_table}"."{time_col}" AS TIMESTAMP)'
+        
+        # Parse period and build WHERE clause
+        # Format: "september_2025", "october_2025", "year_2024"
+        if "_" in period:
+            parts = period.split("_")
+            if len(parts) == 2:
+                period_type, period_value = parts
+                
+                # Month comparison
+                if period_type in ["january", "february", "march", "april", "may", "june",
+                                  "july", "august", "september", "october", "november", "december"]:
+                    month_num = {
+                        "january": 1, "february": 2, "march": 3, "april": 4,
+                        "may": 5, "june": 6, "july": 7, "august": 8,
+                        "september": 9, "october": 10, "november": 11, "december": 12
+                    }[period_type]
+                    
+                    where_clauses.append(
+                        f"EXTRACT(YEAR FROM {ts_expr}) = {period_value} AND "
+                        f"EXTRACT(MONTH FROM {ts_expr}) = {month_num}"
+                    )
+                    metadata["constraints_applied"].append({
+                        "type": "time_filter",
+                        "period": period,
+                        "column": time_col
+                    })
+                
+                # Year comparison
+                elif period_type == "year":
+                    where_clauses.append(f"EXTRACT(YEAR FROM {ts_expr}) = {period_value}")
+                    metadata["constraints_applied"].append({
+                        "type": "time_filter",
+                        "period": period,
+                        "column": time_col
+                    })
+    
+    # Apply plan-level constraints
     constraints = plan.get("constraints", [])
 
     for constraint in constraints:
         expr = constraint.get("expression", "")
+        constraint_type = constraint.get("type")
 
         # Check if constraint is scoped to a specific subquestion (A5 comparison support)
         applies_to = constraint.get("applies_to")
         if applies_to and applies_to != sq.get("id"):
             continue
 
-        # Check if constraint's table is in our tables
+        # Handle time_month constraints
+        if constraint_type == "time_month":
+            month_num = constraint.get("month")
+            time_col = constraint.get("column")
+            constraint_table = constraint.get("table")
+            
+            if constraint_table in tables:
+                # Get timestamp expression with proper casting
+                if conn:
+                    ts_expr = get_timestamp_expression(constraint_table, time_col, conn)
+                else:
+                    ts_expr = f'TRY_CAST("{constraint_table}"."{time_col}" AS TIMESTAMP)'
+                
+                sql_expr = f"EXTRACT(MONTH FROM {ts_expr}) = {month_num}"
+                where_clauses.append(sql_expr)
+                metadata["constraints_applied"].append({
+                    "type": "time_month",
+                    "month": month_num,
+                    "column": time_col,
+                    "expression": sql_expr
+                })
+            continue
+        
+        # Handle value_filter constraints
+        if constraint_type == "value_filter":
+            constraint_table = constraint.get("table")
+            if constraint_table in tables:
+                sql_expr = expr  # Use expression as-is (e.g., "table.column IS NOT NULL")
+                where_clauses.append(sql_expr)
+                metadata["constraints_applied"].append({
+                    "type": "value_filter",
+                    "expression": sql_expr,
+                    "value": constraint.get("value")
+                })
+            continue
+
+        # Check if constraint's table is in our tables (for other constraint types)
         constraint_table = extract_table_from_constraint(expr)
         if constraint_table and constraint_table in tables:
             # Translate constraint
-            if constraint.get("type") == "time":
-                sql_expr = translate_time_constraint(expr)
+            if constraint_type == "time":
+                sql_expr = translate_time_constraint(expr, conn)
             else:
                 sql_expr = expr
 
             where_clauses.append(sql_expr)
             metadata["constraints_applied"].append(
-                {"type": constraint.get("type"), "expression": sql_expr}
+                {"type": constraint_type, "expression": sql_expr}
             )
 
     where_clause = ""
@@ -247,22 +507,53 @@ def build_sql(sq: dict, plan: dict) -> tuple[str, dict]:
     # Build GROUP BY clause
     group_by_clause = ""
     if group_by:
-        group_by_parts = [f'"{primary_table}"."{col}"' for col in sorted(group_by)]
-        group_by_clause = "GROUP BY " + ", ".join(group_by_parts)
+        group_by_parts = []
+        for col_spec in group_by:
+            if isinstance(col_spec, dict) and col_spec.get("type") == "time_bucket":
+                # Use the bucket expression directly (with VARCHAR handling)
+                grain = col_spec.get("grain", "month")
+                col_name = col_spec["col"]
+                
+                # Get timestamp expression (handles VARCHAR columns)
+                if conn:
+                    ts_expr = get_timestamp_expression(primary_table, col_name, conn)
+                else:
+                    ts_expr = f'"{primary_table}"."{col_name}"'
+                
+                bucket_expr = f"date_trunc('{grain}', {ts_expr})"
+                group_by_parts.append(bucket_expr)
+            elif isinstance(col_spec, str):
+                group_by_parts.append(f'"{primary_table}"."{col_spec}"')
+        
+        if group_by_parts:
+            group_by_clause = "GROUP BY " + ", ".join(group_by_parts)
 
     # Build ORDER BY clause for determinism
     order_by_clause = ""
     if group_by:
-        # Order by group_by columns
-        order_by_parts = [f'"{primary_table}"."{col}"' for col in sorted(group_by)]
-        order_by_clause = "ORDER BY " + ", ".join(order_by_parts)
+        # Order by group_by columns (preserving order for time series)
+        order_by_parts = []
+        for col_spec in group_by:
+            if isinstance(col_spec, dict) and col_spec.get("type") == "time_bucket":
+                # Order by time bucket alias with NULLS LAST
+                grain = col_spec.get("grain", "month")
+                order_by_parts.append(f'"{grain}" NULLS LAST')
+            elif isinstance(col_spec, str):
+                order_by_parts.append(f'"{primary_table}"."{col_spec}"')
+        
+        if order_by_parts:
+            order_by_clause = "ORDER BY " + ", ".join(order_by_parts)
+    elif aggregations and not group_by:
+        # Pure aggregation: no ordering
+        order_by_clause = ""
     elif columns:
         # Order by first column
         order_by_clause = f'ORDER BY "{primary_table}"."{columns[0]}"'
 
-    # Build LIMIT clause for non-grouped queries
+    # Build LIMIT clause for non-grouped, non-aggregated queries
     limit_clause = ""
-    if not group_by:
+    if not group_by and not aggregations:
+        # Only add LIMIT for regular SELECT queries (not aggregations)
         # Check for plan-level row_limit (from A5 follow-ups)
         row_limit = plan.get("row_limit")
         if row_limit and isinstance(row_limit, int) and row_limit > 0:
@@ -282,6 +573,28 @@ def build_sql(sq: dict, plan: dict) -> tuple[str, dict]:
         sql_parts.append(limit_clause)
 
     sql = " ".join(sql_parts)
+
+    # Defensive guard: ensure exactly one FROM clause in simple queries.
+    # Scrub literals/identifiers first to avoid false matches in skip logic and FROM counting.
+    # Only enforce guard when we don't detect CTEs or subqueries.
+    scrubbed = _strip_sql_literals(sql)
+    scrubbed_upper = scrubbed.upper()
+    
+    # Skip guard if CTEs (WITH) or subqueries ((SELECT with optional whitespace) detected
+    has_cte = bool(re.search(r"\bWITH\b", scrubbed_upper))
+    has_subquery = bool(re.search(r"\(\s*SELECT\b", scrubbed_upper))
+    
+    # Also skip guard if EXTRACT(...FROM...) is present (temporal functions)
+    has_extract = bool(re.search(r"\bEXTRACT\s*\(", scrubbed_upper))
+    
+    if not has_cte and not has_subquery and not has_extract:
+        # Count FROM clauses in scrubbed SQL (already uppercase, no case flag needed)
+        from_matches = re.findall(r"\bFROM\b", scrubbed_upper)
+        if len(from_matches) != 1:
+            raise ValueError(
+                f"Invalid SQL generated: expected exactly 1 FROM clause, got {len(from_matches)}.\n"
+                f"SQL: {sql}"
+            )
 
     return sql, metadata
 
@@ -310,13 +623,14 @@ def extract_table_from_constraint(expr: str) -> str | None:
     return match.group(1) if match else None
 
 
-def translate_time_constraint(expr: str) -> str:
+def translate_time_constraint(expr: str, conn=None) -> str:
     """
     Translate symbolic time constraint to SQL.
 
     Args:
         expr: Symbolic expression like "test_2_1.created_at in last_30_days"
               or "table.col in yesterday" or "table.col in this_month"
+        conn: Optional DuckDB connection for VARCHAR handling
 
     Returns:
         SQL expression like "test_2_1.created_at >= now() - interval '30 days'"
@@ -332,7 +646,11 @@ def translate_time_constraint(expr: str) -> str:
     col_name = match.group(2)
     period = match.group(3).strip()
 
-    qualified_col = f'"{table_name}"."{col_name}"'
+    # Get timestamp expression (handles VARCHAR columns)
+    if conn:
+        qualified_col = get_timestamp_expression(table_name, col_name, conn)
+    else:
+        qualified_col = f'"{table_name}"."{col_name}"'
 
     # Handle different period formats
     # Pattern: last_N_days, last_N_weeks, last_N_months, last_N_years

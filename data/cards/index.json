@@ -1,18 +1,11 @@
 {
   "cards": [
     {
-      "id": "table:test_1_1",
+      "id": "table:test_1_1_merged",
       "card_type": "table",
-      "title": "Table: test_1_1",
-      "table": "test_1_1",
-      "path": "table_test_1_1.json"
-    },
-    {
-      "id": "table:test_2_1",
-      "card_type": "table",
-      "title": "Table: test_2_1",
-      "table": "test_2_1",
-      "path": "table_test_2_1.json"
+      "title": "Table: test_1_1_merged",
+      "table": "test_1_1_merged",
+      "path": "table_test_1_1_merged.json"
     },
     {
       "id": "table:test_3_1",
@@ -36,529 +29,438 @@
       "path": "table_test_5_1.json"
     },
     {
-      "id": "column:test_1_1.sha_id",
+      "id": "column:test_1_1_merged.a2_form_created_at",
       "card_type": "column",
-      "title": "Column: test_1_1.sha_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_sha_id.json"
+      "title": "Column: test_1_1_merged.a2_form_created_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_a2_form_created_at.json"
     },
     {
-      "id": "column:test_1_1.customer_id",
+      "id": "column:test_1_1_merged.a2_form_document_id",
       "card_type": "column",
-      "title": "Column: test_1_1.customer_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_customer_id.json"
+      "title": "Column: test_1_1_merged.a2_form_document_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_a2_form_document_id.json"
     },
     {
-      "id": "column:test_1_1.transaction_id",
+      "id": "column:test_1_1_merged.account_details_ifsc",
       "card_type": "column",
-      "title": "Column: test_1_1.transaction_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_transaction_id.json"
+      "title": "Column: test_1_1_merged.account_details_ifsc",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_account_details_ifsc.json"
     },
     {
-      "id": "column:test_1_1.payee_id",
+      "id": "column:test_1_1_merged.account_details_status",
       "card_type": "column",
-      "title": "Column: test_1_1.payee_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_payee_id.json"
+      "title": "Column: test_1_1_merged.account_details_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_account_details_status.json"
     },
     {
-      "id": "column:test_1_1.document_requirementlist_verification_agent_remarks",
+      "id": "column:test_1_1_merged.amount_collected",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirementlist_verification_agent_remarks",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirementlist_verification_agent_remarks.json"
+      "title": "Column: test_1_1_merged.amount_collected",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_amount_collected.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_verification_created_at",
+      "id": "column:test_1_1_merged.consent_consent",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_verification_created_at",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_verification_created_at.json"
+      "title": "Column: test_1_1_merged.consent_consent",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_consent_consent.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_verification_status",
+      "id": "column:test_1_1_merged.consent_created_at",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_verification_status",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_verification_status.json"
+      "title": "Column: test_1_1_merged.consent_created_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_consent_created_at.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_verification_updated_at",
+      "id": "column:test_1_1_merged.created_at",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_verification_updated_at",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_verification_updated_at.json"
+      "title": "Column: test_1_1_merged.created_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_created_at.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_verification_validated_by",
+      "id": "column:test_1_1_merged.customer_id",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_verification_validated_by",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_verification_validated_by.json"
+      "title": "Column: test_1_1_merged.customer_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_customer_id.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_requirement_id",
+      "id": "column:test_1_1_merged.deal_details_amount",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_requirement_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_requirement_id.json"
+      "title": "Column: test_1_1_merged.deal_details_amount",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_deal_details_amount.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_document_type",
+      "id": "column:test_1_1_merged.deal_details_customer_reference_no",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_document_type",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_document_type.json"
+      "title": "Column: test_1_1_merged.deal_details_customer_reference_no",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_deal_details_customer_reference_no.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_status",
+      "id": "column:test_1_1_merged.deal_details_deal_id",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_status",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_status.json"
+      "title": "Column: test_1_1_merged.deal_details_deal_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_deal_details_deal_id.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_description",
+      "id": "column:test_1_1_merged.deal_details_digi_ref_number",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_description",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_description.json"
+      "title": "Column: test_1_1_merged.deal_details_digi_ref_number",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_deal_details_digi_ref_number.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_is_required",
+      "id": "column:test_1_1_merged.deal_details_status",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_is_required",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_is_required.json"
+      "title": "Column: test_1_1_merged.deal_details_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_deal_details_status.json"
     },
     {
-      "id": "column:test_1_1.document_requirement_list_uploaded_by",
+      "id": "column:test_1_1_merged.doc_reject_count",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requirement_list_uploaded_by",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requirement_list_uploaded_by.json"
+      "title": "Column: test_1_1_merged.doc_reject_count",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_doc_reject_count.json"
     },
     {
-      "id": "column:test_1_1.document_requiremen_list_document_id",
+      "id": "column:test_1_1_merged.document_requiremen_list_document_id",
       "card_type": "column",
-      "title": "Column: test_1_1.document_requiremen_list_document_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_document_requiremen_list_document_id.json"
+      "title": "Column: test_1_1_merged.document_requiremen_list_document_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requiremen_list_document_id.json"
     },
     {
-      "id": "column:test_1_1.eta_destination_type",
+      "id": "column:test_1_1_merged.document_requirement_list_description",
       "card_type": "column",
-      "title": "Column: test_1_1.eta_destination_type",
-      "table": "test_1_1",
-      "path": "column_test_1_1_eta_destination_type.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_description",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_description.json"
     },
     {
-      "id": "column:test_1_1.eta_eta",
+      "id": "column:test_1_1_merged.document_requirement_list_document_type",
       "card_type": "column",
-      "title": "Column: test_1_1.eta_eta",
-      "table": "test_1_1",
-      "path": "column_test_1_1_eta_eta.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_document_type",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_document_type.json"
     },
     {
-      "id": "column:test_1_1.eta_status",
+      "id": "column:test_1_1_merged.document_requirement_list_is_required",
       "card_type": "column",
-      "title": "Column: test_1_1.eta_status",
-      "table": "test_1_1",
-      "path": "column_test_1_1_eta_status.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_is_required",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_is_required.json"
     },
     {
-      "id": "column:test_1_1.eta_title",
+      "id": "column:test_1_1_merged.document_requirement_list_requirement_id",
       "card_type": "column",
-      "title": "Column: test_1_1.eta_title",
-      "table": "test_1_1",
-      "path": "column_test_1_1_eta_title.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_requirement_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_requirement_id.json"
     },
     {
-      "id": "column:test_1_1.payment_amount",
+      "id": "column:test_1_1_merged.document_requirement_list_status",
       "card_type": "column",
-      "title": "Column: test_1_1.payment_amount",
-      "table": "test_1_1",
-      "path": "column_test_1_1_payment_amount.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_status.json"
     },
     {
-      "id": "column:test_1_1.payment_created_at",
+      "id": "column:test_1_1_merged.document_requirement_list_uploaded_by",
       "card_type": "column",
-      "title": "Column: test_1_1.payment_created_at",
-      "table": "test_1_1",
-      "path": "column_test_1_1_payment_created_at.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_uploaded_by",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_uploaded_by.json"
     },
     {
-      "id": "column:test_1_1.payment_status",
+      "id": "column:test_1_1_merged.document_requirement_list_verification_created_at",
       "card_type": "column",
-      "title": "Column: test_1_1.payment_status",
-      "table": "test_1_1",
-      "path": "column_test_1_1_payment_status.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_verification_created_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_verification_created_at.json"
     },
     {
-      "id": "column:test_1_1.payment_updated_at",
+      "id": "column:test_1_1_merged.document_requirement_list_verification_status",
       "card_type": "column",
-      "title": "Column: test_1_1.payment_updated_at",
-      "table": "test_1_1",
-      "path": "column_test_1_1_payment_updated_at.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_verification_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_verification_status.json"
     },
     {
-      "id": "column:test_1_1.payment_account_status",
+      "id": "column:test_1_1_merged.document_requirement_list_verification_updated_at",
       "card_type": "column",
-      "title": "Column: test_1_1.payment_account_status",
-      "table": "test_1_1",
-      "path": "column_test_1_1_payment_account_status.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_verification_updated_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_verification_updated_at.json"
     },
     {
-      "id": "column:test_1_1.quote_quote_id",
+      "id": "column:test_1_1_merged.document_requirement_list_verification_validated_by",
       "card_type": "column",
-      "title": "Column: test_1_1.quote_quote_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_quote_quote_id.json"
+      "title": "Column: test_1_1_merged.document_requirement_list_verification_validated_by",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirement_list_verification_validated_by.json"
     },
     {
-      "id": "column:test_1_1.quote_status",
+      "id": "column:test_1_1_merged.document_requirementlist_verification_agent_remarks",
       "card_type": "column",
-      "title": "Column: test_1_1.quote_status",
-      "table": "test_1_1",
-      "path": "column_test_1_1_quote_status.json"
+      "title": "Column: test_1_1_merged.document_requirementlist_verification_agent_remarks",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_document_requirementlist_verification_agent_remarks.json"
     },
     {
-      "id": "column:test_1_1.deal_details_amount",
+      "id": "column:test_1_1_merged.eta_destination_type",
       "card_type": "column",
-      "title": "Column: test_1_1.deal_details_amount",
-      "table": "test_1_1",
-      "path": "column_test_1_1_deal_details_amount.json"
+      "title": "Column: test_1_1_merged.eta_destination_type",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_eta_destination_type.json"
     },
     {
-      "id": "column:test_1_1.deal_details_deal_id",
+      "id": "column:test_1_1_merged.eta_eta",
       "card_type": "column",
-      "title": "Column: test_1_1.deal_details_deal_id",
-      "table": "test_1_1",
-      "path": "column_test_1_1_deal_details_deal_id.json"
+      "title": "Column: test_1_1_merged.eta_eta",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_eta_eta.json"
     },
     {
-      "id": "column:test_1_1.deal_details_status",
+      "id": "column:test_1_1_merged.eta_status",
       "card_type": "column",
-      "title": "Column: test_1_1.deal_details_status",
-      "table": "test_1_1",
-      "path": "column_test_1_1_deal_details_status.json"
+      "title": "Column: test_1_1_merged.eta_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_eta_status.json"
     },
     {
-      "id": "column:test_1_1.deal_details_customer_reference_no",
+      "id": "column:test_1_1_merged.eta_title",
       "card_type": "column",
-      "title": "Column: test_1_1.deal_details_customer_reference_no",
-      "table": "test_1_1",
-      "path": "column_test_1_1_deal_details_customer_reference_no.json"
+      "title": "Column: test_1_1_merged.eta_title",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_eta_title.json"
     },
     {
-      "id": "column:test_1_1.deal_details_digi_ref_number",
+      "id": "column:test_1_1_merged.invoice_document_created_at",
       "card_type": "column",
-      "title": "Column: test_1_1.deal_details_digi_ref_number",
-      "table": "test_1_1",
-      "path": "column_test_1_1_deal_details_digi_ref_number.json"
+      "title": "Column: test_1_1_merged.invoice_document_created_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_invoice_document_created_at.json"
     },
     {
-      "id": "column:test_1_1.updated_at",
+      "id": "column:test_1_1_merged.invoice_document_document_id",
       "card_type": "column",
-      "title": "Column: test_1_1.updated_at",
-      "table": "test_1_1",
-      "path": "column_test_1_1_updated_at.json"
+      "title": "Column: test_1_1_merged.invoice_document_document_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_invoice_document_document_id.json"
     },
     {
-      "id": "column:test_1_1.created_at",
+      "id": "column:test_1_1_merged.invoice_document_invoice_number",
       "card_type": "column",
-      "title": "Column: test_1_1.created_at",
-      "table": "test_1_1",
-      "path": "column_test_1_1_created_at.json"
+      "title": "Column: test_1_1_merged.invoice_document_invoice_number",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_invoice_document_invoice_number.json"
     },
     {
-      "id": "column:test_2_1.sha_id",
+      "id": "column:test_1_1_merged.invoice_document_uploaded_by",
       "card_type": "column",
-      "title": "Column: test_2_1.sha_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_sha_id.json"
+      "title": "Column: test_1_1_merged.invoice_document_uploaded_by",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_invoice_document_uploaded_by.json"
     },
     {
-      "id": "column:test_2_1.account_details_ifsc",
+      "id": "column:test_1_1_merged.mt103_created_at",
       "card_type": "column",
-      "title": "Column: test_2_1.account_details_ifsc",
-      "table": "test_2_1",
-      "path": "column_test_2_1_account_details_ifsc.json"
+      "title": "Column: test_1_1_merged.mt103_created_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_mt103_created_at.json"
     },
     {
-      "id": "column:test_2_1.account_details_status",
+      "id": "column:test_1_1_merged.mt103_document_id",
       "card_type": "column",
-      "title": "Column: test_2_1.account_details_status",
-      "table": "test_2_1",
-      "path": "column_test_2_1_account_details_status.json"
+      "title": "Column: test_1_1_merged.mt103_document_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_mt103_document_id.json"
     },
     {
-      "id": "column:test_2_1.mt103_created_at",
+      "id": "column:test_1_1_merged.mt103_uploaded_by",
       "card_type": "column",
-      "title": "Column: test_2_1.mt103_created_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_mt103_created_at.json"
+      "title": "Column: test_1_1_merged.mt103_uploaded_by",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_mt103_uploaded_by.json"
     },
     {
-      "id": "column:test_2_1.mt103_document_id",
+      "id": "column:test_1_1_merged.payee_id",
       "card_type": "column",
-      "title": "Column: test_2_1.mt103_document_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_mt103_document_id.json"
+      "title": "Column: test_1_1_merged.payee_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_payee_id.json"
     },
     {
-      "id": "column:test_2_1.mt103_uploaded_by",
+      "id": "column:test_1_1_merged.payment_account_status",
       "card_type": "column",
-      "title": "Column: test_2_1.mt103_uploaded_by",
-      "table": "test_2_1",
-      "path": "column_test_2_1_mt103_uploaded_by.json"
+      "title": "Column: test_1_1_merged.payment_account_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_payment_account_status.json"
     },
     {
-      "id": "column:test_2_1.a2_form_created_at",
+      "id": "column:test_1_1_merged.payment_amount",
       "card_type": "column",
-      "title": "Column: test_2_1.a2_form_created_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_a2_form_created_at.json"
+      "title": "Column: test_1_1_merged.payment_amount",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_payment_amount.json"
     },
     {
-      "id": "column:test_2_1.payment_amount",
+      "id": "column:test_1_1_merged.payment_created_at",
       "card_type": "column",
-      "title": "Column: test_2_1.payment_amount",
-      "table": "test_2_1",
-      "path": "column_test_2_1_payment_amount.json"
+      "title": "Column: test_1_1_merged.payment_created_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_payment_created_at.json"
     },
     {
-      "id": "column:test_2_1.payment_created_at",
+      "id": "column:test_1_1_merged.payment_status",
       "card_type": "column",
-      "title": "Column: test_2_1.payment_created_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_payment_created_at.json"
+      "title": "Column: test_1_1_merged.payment_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_payment_status.json"
     },
     {
-      "id": "column:test_2_1.payment_status",
+      "id": "column:test_1_1_merged.payment_updated_at",
       "card_type": "column",
-      "title": "Column: test_2_1.payment_status",
-      "table": "test_2_1",
-      "path": "column_test_2_1_payment_status.json"
+      "title": "Column: test_1_1_merged.payment_updated_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_payment_updated_at.json"
     },
     {
-      "id": "column:test_2_1.payment_updated_at",
+      "id": "column:test_1_1_merged.platform_name",
       "card_type": "column",
-      "title": "Column: test_2_1.payment_updated_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_payment_updated_at.json"
+      "title": "Column: test_1_1_merged.platform_name",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_platform_name.json"
     },
     {
-      "id": "column:test_2_1.payment_account_status",
+      "id": "column:test_1_1_merged.quote_quote_id",
       "card_type": "column",
-      "title": "Column: test_2_1.payment_account_status",
-      "table": "test_2_1",
-      "path": "column_test_2_1_payment_account_status.json"
+      "title": "Column: test_1_1_merged.quote_quote_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_quote_quote_id.json"
     },
     {
-      "id": "column:test_2_1.quote_quote_id",
+      "id": "column:test_1_1_merged.quote_status",
       "card_type": "column",
-      "title": "Column: test_2_1.quote_quote_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_quote_quote_id.json"
+      "title": "Column: test_1_1_merged.quote_status",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_quote_status.json"
     },
     {
-      "id": "column:test_2_1.quote_status",
+      "id": "column:test_1_1_merged.referral_code",
       "card_type": "column",
-      "title": "Column: test_2_1.quote_status",
-      "table": "test_2_1",
-      "path": "column_test_2_1_quote_status.json"
+      "title": "Column: test_1_1_merged.referral_code",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_referral_code.json"
     },
     {
-      "id": "column:test_2_1.a2_form_document_id",
+      "id": "column:test_1_1_merged.refund_agent_id",
       "card_type": "column",
-      "title": "Column: test_2_1.a2_form_document_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_a2_form_document_id.json"
+      "title": "Column: test_1_1_merged.refund_agent_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_refund_agent_id.json"
     },
     {
-      "id": "column:test_2_1.invoice_document_created_at",
+      "id": "column:test_1_1_merged.refund_refund_charges",
       "card_type": "column",
-      "title": "Column: test_2_1.invoice_document_created_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_invoice_document_created_at.json"
+      "title": "Column: test_1_1_merged.refund_refund_charges",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_refund_refund_charges.json"
     },
     {
-      "id": "column:test_2_1.invoice_document_document_id",
+      "id": "column:test_1_1_merged.refund_refund_id",
       "card_type": "column",
-      "title": "Column: test_2_1.invoice_document_document_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_invoice_document_document_id.json"
+      "title": "Column: test_1_1_merged.refund_refund_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_refund_refund_id.json"
     },
     {
-      "id": "column:test_2_1.invoice_document_uploaded_by",
+      "id": "column:test_1_1_merged.refund_refund_initiated_at",
       "card_type": "column",
-      "title": "Column: test_2_1.invoice_document_uploaded_by",
-      "table": "test_2_1",
-      "path": "column_test_2_1_invoice_document_uploaded_by.json"
+      "title": "Column: test_1_1_merged.refund_refund_initiated_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_refund_refund_initiated_at.json"
     },
     {
-      "id": "column:test_2_1.invoice_document_invoice_number",
+      "id": "column:test_1_1_merged.refund_refund_initiated_by",
       "card_type": "column",
-      "title": "Column: test_2_1.invoice_document_invoice_number",
-      "table": "test_2_1",
-      "path": "column_test_2_1_invoice_document_invoice_number.json"
+      "title": "Column: test_1_1_merged.refund_refund_initiated_by",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_refund_refund_initiated_by.json"
     },
     {
-      "id": "column:test_2_1.refund_refund_id",
+      "id": "column:test_1_1_merged.refund_refund_mode",
       "card_type": "column",
-      "title": "Column: test_2_1.refund_refund_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_refund_refund_id.json"
+      "title": "Column: test_1_1_merged.refund_refund_mode",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_refund_refund_mode.json"
     },
     {
-      "id": "column:test_2_1.refund_refund_initiated_by",
+      "id": "column:test_1_1_merged.sha_id",
       "card_type": "column",
-      "title": "Column: test_2_1.refund_refund_initiated_by",
-      "table": "test_2_1",
-      "path": "column_test_2_1_refund_refund_initiated_by.json"
+      "title": "Column: test_1_1_merged.sha_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_sha_id.json"
     },
     {
-      "id": "column:test_2_1.refund_refund_initiated_at",
+      "id": "column:test_1_1_merged.state",
       "card_type": "column",
-      "title": "Column: test_2_1.refund_refund_initiated_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_refund_refund_initiated_at.json"
+      "title": "Column: test_1_1_merged.state",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_state.json"
     },
     {
-      "id": "column:test_2_1.refund_refund_charges",
+      "id": "column:test_1_1_merged.transaction_id",
       "card_type": "column",
-      "title": "Column: test_2_1.refund_refund_charges",
-      "table": "test_2_1",
-      "path": "column_test_2_1_refund_refund_charges.json"
+      "title": "Column: test_1_1_merged.transaction_id",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_transaction_id.json"
     },
     {
-      "id": "column:test_2_1.refund_agent_id",
+      "id": "column:test_1_1_merged.txn_flow",
       "card_type": "column",
-      "title": "Column: test_2_1.refund_agent_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_refund_agent_id.json"
+      "title": "Column: test_1_1_merged.txn_flow",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_txn_flow.json"
     },
     {
-      "id": "column:test_2_1.refund_refund_mode",
+      "id": "column:test_1_1_merged.txn_lock_locked_by",
       "card_type": "column",
-      "title": "Column: test_2_1.refund_refund_mode",
-      "table": "test_2_1",
-      "path": "column_test_2_1_refund_refund_mode.json"
+      "title": "Column: test_1_1_merged.txn_lock_locked_by",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_txn_lock_locked_by.json"
     },
     {
-      "id": "column:test_2_1.customer_id",
+      "id": "column:test_1_1_merged.txnlock_is_locked",
       "card_type": "column",
-      "title": "Column: test_2_1.customer_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_customer_id.json"
+      "title": "Column: test_1_1_merged.txnlock_is_locked",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_txnlock_is_locked.json"
     },
     {
-      "id": "column:test_2_1.transaction_id",
+      "id": "column:test_1_1_merged.txnlock_locked_dt",
       "card_type": "column",
-      "title": "Column: test_2_1.transaction_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_transaction_id.json"
+      "title": "Column: test_1_1_merged.txnlock_locked_dt",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_txnlock_locked_dt.json"
     },
     {
-      "id": "column:test_2_1.payee_id",
+      "id": "column:test_1_1_merged.updated_at",
       "card_type": "column",
-      "title": "Column: test_2_1.payee_id",
-      "table": "test_2_1",
-      "path": "column_test_2_1_payee_id.json"
-    },
-    {
-      "id": "column:test_2_1.state",
-      "card_type": "column",
-      "title": "Column: test_2_1.state",
-      "table": "test_2_1",
-      "path": "column_test_2_1_state.json"
-    },
-    {
-      "id": "column:test_2_1.doc_reject_count",
-      "card_type": "column",
-      "title": "Column: test_2_1.doc_reject_count",
-      "table": "test_2_1",
-      "path": "column_test_2_1_doc_reject_count.json"
-    },
-    {
-      "id": "column:test_2_1.txn_flow",
-      "card_type": "column",
-      "title": "Column: test_2_1.txn_flow",
-      "table": "test_2_1",
-      "path": "column_test_2_1_txn_flow.json"
-    },
-    {
-      "id": "column:test_2_1.platform_name",
-      "card_type": "column",
-      "title": "Column: test_2_1.platform_name",
-      "table": "test_2_1",
-      "path": "column_test_2_1_platform_name.json"
-    },
-    {
-      "id": "column:test_2_1.referral_code",
-      "card_type": "column",
-      "title": "Column: test_2_1.referral_code",
-      "table": "test_2_1",
-      "path": "column_test_2_1_referral_code.json"
-    },
-    {
-      "id": "column:test_2_1.consent_consent",
-      "card_type": "column",
-      "title": "Column: test_2_1.consent_consent",
-      "table": "test_2_1",
-      "path": "column_test_2_1_consent_consent.json"
-    },
-    {
-      "id": "column:test_2_1.consent_created_at",
-      "card_type": "column",
-      "title": "Column: test_2_1.consent_created_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_consent_created_at.json"
-    },
-    {
-      "id": "column:test_2_1.amount_collected",
-      "card_type": "column",
-      "title": "Column: test_2_1.amount_collected",
-      "table": "test_2_1",
-      "path": "column_test_2_1_amount_collected.json"
-    },
-    {
-      "id": "column:test_2_1.txnlock_locked_dt",
-      "card_type": "column",
-      "title": "Column: test_2_1.txnlock_locked_dt",
-      "table": "test_2_1",
-      "path": "column_test_2_1_txnlock_locked_dt.json"
-    },
-    {
-      "id": "column:test_2_1.txnlock_is_locked",
-      "card_type": "column",
-      "title": "Column: test_2_1.txnlock_is_locked",
-      "table": "test_2_1",
-      "path": "column_test_2_1_txnlock_is_locked.json"
-    },
-    {
-      "id": "column:test_2_1.txn_lock_locked_by",
-      "card_type": "column",
-      "title": "Column: test_2_1.txn_lock_locked_by",
-      "table": "test_2_1",
-      "path": "column_test_2_1_txn_lock_locked_by.json"
-    },
-    {
-      "id": "column:test_2_1.updated_at",
-      "card_type": "column",
-      "title": "Column: test_2_1.updated_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_updated_at.json"
-    },
-    {
-      "id": "column:test_2_1.created_at",
-      "card_type": "column",
-      "title": "Column: test_2_1.created_at",
-      "table": "test_2_1",
-      "path": "column_test_2_1_created_at.json"
+      "title": "Column: test_1_1_merged.updated_at",
+      "table": "test_1_1_merged",
+      "path": "column_test_1_1_merged_updated_at.json"
     },
     {
       "id": "column:test_3_1.status",
@@ -932,164 +834,87 @@
       "path": "column_test_5_1_created_at.json"
     },
     {
-      "id": "relation:test_1_1.sha_id~test_2_1.sha_id",
+      "id": "relation:test_1_1_merged.customer_id~test_4_1.customer_id",
       "card_type": "relation",
-      "title": "Join: test_1_1.sha_id ~ test_2_1.sha_id",
-      "tables": "test_1_1,test_2_1",
-      "path": "relation_test_1_1_sha_id_test_2_1_sha_id.json"
+      "title": "Join: test_1_1_merged.customer_id ~ test_4_1.customer_id",
+      "tables": "test_1_1_merged,test_4_1",
+      "path": "relation_test_1_1_merged_customer_id_test_4_1_customer_id.json"
     },
     {
-      "id": "relation:test_1_1.customer_id~test_2_1.customer_id",
+      "id": "relation:test_1_1_merged.payee_id~test_4_1.payee_id",
       "card_type": "relation",
-      "title": "Join: test_1_1.customer_id ~ test_2_1.customer_id",
-      "tables": "test_1_1,test_2_1",
-      "path": "relation_test_1_1_customer_id_test_2_1_customer_id.json"
-    },
-    {
-      "id": "relation:test_1_1.customer_id~test_4_1.customer_id",
-      "card_type": "relation",
-      "title": "Join: test_1_1.customer_id ~ test_4_1.customer_id",
-      "tables": "test_1_1,test_4_1",
-      "path": "relation_test_1_1_customer_id_test_4_1_customer_id.json"
-    },
-    {
-      "id": "relation:test_2_1.customer_id~test_4_1.customer_id",
-      "card_type": "relation",
-      "title": "Join: test_2_1.customer_id ~ test_4_1.customer_id",
-      "tables": "test_2_1,test_4_1",
-      "path": "relation_test_2_1_customer_id_test_4_1_customer_id.json"
-    },
-    {
-      "id": "relation:test_1_1.transaction_id~test_2_1.transaction_id",
-      "card_type": "relation",
-      "title": "Join: test_1_1.transaction_id ~ test_2_1.transaction_id",
-      "tables": "test_1_1,test_2_1",
-      "path": "relation_test_1_1_transaction_id_test_2_1_transaction_id.json"
-    },
-    {
-      "id": "relation:test_1_1.payee_id~test_2_1.payee_id",
-      "card_type": "relation",
-      "title": "Join: test_1_1.payee_id ~ test_2_1.payee_id",
-      "tables": "test_1_1,test_2_1",
-      "path": "relation_test_1_1_payee_id_test_2_1_payee_id.json"
-    },
-    {
-      "id": "relation:test_1_1.payee_id~test_4_1.payee_id",
-      "card_type": "relation",
-      "title": "Join: test_1_1.payee_id ~ test_4_1.payee_id",
-      "tables": "test_1_1,test_4_1",
-      "path": "relation_test_1_1_payee_id_test_4_1_payee_id.json"
-    },
-    {
-      "id": "relation:test_2_1.payee_id~test_4_1.payee_id",
-      "card_type": "relation",
-      "title": "Join: test_2_1.payee_id ~ test_4_1.payee_id",
-      "tables": "test_2_1,test_4_1",
-      "path": "relation_test_2_1_payee_id_test_4_1_payee_id.json"
-    },
-    {
-      "id": "relation:test_1_1.quote_quote_id~test_2_1.quote_quote_id",
-      "card_type": "relation",
-      "title": "Join: test_1_1.quote_quote_id ~ test_2_1.quote_quote_id",
-      "tables": "test_1_1,test_2_1",
-      "path": "relation_test_1_1_quote_quote_id_test_2_1_quote_quote_id.json"
+      "title": "Join: test_1_1_merged.payee_id ~ test_4_1.payee_id",
+      "tables": "test_1_1_merged,test_4_1",
+      "path": "relation_test_1_1_merged_payee_id_test_4_1_payee_id.json"
     }
   ],
   "by_table": {
-    "test_1_1": [
-      "table:test_1_1",
-      "column:test_1_1.sha_id",
-      "column:test_1_1.customer_id",
-      "column:test_1_1.transaction_id",
-      "column:test_1_1.payee_id",
-      "column:test_1_1.document_requirementlist_verification_agent_remarks",
-      "column:test_1_1.document_requirement_list_verification_created_at",
-      "column:test_1_1.document_requirement_list_verification_status",
-      "column:test_1_1.document_requirement_list_verification_updated_at",
-      "column:test_1_1.document_requirement_list_verification_validated_by",
-      "column:test_1_1.document_requirement_list_requirement_id",
-      "column:test_1_1.document_requirement_list_document_type",
-      "column:test_1_1.document_requirement_list_status",
-      "column:test_1_1.document_requirement_list_description",
-      "column:test_1_1.document_requirement_list_is_required",
-      "column:test_1_1.document_requirement_list_uploaded_by",
-      "column:test_1_1.document_requiremen_list_document_id",
-      "column:test_1_1.eta_destination_type",
-      "column:test_1_1.eta_eta",
-      "column:test_1_1.eta_status",
-      "column:test_1_1.eta_title",
-      "column:test_1_1.payment_amount",
-      "column:test_1_1.payment_created_at",
-      "column:test_1_1.payment_status",
-      "column:test_1_1.payment_updated_at",
-      "column:test_1_1.payment_account_status",
-      "column:test_1_1.quote_quote_id",
-      "column:test_1_1.quote_status",
-      "column:test_1_1.deal_details_amount",
-      "column:test_1_1.deal_details_deal_id",
-      "column:test_1_1.deal_details_status",
-      "column:test_1_1.deal_details_customer_reference_no",
-      "column:test_1_1.deal_details_digi_ref_number",
-      "column:test_1_1.updated_at",
-      "column:test_1_1.created_at",
-      "relation:test_1_1.sha_id~test_2_1.sha_id",
-      "relation:test_1_1.customer_id~test_2_1.customer_id",
-      "relation:test_1_1.customer_id~test_4_1.customer_id",
-      "relation:test_1_1.transaction_id~test_2_1.transaction_id",
-      "relation:test_1_1.payee_id~test_2_1.payee_id",
-      "relation:test_1_1.payee_id~test_4_1.payee_id",
-      "relation:test_1_1.quote_quote_id~test_2_1.quote_quote_id"
-    ],
-    "test_2_1": [
-      "table:test_2_1",
-      "column:test_2_1.sha_id",
-      "column:test_2_1.account_details_ifsc",
-      "column:test_2_1.account_details_status",
-      "column:test_2_1.mt103_created_at",
-      "column:test_2_1.mt103_document_id",
-      "column:test_2_1.mt103_uploaded_by",
-      "column:test_2_1.a2_form_created_at",
-      "column:test_2_1.payment_amount",
-      "column:test_2_1.payment_created_at",
-      "column:test_2_1.payment_status",
-      "column:test_2_1.payment_updated_at",
-      "column:test_2_1.payment_account_status",
-      "column:test_2_1.quote_quote_id",
-      "column:test_2_1.quote_status",
-      "column:test_2_1.a2_form_document_id",
-      "column:test_2_1.invoice_document_created_at",
-      "column:test_2_1.invoice_document_document_id",
-      "column:test_2_1.invoice_document_uploaded_by",
-      "column:test_2_1.invoice_document_invoice_number",
-      "column:test_2_1.refund_refund_id",
-      "column:test_2_1.refund_refund_initiated_by",
-      "column:test_2_1.refund_refund_initiated_at",
-      "column:test_2_1.refund_refund_charges",
-      "column:test_2_1.refund_agent_id",
-      "column:test_2_1.refund_refund_mode",
-      "column:test_2_1.customer_id",
-      "column:test_2_1.transaction_id",
-      "column:test_2_1.payee_id",
-      "column:test_2_1.state",
-      "column:test_2_1.doc_reject_count",
-      "column:test_2_1.txn_flow",
-      "column:test_2_1.platform_name",
-      "column:test_2_1.referral_code",
-      "column:test_2_1.consent_consent",
-      "column:test_2_1.consent_created_at",
-      "column:test_2_1.amount_collected",
-      "column:test_2_1.txnlock_locked_dt",
-      "column:test_2_1.txnlock_is_locked",
-      "column:test_2_1.txn_lock_locked_by",
-      "column:test_2_1.updated_at",
-      "column:test_2_1.created_at",
-      "relation:test_1_1.sha_id~test_2_1.sha_id",
-      "relation:test_1_1.customer_id~test_2_1.customer_id",
-      "relation:test_2_1.customer_id~test_4_1.customer_id",
-      "relation:test_1_1.transaction_id~test_2_1.transaction_id",
-      "relation:test_1_1.payee_id~test_2_1.payee_id",
-      "relation:test_2_1.payee_id~test_4_1.payee_id",
-      "relation:test_1_1.quote_quote_id~test_2_1.quote_quote_id"
+    "test_1_1_merged": [
+      "table:test_1_1_merged",
+      "column:test_1_1_merged.a2_form_created_at",
+      "column:test_1_1_merged.a2_form_document_id",
+      "column:test_1_1_merged.account_details_ifsc",
+      "column:test_1_1_merged.account_details_status",
+      "column:test_1_1_merged.amount_collected",
+      "column:test_1_1_merged.consent_consent",
+      "column:test_1_1_merged.consent_created_at",
+      "column:test_1_1_merged.created_at",
+      "column:test_1_1_merged.customer_id",
+      "column:test_1_1_merged.deal_details_amount",
+      "column:test_1_1_merged.deal_details_customer_reference_no",
+      "column:test_1_1_merged.deal_details_deal_id",
+      "column:test_1_1_merged.deal_details_digi_ref_number",
+      "column:test_1_1_merged.deal_details_status",
+      "column:test_1_1_merged.doc_reject_count",
+      "column:test_1_1_merged.document_requiremen_list_document_id",
+      "column:test_1_1_merged.document_requirement_list_description",
+      "column:test_1_1_merged.document_requirement_list_document_type",
+      "column:test_1_1_merged.document_requirement_list_is_required",
+      "column:test_1_1_merged.document_requirement_list_requirement_id",
+      "column:test_1_1_merged.document_requirement_list_status",
+      "column:test_1_1_merged.document_requirement_list_uploaded_by",
+      "column:test_1_1_merged.document_requirement_list_verification_created_at",
+      "column:test_1_1_merged.document_requirement_list_verification_status",
+      "column:test_1_1_merged.document_requirement_list_verification_updated_at",
+      "column:test_1_1_merged.document_requirement_list_verification_validated_by",
+      "column:test_1_1_merged.document_requirementlist_verification_agent_remarks",
+      "column:test_1_1_merged.eta_destination_type",
+      "column:test_1_1_merged.eta_eta",
+      "column:test_1_1_merged.eta_status",
+      "column:test_1_1_merged.eta_title",
+      "column:test_1_1_merged.invoice_document_created_at",
+      "column:test_1_1_merged.invoice_document_document_id",
+      "column:test_1_1_merged.invoice_document_invoice_number",
+      "column:test_1_1_merged.invoice_document_uploaded_by",
+      "column:test_1_1_merged.mt103_created_at",
+      "column:test_1_1_merged.mt103_document_id",
+      "column:test_1_1_merged.mt103_uploaded_by",
+      "column:test_1_1_merged.payee_id",
+      "column:test_1_1_merged.payment_account_status",
+      "column:test_1_1_merged.payment_amount",
+      "column:test_1_1_merged.payment_created_at",
+      "column:test_1_1_merged.payment_status",
+      "column:test_1_1_merged.payment_updated_at",
+      "column:test_1_1_merged.platform_name",
+      "column:test_1_1_merged.quote_quote_id",
+      "column:test_1_1_merged.quote_status",
+      "column:test_1_1_merged.referral_code",
+      "column:test_1_1_merged.refund_agent_id",
+      "column:test_1_1_merged.refund_refund_charges",
+      "column:test_1_1_merged.refund_refund_id",
+      "column:test_1_1_merged.refund_refund_initiated_at",
+      "column:test_1_1_merged.refund_refund_initiated_by",
+      "column:test_1_1_merged.refund_refund_mode",
+      "column:test_1_1_merged.sha_id",
+      "column:test_1_1_merged.state",
+      "column:test_1_1_merged.transaction_id",
+      "column:test_1_1_merged.txn_flow",
+      "column:test_1_1_merged.txn_lock_locked_by",
+      "column:test_1_1_merged.txnlock_is_locked",
+      "column:test_1_1_merged.txnlock_locked_dt",
+      "column:test_1_1_merged.updated_at",
+      "relation:test_1_1_merged.customer_id~test_4_1.customer_id",
+      "relation:test_1_1_merged.payee_id~test_4_1.payee_id"
     ],
     "test_3_1": [
       "table:test_3_1",
@@ -1132,10 +957,8 @@
       "column:test_4_1.status",
       "column:test_4_1.updated_at",
       "column:test_4_1.created_at",
-      "relation:test_1_1.customer_id~test_4_1.customer_id",
-      "relation:test_2_1.customer_id~test_4_1.customer_id",
-      "relation:test_1_1.payee_id~test_4_1.payee_id",
-      "relation:test_2_1.payee_id~test_4_1.payee_id"
+      "relation:test_1_1_merged.customer_id~test_4_1.customer_id",
+      "relation:test_1_1_merged.payee_id~test_4_1.payee_id"
     ],
     "test_5_1": [
       "table:test_5_1",

@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>HaikuGraph Project Documentation</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.5.1/github-markdown.min.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">HaikuGraph Project Documentation</h1>
+</header>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#haikugraph-project-documentation"
+id="toc-haikugraph-project-documentation">HaikuGraph Project
+Documentation</a>
+<ul>
+<li><a href="#table-of-contents" id="toc-table-of-contents">Table of
+Contents</a></li>
+<li><a href="#project-overview" id="toc-project-overview">Project
+Overview</a></li>
+<li><a href="#architecture" id="toc-architecture">Architecture</a></li>
+<li><a href="#implementation-task-list"
+id="toc-implementation-task-list">Implementation Task List</a></li>
+<li><a href="#system-flow-diagrams" id="toc-system-flow-diagrams">System
+Flow Diagrams</a></li>
+<li><a href="#what-we-showcase" id="toc-what-we-showcase">What We
+Showcase</a></li>
+<li><a href="#solution-differentiation"
+id="toc-solution-differentiation">Solution Differentiation</a></li>
+<li><a href="#pros-and-cons-analysis"
+id="toc-pros-and-cons-analysis">Pros and Cons Analysis</a></li>
+<li><a href="#future-roadmap" id="toc-future-roadmap">Future
+Roadmap</a></li>
+<li><a href="#conclusion" id="toc-conclusion">Conclusion</a></li>
+<li><a href="#getting-started" id="toc-getting-started">Getting
+Started</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1 id="haikugraph-project-documentation">HaikuGraph Project
+Documentation</h1>
+<p><strong>Natural Language Data Assistant with Interactive
+Visualizations</strong></p>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol type="1">
+<li><a href="#project-overview">Project Overview</a></li>
+<li><a href="#architecture">Architecture</a></li>
+<li><a href="#implementation-task-list">Implementation Task
+List</a></li>
+<li><a href="#system-flow-diagrams">System Flow Diagrams</a></li>
+<li><a href="#what-we-showcase">What We Showcase</a></li>
+<li><a href="#solution-differentiation">Solution
+Differentiation</a></li>
+<li><a href="#pros-and-cons-analysis">Pros and Cons Analysis</a></li>
+</ol>
+<hr />
+<h2 id="project-overview">Project Overview</h2>
+<p>HaikuGraph is a natural language data assistant that allows users to
+query their data using plain English. The system translates questions
+into SQL, executes them against a DuckDB database, and presents results
+through interactive visualizations with full transparency into the query
+planning and execution process.</p>
+<h3 id="key-features">Key Features</h3>
+<ul>
+<li>🗣️ <strong>Natural Language Queries</strong>: Ask questions in plain
+English</li>
+<li>📊 <strong>Rich Visualizations</strong>: Auto-generated charts,
+tables, and number displays</li>
+<li>🔍 <strong>Full Transparency</strong>: View intent classification,
+query plans, and generated SQL</li>
+<li>📈 <strong>Smart Comparisons</strong>: Automatic period-over-period
+analysis</li>
+<li>🎨 <strong>Interactive UI</strong>: Filter, sort, paginate, zoom,
+and export data</li>
+<li>🧪 <strong>Data Quality Insights</strong>: Surface and visualize
+NULL/missing data</li>
+</ul>
+<hr />
+<h2 id="architecture">Architecture</h2>
+<h3 id="high-level-system-architecture">High-Level System
+Architecture</h3>
+<pre><code>┌─────────────────────────────────────────────────────────────┐
+│                        FRONTEND                             │
+│                   React + Vite + Recharts                   │
+│                   (http://localhost:5173)                   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  User Interface                                      │  │
+│  │  • Question input with examples                      │  │
+│  │  • Answer display with metadata                      │  │
+│  │  • Comparison cards (period-over-period)             │  │
+│  │  • Interactive visualizations (charts/tables)        │  │
+│  │  • Explainability tabs (Intent/Plan/SQL/Raw Data)    │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                           ↕ HTTP REST API
+┌─────────────────────────────────────────────────────────────┐
+│                        BACKEND                              │
+│                    FastAPI + Python                         │
+│                   (http://localhost:8000)                   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  API Layer (FastAPI)                                 │  │
+│  │  • POST /ask - Main query endpoint                   │  │
+│  │  • GET /health - Health check                        │  │
+│  │  • CORS middleware for dev                           │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                           ↓                                 │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │  Processing Pipeline                                 │  │
+│  │  1. Intent Classification (LLM + Rules)              │  │
+│  │  2. Query Planning (Ollama)                          │  │
+│  │  3. SQL Generation &amp; Execution (DuckDB)              │  │
+│  │  4. Comparison Extraction                            │  │
+│  │  5. Narration (Ollama)                               │  │
+│  │  6. Visualization Hints                              │  │
+│  └──────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     DATA LAYER                              │
+│                                                             │
+│  ┌──────────────┐     ┌──────────────┐     ┌────────────┐ │
+│  │   DuckDB     │ ←── │ Excel Files  │ ←── │  CSV Data  │ │
+│  │  (In-Memory) │     │ (.xlsx/.xls) │     │            │ │
+│  │              │     └──────────────┘     └────────────┘ │
+│  │ • test_1_1   │                                          │
+│  │ • test_2_1   │     ┌──────────────┐                    │
+│  │ • test_3_1   │ ←── │ Profile JSON │                    │
+│  │ • test_4_1   │     │ (Metadata)   │                    │
+│  │ • test_5_1   │     └──────────────┘                    │
+│  └──────────────┘                                          │
+│                       ┌──────────────┐                     │
+│                       │ Data Cards   │                     │
+│                       │ (Semantics)  │                     │
+│                       └──────────────┘                     │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+<h3 id="technology-stack">Technology Stack</h3>
+<h4 id="backend">Backend</h4>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Web Framework</td>
+<td>FastAPI</td>
+<td>Modern, async Python API</td>
+</tr>
+<tr>
+<td>Server</td>
+<td>Uvicorn</td>
+<td>ASGI server with hot reload</td>
+</tr>
+<tr>
+<td>Database</td>
+<td>DuckDB</td>
+<td>In-process analytical DB</td>
+</tr>
+<tr>
+<td>LLM Runtime</td>
+<td>Ollama</td>
+<td>Local LLM for planning/narration</td>
+</tr>
+<tr>
+<td>Data Validation</td>
+<td>Pydantic</td>
+<td>Request/response schemas</td>
+</tr>
+</tbody>
+</table>
+<h4 id="frontend">Frontend</h4>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Technology</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UI Framework</td>
+<td>React 18</td>
+<td>Component-based UI</td>
+</tr>
+<tr>
+<td>Build Tool</td>
+<td>Vite</td>
+<td>Fast dev server &amp; bundler</td>
+</tr>
+<tr>
+<td>Charts</td>
+<td>Recharts</td>
+<td>Composable chart library</td>
+</tr>
+<tr>
+<td>Icons</td>
+<td>Lucide React</td>
+<td>Icon components</td>
+</tr>
+<tr>
+<td>State</td>
+<td>React Hooks</td>
+<td>Local state management</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="implementation-task-list">Implementation Task List</h2>
+<h3 id="phase-1-foundation-data-ingestion">Phase 1: Foundation &amp;
+Data Ingestion</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Data Ingestion
+System</strong></label>
+<ul>
+<li>Excel/CSV file reader with auto-fallback to string mode</li>
+<li>DuckDB table creation with sanitized naming</li>
+<li>Automatic type inference with error recovery</li>
+<li>Profile generation with statistics</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Schema
+Analysis</strong></label>
+<ul>
+<li>Column type detection (numeric, date, string, identifier)</li>
+<li>Null percentage and distinct count analysis</li>
+<li>Semantic hints (timestamp, money, status columns)</li>
+<li>Table grain and primary key detection</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Data Cards
+Generation</strong></label>
+<ul>
+<li>Table cards with suggested metrics</li>
+<li>Column cards with semantic annotations</li>
+<li>Relation cards for potential joins</li>
+<li>Index creation for fast lookup</li>
+</ul></li>
+</ul>
+<h3 id="phase-2-query-processing-pipeline">Phase 2: Query Processing
+Pipeline</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Intent
+Classification</strong></label>
+<ul>
+<li>Rule-based classifier for common patterns</li>
+<li>LLM fallback for ambiguous cases</li>
+<li>Confidence scoring and rationale</li>
+<li>Comparison detection</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Query
+Planning</strong></label>
+<ul>
+<li>LLM-based plan generation (Ollama)</li>
+<li>Subquestion decomposition</li>
+<li>Constraint extraction (time, filters)</li>
+<li>Table and column selection</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>SQL
+Generation</strong></label>
+<ul>
+<li>Dynamic SQL builder from plan</li>
+<li>Aggregation support (SUM, COUNT, AVG, MIN, MAX)</li>
+<li>GROUP BY with time bucketing</li>
+<li>JOIN path resolution</li>
+<li>Type casting (VARCHAR→TIMESTAMP, VARCHAR→DOUBLE)</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Execution &amp;
+Results</strong></label>
+<ul>
+<li>DuckDB query execution</li>
+<li>Error handling and retries</li>
+<li>Result formatting with preview rows</li>
+<li>Metadata collection (timing, row counts)</li>
+</ul></li>
+</ul>
+<h3 id="phase-3-advanced-features">Phase 3: Advanced Features</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Comparison
+Extraction</strong></label>
+<ul>
+<li>Period-over-period detection</li>
+<li>Delta and percentage calculation</li>
+<li>Normalized comparison structure</li>
+<li>Direction indicators (up/down/flat)</li>
+</ul></li>
+<li><label><input type="checkbox"
+checked="" /><strong>Narration</strong></label>
+<ul>
+<li>LLM-based result explanation</li>
+<li>Context-aware language generation</li>
+<li>Comparison-aware narratives</li>
+<li>Human-readable formatting</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Visualization
+Hints</strong></label>
+<ul>
+<li>Shape analysis (rows, columns, types)</li>
+<li>Auto-detection of chart types</li>
+<li>Axis and units inference</li>
+<li>Display hint generation (number/bar/line/table)</li>
+</ul></li>
+</ul>
+<h3 id="phase-4-web-ui-development">Phase 4: Web UI Development</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Basic UI
+Components</strong></label>
+<ul>
+<li>Question input form</li>
+<li>Demo question buttons</li>
+<li>Answer display card</li>
+<li>Loading states and error handling</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Visualization
+Components</strong></label>
+<ul>
+<li>Number display for single values</li>
+<li>Bar charts for grouped metrics</li>
+<li>Line charts for time series</li>
+<li>Data tables for multi-column results</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Comparison
+UI</strong></label>
+<ul>
+<li>Side-by-side value display</li>
+<li>Delta and percentage badges</li>
+<li>Direction indicators with icons</li>
+<li>Color-coded changes</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Explainability
+Interface</strong></label>
+<ul>
+<li>Collapsible details section</li>
+<li>Tabbed navigation (Intent/Plan/SQL/Metadata)</li>
+<li>JSON pretty-printing</li>
+<li>Execution timing display</li>
+</ul></li>
+</ul>
+<h3 id="phase-5-interactive-enhancements">Phase 5: Interactive
+Enhancements</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Interactive
+Charts</strong></label>
+<ul>
+<li>Brush component for zoom/pan</li>
+<li>Clickable legend to toggle series</li>
+<li>Custom tooltips with formatting</li>
+<li>Export to SVG functionality</li>
+<li>NULL value handling with “(No data)” label</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Advanced
+Tables</strong></label>
+<ul>
+<li>Pagination (10/25/50/100 rows)</li>
+<li>Column sorting (asc/desc)</li>
+<li>Column filtering with search</li>
+<li>Export to CSV</li>
+<li>First/Prev/Next/Last navigation</li>
+<li>Row count display</li>
+<li>NULL value highlighting</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Raw Data
+Tab</strong></label>
+<ul>
+<li>Complete preview_rows JSON display</li>
+<li>Status and column metadata</li>
+<li>Row count badges</li>
+<li>Debugging transparency</li>
+</ul></li>
+</ul>
+<h3 id="phase-6-data-quality-testing">Phase 6: Data Quality &amp;
+Testing</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Data Quality
+Detection</strong></label>
+<ul>
+<li>NULL percentage analysis</li>
+<li>Timestamp validation tests</li>
+<li>VARCHAR→TIMESTAMP casting</li>
+<li>NULLS LAST ordering in GROUP BY</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Comprehensive
+Test Suite</strong></label>
+<ul>
+<li>Timestamp aggregation tests (MIN/MAX with NULLs)</li>
+<li>Time grouping tests (month bucketing)</li>
+<li>Data quality validation tests</li>
+<li>Aggregation pattern tests</li>
+<li>9 tests covering edge cases</li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Frontend NULL
+Handling</strong></label>
+<ul>
+<li>Display “(No data)” for NULL values</li>
+<li>Gray italic styling for missing data</li>
+<li>Chart transformation to label NULLs</li>
+<li>Table cell special rendering</li>
+</ul></li>
+</ul>
+<h3 id="phase-7-developer-experience">Phase 7: Developer Experience</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Unified Startup
+Script</strong></label>
+<ul>
+<li>Single <code>run.sh</code> to start both servers</li>
+<li>Automatic dependency installation</li>
+<li>Process cleanup on exit</li>
+<li>Log file redirection</li>
+</ul></li>
+<li><label><input type="checkbox"
+checked="" /><strong>Documentation</strong></label>
+<ul>
+<li>Architecture diagrams</li>
+<li>API documentation</li>
+<li>Component breakdown</li>
+<li>Usage examples</li>
+<li>Data quality insights report</li>
+</ul></li>
+</ul>
+<hr />
+<h2 id="system-flow-diagrams">System Flow Diagrams</h2>
+<h3 id="end-to-end-query-flow">1. End-to-End Query Flow</h3>
+<pre><code>┌──────────────┐
+│     USER     │
+│ &quot;oldest      │
+│ transaction?&quot;│
+└──────┬───────┘
+       │
+       ↓ HTTP POST /ask
+┌──────────────────────────────────────────────────────────┐
+│                    BACKEND PIPELINE                      │
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│  Step 1: INTENT CLASSIFICATION                          │
+│  ┌────────────────────────────────────────────────┐    │
+│  │ Input: &quot;oldest transaction?&quot;                   │    │
+│  │ Classifier: Rule-based + LLM                    │    │
+│  │ Output: {                                       │    │
+│  │   &quot;type&quot;: &quot;metric&quot;,                             │    │
+│  │   &quot;confidence&quot;: 0.85,                           │    │
+│  │   &quot;rationale&quot;: &quot;MIN aggregation detected&quot;       │    │
+│  │ }                                               │    │
+│  └────────────────────────────────────────────────┘    │
+│                       ↓                                  │
+│  Step 2: PLAN GENERATION                                │
+│  ┌────────────────────────────────────────────────┐    │
+│  │ Input: Question + Schema + Intent              │    │
+│  │ Planner: Ollama LLM                             │    │
+│  │ Output: {                                       │    │
+│  │   &quot;subquestions&quot;: [{                            │    │
+│  │     &quot;tables&quot;: [&quot;test_2_1&quot;],                     │    │
+│  │     &quot;columns&quot;: [&quot;payment_created_at&quot;],          │    │
+│  │     &quot;aggregations&quot;: [{                          │    │
+│  │       &quot;agg&quot;: &quot;MIN&quot;,                              │    │
+│  │       &quot;col&quot;: &quot;payment_created_at&quot;                │    │
+│  │     }]                                           │    │
+│  │   }]                                             │    │
+│  │ }                                               │    │
+│  └────────────────────────────────────────────────┘    │
+│                       ↓                                  │
+│  Step 3: SQL GENERATION &amp; EXECUTION                     │
+│  ┌────────────────────────────────────────────────┐    │
+│  │ Generated SQL:                                  │    │
+│  │ SELECT MIN(TRY_CAST(&quot;test_2_1&quot;.&quot;payment_       │    │
+│  │   created_at&quot; AS TIMESTAMP)) AS                 │    │
+│  │   &quot;min_payment_created_at&quot;                      │    │
+│  │ FROM &quot;test_2_1&quot;                                 │    │
+│  │                                                  │    │
+│  │ DuckDB Execution:                               │    │
+│  │ Result: [(&#39;2025-05-22 22:30:57.548+00:00&#39;,)]   │    │
+│  └────────────────────────────────────────────────┘    │
+│                       ↓                                  │
+│  Step 4: NARRATION                                      │
+│  ┌────────────────────────────────────────────────┐    │
+│  │ Input: Question + Intent + Results              │    │
+│  │ Narrator: Ollama LLM                            │    │
+│  │ Output: &quot;The oldest transaction was created     │    │
+│  │          on May 22, 2025 at 22:30:57 UTC.&quot;     │    │
+│  └────────────────────────────────────────────────┘    │
+│                       ↓                                  │
+│  Step 5: VISUALIZATION HINTS                            │
+│  ┌────────────────────────────────────────────────┐    │
+│  │ Analysis: 1 row, 1 column, timestamp type       │    │
+│  │ Hint: {                                         │    │
+│  │   &quot;display_hint&quot;: &quot;number&quot;,                     │    │
+│  │   &quot;units&quot;: null                                 │    │
+│  │ }                                               │    │
+│  └────────────────────────────────────────────────┘    │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+       ↓ JSON Response
+┌──────────────────────────────────────────────────────────┐
+│                     FRONTEND                             │
+├──────────────────────────────────────────────────────────┤
+│  Render Components:                                      │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Answer Card                                     │   │
+│  │ &quot;The oldest transaction was created on...&quot;      │   │
+│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Visualization (Number Display)                  │   │
+│  │ 2025-05-22 22:30:57.548000+00:00                │   │
+│  │ min_payment_created_at                          │   │
+│  └─────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ View Details (Collapsed)                        │   │
+│  │ • Intent: metric (85% confidence)               │   │
+│  │ • Plan: 1 subquestion, 1 table                  │   │
+│  │ • SQL: SELECT MIN(TRY_CAST...                   │   │
+│  │ • Raw Data: [{&quot;min_payment_created_at&quot;: ...}]   │   │
+│  └─────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────┘</code></pre>
+<h3 id="data-quality-flow">2. Data Quality Flow</h3>
+<pre><code>┌─────────────────────────────────────────────────────┐
+│             DATA QUALITY DETECTION                  │
+└─────────────────────────────────────────────────────┘
+
+Step 1: IDENTIFY NULL DATA
+┌────────────────────────────────────────────┐
+│ SQL: SELECT COUNT(*),                      │
+│      COUNT(payment_created_at),            │
+│      COUNT(*) - COUNT(payment_created_at)  │
+│      FROM test_2_1                         │
+│                                            │
+│ Result:                                    │
+│ Total: 76,583                              │
+│ Non-NULL: 1,715                            │
+│ NULL: 74,868                               │
+│ NULL %: 97.8%                              │
+└────────────────────────────────────────────┘
+                 ↓
+
+Step 2: HANDLE IN SQL GENERATION
+┌────────────────────────────────────────────┐
+│ • Use TRY_CAST for VARCHAR→TIMESTAMP       │
+│ • Add NULLS LAST to ORDER BY               │
+│ • Keep NULL in GROUP BY (separate bucket)  │
+│                                            │
+│ Example:                                   │
+│ SELECT                                     │
+│   date_trunc(&#39;month&#39;,                      │
+│     TRY_CAST(payment_created_at           │
+│       AS TIMESTAMP)) as month,            │
+│   COUNT(*) as count                       │
+│ FROM test_2_1                              │
+│ GROUP BY month                             │
+│ ORDER BY month NULLS LAST                  │
+└────────────────────────────────────────────┘
+                 ↓
+
+Step 3: VISUALIZE WITH NULL BUCKET
+┌────────────────────────────────────────────┐
+│ Chart Data:                                │
+│ • Month 1: 1,152 records                   │
+│ • Month 5: 12 records                      │
+│ • Month 9: 109 records                     │
+│ • ...                                      │
+│ • (No data): 74,868 records ← Majority!    │
+│                                            │
+│ Frontend Transformation:                   │
+│ • NULL → &quot;(No data)&quot;                       │
+│ • Gray italic styling                      │
+│ • Separate bar in chart                    │
+└────────────────────────────────────────────┘
+                 ↓
+
+Step 4: SURFACE IN UI
+┌────────────────────────────────────────────┐
+│ ┌────────────────────────────────────┐    │
+│ │ Bar Chart: Transactions by Month   │    │
+│ │                                    │    │
+│ │  ████ 1,152 (Month 1)              │    │
+│ │  ██ 348 (Month 12)                 │    │
+│ │  █ 109 (Month 9)                   │    │
+│ │  ████████████ 74,868 (No data) ⚠️  │    │
+│ └────────────────────────────────────┘    │
+│                                            │
+│ Raw Data Tab Shows:                        │
+│ • &quot;month&quot;: null                            │
+│ • &quot;count&quot;: 74868                           │
+└────────────────────────────────────────────┘</code></pre>
+<h3 id="interactive-visualization-flow">3. Interactive Visualization
+Flow</h3>
+<pre><code>┌────────────────────────────────────────────────┐
+│          INTERACTIVE TABLE FEATURES            │
+└────────────────────────────────────────────────┘
+
+Initial Load (100 rows from DB)
+        ↓
+┌────────────────────────────────────────────┐
+│ useTableControls Hook                      │
+│ • currentPage = 1                          │
+│ • pageSize = 10                            │
+│ • sortColumn = null                        │
+│ • sortDirection = &#39;asc&#39;                    │
+│ • filters = {}                             │
+└────────────────────────────────────────────┘
+        ↓
+USER INTERACTIONS:
+        ↓
+┌────────────────────────────────────────────┐
+│ 1. FILTER: User types &quot;Alice&quot; in customer │
+│    → filters = { customer: &quot;Alice&quot; }       │
+│    → filteredData = data.filter(...)       │
+│    → currentPage reset to 1                │
+└────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────┐
+│ 2. SORT: User clicks &quot;amount&quot; header      │
+│    → sortColumn = &quot;amount&quot;                 │
+│    → sortDirection = &quot;asc&quot;                 │
+│    → sortedData = [...filteredData].sort()│
+└────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────┐
+│ 3. PAGINATE: Show 10 rows at a time       │
+│    → start = (currentPage - 1) * pageSize  │
+│    → end = start + pageSize                │
+│    → paginatedData = sortedData.slice(...) │
+└────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────┐
+│ 4. RENDER TABLE                            │
+│ ┌──────────────────────────────────────┐  │
+│ │ customer ▲  amount  date             │  │
+│ │ [Search..]  [Search] [Search]        │  │
+│ │ ─────────────────────────────────────│  │
+│ │ Alice       $1,000   2025-01-15      │  │
+│ │ Alice       $2,000   2025-02-20      │  │
+│ │ ...         ...      ...             │  │
+│ │ ─────────────────────────────────────│  │
+│ │ Showing 1-10 of 15    [Export CSV]   │  │
+│ │ [&lt;&lt;] [&lt;] Page 1 of 2 [&gt;] [&gt;&gt;]        │  │
+│ └──────────────────────────────────────┘  │
+└────────────────────────────────────────────┘
+        ↓
+┌────────────────────────────────────────────┐
+│ 5. EXPORT: User clicks &quot;Export CSV&quot;       │
+│    → exportToCSV(allFilteredData, ...)    │
+│    → Browser downloads filtered_data.csv   │
+└────────────────────────────────────────────┘</code></pre>
+<hr />
+<h2 id="what-we-showcase">What We Showcase</h2>
+<h3 id="natural-language-to-sql-translation">1. <strong>Natural Language
+to SQL Translation</strong></h3>
+<ul>
+<li><strong>Challenge</strong>: Bridge the gap between human language
+and database queries</li>
+<li><strong>Our Approach</strong>: Multi-stage pipeline with intent
+classification, semantic planning, and validated SQL generation</li>
+<li><strong>Result</strong>: Users can ask “Show me revenue by customer”
+without knowing SQL syntax</li>
+</ul>
+<h3 id="full-transparency-explainability">2. <strong>Full Transparency
+&amp; Explainability</strong></h3>
+<ul>
+<li><strong>Challenge</strong>: Black-box AI systems lack trust</li>
+<li><strong>Our Approach</strong>: Every query shows its reasoning:
+<ul>
+<li>Intent classification with confidence scores</li>
+<li>Complete query plan with subquestions</li>
+<li>Generated SQL visible to users</li>
+<li>Raw data tab for verification</li>
+</ul></li>
+<li><strong>Result</strong>: Users understand how answers were derived
+and can debug issues</li>
+</ul>
+<h3 id="smart-data-quality-handling">3. <strong>Smart Data Quality
+Handling</strong></h3>
+<ul>
+<li><strong>Challenge</strong>: Real-world data is messy (97.8% NULL
+timestamps in our case!)</li>
+<li><strong>Our Approach</strong>:
+<ul>
+<li>Don’t filter out—show NULLs as “(No data)” buckets</li>
+<li>Surface data quality issues visually</li>
+<li>Add tests to detect and report problems</li>
+</ul></li>
+<li><strong>Result</strong>: Users see the true state of their data and
+can take action</li>
+</ul>
+<h3 id="interactive-visualizations">4. <strong>Interactive
+Visualizations</strong></h3>
+<ul>
+<li><strong>Challenge</strong>: Static charts don’t allow
+exploration</li>
+<li><strong>Our Approach</strong>: Full interactivity:
+<ul>
+<li>Zoom/pan on charts</li>
+<li>Sort/filter/paginate tables</li>
+<li>Export data in multiple formats</li>
+<li>Toggle series visibility</li>
+</ul></li>
+<li><strong>Result</strong>: Users can explore data beyond the initial
+answer</li>
+</ul>
+<h3 id="type-safety-error-recovery">5. <strong>Type Safety &amp; Error
+Recovery</strong></h3>
+<ul>
+<li><strong>Challenge</strong>: Data types in Excel/CSV are unreliable
+(VARCHAR timestamps)</li>
+<li><strong>Our Approach</strong>:
+<ul>
+<li>Intelligent type casting (TRY_CAST)</li>
+<li>Auto-fallback to string mode on ingestion errors</li>
+<li>Semantic column detection (timestamps, currency)</li>
+</ul></li>
+<li><strong>Result</strong>: Robust system that handles messy real-world
+data</li>
+</ul>
+<h3 id="local-first-architecture">6. <strong>Local-First
+Architecture</strong></h3>
+<ul>
+<li><strong>Challenge</strong>: Privacy and latency concerns with cloud
+LLMs</li>
+<li><strong>Our Approach</strong>:
+<ul>
+<li>Local Ollama for LLM inference</li>
+<li>DuckDB for in-process analytics</li>
+<li>No data leaves the machine</li>
+</ul></li>
+<li><strong>Result</strong>: Fast, private, and offline-capable</li>
+</ul>
+<h3 id="comparison-intelligence">7. <strong>Comparison
+Intelligence</strong></h3>
+<ul>
+<li><strong>Challenge</strong>: Period-over-period analysis requires
+domain logic</li>
+<li><strong>Our Approach</strong>:
+<ul>
+<li>Automatic detection of comparison queries</li>
+<li>Normalized comparison structure</li>
+<li>Delta and percentage calculation</li>
+<li>Visual comparison cards</li>
+</ul></li>
+<li><strong>Result</strong>: Users get instant insights on trends</li>
+</ul>
+<hr />
+<h2 id="solution-differentiation">Solution Differentiation</h2>
+<h3 id="how-haikugraph-is-different">How HaikuGraph is Different</h3>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│              TRADITIONAL APPROACHES                     │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  1. Manual SQL Writing                                  │
+│     • Users must know SQL syntax                        │
+│     • Slow iteration for exploratory analysis           │
+│     • Error-prone for complex queries                   │
+│                                                         │
+│  2. BI Tools (Tableau, Power BI)                        │
+│     • Drag-and-drop interface                           │
+│     • Requires upfront data modeling                    │
+│     • Limited natural language support                  │
+│     • Expensive licensing                               │
+│                                                         │
+│  3. Cloud AI SQL Assistants (BigQuery, Snowflake)      │
+│     • Natural language interface ✓                      │
+│     • But: Data must be in cloud                        │
+│     • But: Black-box reasoning                          │
+│     • But: Pay-per-query                                │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+
+                          VS
+
+┌─────────────────────────────────────────────────────────┐
+│                   HAIKUGRAPH                            │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  ✅ Natural Language Interface                          │
+│     • Plain English questions                           │
+│     • No SQL knowledge required                         │
+│     • Instant results                                   │
+│                                                         │
+│  ✅ Full Transparency                                   │
+│     • See intent classification                         │
+│     • View query plan                                   │
+│     • Inspect generated SQL                             │
+│     • Verify raw data                                   │
+│                                                         │
+│  ✅ Local &amp; Private                                     │
+│     • Data never leaves your machine                    │
+│     • Local LLM (Ollama)                                │
+│     • In-process database (DuckDB)                      │
+│     • Offline-capable                                   │
+│                                                         │
+│  ✅ Smart Data Quality                                  │
+│     • Surfaces NULL/missing data                        │
+│     • Handles messy real-world data                     │
+│     • Type inference and casting                        │
+│     • Test-driven quality checks                        │
+│                                                         │
+│  ✅ Interactive Exploration                             │
+│     • Zoom/filter/sort on the fly                       │
+│     • Export to CSV/SVG                                 │
+│     • Pagination for large datasets                     │
+│     • Real-time data transformation                     │
+│                                                         │
+│  ✅ No Upfront Modeling                                 │
+│     • Auto-ingest from Excel/CSV                        │
+│     • Auto-generate data cards                          │
+│     • Schema-on-read                                    │
+│                                                         │
+└─────────────────────────────────────────────────────────┘</code></pre>
+<h3 id="unique-selling-points">Unique Selling Points</h3>
+<ol type="1">
+<li><strong>Transparency-First Design</strong>
+<ul>
+<li>Unlike black-box AI tools, every decision is explainable</li>
+<li>Users see the “why” behind every answer</li>
+<li>Builds trust through visibility</li>
+</ul></li>
+<li><strong>Data Quality as First-Class Citizen</strong>
+<ul>
+<li>Most tools hide NULLs; we surface them</li>
+<li>Comprehensive test suite for edge cases</li>
+<li>Visual indicators for missing data</li>
+</ul></li>
+<li><strong>Local-First with Enterprise Potential</strong>
+<ul>
+<li>Start local for privacy/speed</li>
+<li>Architecture supports scale-out (see ARCHITECTURE.md)</li>
+<li>No vendor lock-in</li>
+</ul></li>
+<li><strong>Developer-Friendly</strong>
+<ul>
+<li>Full test coverage</li>
+<li>Clear separation of concerns</li>
+<li>Easy to extend and customize</li>
+</ul></li>
+<li><strong>Real-World Data Tolerance</strong>
+<ul>
+<li>Handles VARCHAR timestamps</li>
+<li>Auto-fallback on type errors</li>
+<li>Graceful degradation</li>
+</ul></li>
+</ol>
+<hr />
+<h2 id="pros-and-cons-analysis">Pros and Cons Analysis</h2>
+<h3 id="pros">✅ PROS</h3>
+<h4 id="technical-strengths">Technical Strengths</h4>
+<ol type="1">
+<li><strong>Clean Architecture</strong>
+<ul>
+<li>Modular pipeline (Intent → Plan → Execute → Narrate)</li>
+<li>Same backend for CLI and UI</li>
+<li>Easy to test and maintain</li>
+<li>Clear separation of concerns</li>
+</ul></li>
+<li><strong>Rich Type System</strong>
+<ul>
+<li>Pydantic models for validation</li>
+<li>Type hints throughout Python code</li>
+<li>React PropTypes for components</li>
+<li>Catches errors early</li>
+</ul></li>
+<li><strong>Comprehensive Testing</strong>
+<ul>
+<li>9 data quality tests</li>
+<li>Edge case coverage (NULL handling)</li>
+<li>Timestamp validation</li>
+<li>Aggregation pattern tests</li>
+</ul></li>
+<li><strong>Performance</strong>
+<ul>
+<li>In-process DuckDB (no network overhead)</li>
+<li>Local LLM (200-500ms latency)</li>
+<li>Efficient SQL generation</li>
+<li>Preview-based pagination</li>
+</ul></li>
+<li><strong>User Experience</strong>
+<ul>
+<li>Intuitive natural language interface</li>
+<li>Rich visualizations auto-generated</li>
+<li>Full transparency (intent/plan/SQL)</li>
+<li>Interactive exploration tools</li>
+</ul></li>
+</ol>
+<h4 id="business-strengths">Business Strengths</h4>
+<ol type="1">
+<li><strong>Privacy &amp; Security</strong>
+<ul>
+<li>All data stays local</li>
+<li>No cloud dependencies</li>
+<li>GDPR/HIPAA friendly</li>
+<li>Audit trail built-in</li>
+</ul></li>
+<li><strong>Cost Effective</strong>
+<ul>
+<li>No per-query fees</li>
+<li>No data egress charges</li>
+<li>Open-source components</li>
+<li>Self-hosted option</li>
+</ul></li>
+<li><strong>Rapid Setup</strong>
+<ul>
+<li>Single command data ingestion</li>
+<li>Auto-schema detection</li>
+<li>No upfront modeling required</li>
+<li>Works with existing Excel/CSV files</li>
+</ul></li>
+</ol>
+<h3 id="cons">❌ CONS</h3>
+<h4 id="technical-limitations">Technical Limitations</h4>
+<ol type="1">
+<li><strong>Scalability Constraints</strong>
+<ul>
+<li>In-process DuckDB limits concurrent users (1-5)</li>
+<li>Single LLM instance (no load balancing)</li>
+<li>No caching layer in POC</li>
+<li>Not tested with &gt;100GB datasets</li>
+<li><strong>Mitigation</strong>: Architecture supports scale-out (see
+ARCHITECTURE.md production design)</li>
+</ul></li>
+<li><strong>LLM Dependency</strong>
+<ul>
+<li>Requires Ollama installation</li>
+<li>LLM accuracy not 100%</li>
+<li>Latency varies by query complexity</li>
+<li>May hallucinate on ambiguous questions</li>
+<li><strong>Mitigation</strong>: Fallback to simpler models, manual SQL
+override</li>
+</ul></li>
+<li><strong>Limited Query Complexity</strong>
+<ul>
+<li>No subqueries in POC</li>
+<li>Complex JOINs not fully tested</li>
+<li>Window functions not supported</li>
+<li>No recursive CTEs</li>
+<li><strong>Mitigation</strong>: Roadmap includes advanced SQL
+features</li>
+</ul></li>
+<li><strong>Data Type Handling</strong>
+<ul>
+<li>All ingested as VARCHAR (DuckDB limitation)</li>
+<li>Requires TRY_CAST at query time</li>
+<li>Date parsing can be ambiguous</li>
+<li>No schema enforcement</li>
+<li><strong>Mitigation</strong>: Future: support proper types on
+ingestion</li>
+</ul></li>
+<li><strong>Error Recovery</strong>
+<ul>
+<li>LLM failures stop the pipeline</li>
+<li>No retry logic for transient errors</li>
+<li>User must rephrase on failure</li>
+<li><strong>Mitigation</strong>: Add retry with exponential backoff</li>
+</ul></li>
+</ol>
+<h4 id="business-limitations">Business Limitations</h4>
+<ol type="1">
+<li><strong>Enterprise Features Missing</strong>
+<ul>
+<li>No authentication/authorization</li>
+<li>No multi-tenancy</li>
+<li>No audit logs</li>
+<li>No role-based access control</li>
+<li><strong>Mitigation</strong>: Roadmap includes enterprise
+features</li>
+</ul></li>
+<li><strong>Integration Gaps</strong>
+<ul>
+<li>Only supports Excel/CSV (no databases)</li>
+<li>No real-time data sources</li>
+<li>No API for external apps</li>
+<li>No Slack/Teams bot</li>
+<li><strong>Mitigation</strong>: API-first design allows easy
+integration</li>
+</ul></li>
+<li><strong>Operational Complexity</strong>
+<ul>
+<li>Requires Ollama setup</li>
+<li>Manual model management</li>
+<li>No monitoring dashboard</li>
+<li>No alerting system</li>
+<li><strong>Mitigation</strong>: Docker image for easy deployment</li>
+</ul></li>
+<li><strong>Documentation Gaps</strong>
+<ul>
+<li>No video tutorials</li>
+<li>Limited troubleshooting guide</li>
+<li>No architecture decision records (ADRs)</li>
+<li><strong>Mitigation</strong>: Comprehensive markdown docs added</li>
+</ul></li>
+<li><strong>Community &amp; Support</strong>
+<ul>
+<li>No community forum</li>
+<li>No commercial support option</li>
+<li>Single maintainer risk</li>
+<li><strong>Mitigation</strong>: Open-source model encourages
+contributions</li>
+</ul></li>
+</ol>
+<h3 id="trade-offs-made">🔄 TRADE-OFFS MADE</h3>
+<ol type="1">
+<li><strong>Local LLM vs Cloud LLM</strong>
+<ul>
+<li><strong>Chose</strong>: Local (Ollama)</li>
+<li><strong>Why</strong>: Privacy, cost, offline capability</li>
+<li><strong>Cost</strong>: Slightly lower accuracy, higher setup
+complexity</li>
+</ul></li>
+<li><strong>In-Process DB vs Client-Server</strong>
+<ul>
+<li><strong>Chose</strong>: In-process (DuckDB)</li>
+<li><strong>Why</strong>: Simplicity, performance for analytics</li>
+<li><strong>Cost</strong>: Limited concurrency, no true multi-user</li>
+</ul></li>
+<li><strong>Transparency vs Simplicity</strong>
+<ul>
+<li><strong>Chose</strong>: Transparency (show all reasoning)</li>
+<li><strong>Why</strong>: Build trust, enable debugging</li>
+<li><strong>Cost</strong>: More UI complexity, potential information
+overload</li>
+</ul></li>
+<li><strong>Auto-Infer vs User-Define Schema</strong>
+<ul>
+<li><strong>Chose</strong>: Auto-infer</li>
+<li><strong>Why</strong>: Faster setup, less user burden</li>
+<li><strong>Cost</strong>: Less control, potential type mismatches</li>
+</ul></li>
+<li><strong>React vs Server-Side Rendering</strong>
+<ul>
+<li><strong>Chose</strong>: React SPA</li>
+<li><strong>Why</strong>: Rich interactivity, modern developer
+experience</li>
+<li><strong>Cost</strong>: Larger bundle size, SEO challenges</li>
+</ul></li>
+</ol>
+<hr />
+<h2 id="future-roadmap">Future Roadmap</h2>
+<h3 id="short-term-1-3-months">Short Term (1-3 months)</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Add authentication
+(OAuth2)</label></li>
+<li><label><input type="checkbox" />Implement caching
+(Redis)</label></li>
+<li><label><input type="checkbox" />Support PostgreSQL/MySQL
+ingestion</label></li>
+<li><label><input type="checkbox" />Add monitoring
+dashboard</label></li>
+<li><label><input type="checkbox" />Docker image for easy
+deployment</label></li>
+</ul>
+<h3 id="medium-term-3-6-months">Medium Term (3-6 months)</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Multi-tenancy support</label></li>
+<li><label><input type="checkbox" />Advanced SQL features (subqueries,
+CTEs, window functions)</label></li>
+<li><label><input type="checkbox" />Real-time data sources</label></li>
+<li><label><input type="checkbox" />Slack/Teams integration</label></li>
+<li><label><input type="checkbox" />Mobile-responsive UI</label></li>
+</ul>
+<h3 id="long-term-6-12-months">Long Term (6-12 months)</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Horizontal scaling
+architecture</label></li>
+<li><label><input type="checkbox" />Cloud-native deployment
+option</label></li>
+<li><label><input type="checkbox" />Enterprise features (RBAC, audit
+logs)</label></li>
+<li><label><input type="checkbox" />ML-based query
+optimization</label></li>
+<li><label><input type="checkbox" />Natural language
+follow-ups</label></li>
+</ul>
+<hr />
+<h2 id="conclusion">Conclusion</h2>
+<p>HaikuGraph demonstrates a <strong>transparency-first, local-first,
+data-quality-aware</strong> approach to natural language data querying.
+By combining modern LLMs with robust SQL generation and interactive
+visualizations, we provide an intuitive yet powerful tool for data
+exploration.</p>
+<p>Our key differentiators are: 1. <strong>Full transparency</strong>
+into AI reasoning 2. <strong>Local-first</strong> for privacy and speed
+3. <strong>Data quality</strong> as a first-class concern 4.
+<strong>Interactive exploration</strong> beyond static answers</p>
+<p>While we have limitations (scalability, LLM dependency, enterprise
+features), our architecture is designed for growth, and our open
+approach encourages community contributions.</p>
+<p><strong>HaikuGraph is not just a query tool—it’s a data conversation
+platform.</strong></p>
+<hr />
+<h2 id="getting-started">Getting Started</h2>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># 1. Ingest your data</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">haikugraph</span> ingest <span class="at">--data-dir</span> ./data</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co"># 2. Start the application</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a><span class="ex">./run.sh</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a><span class="co"># 3. Open http://localhost:5173 and start asking questions!</span></span></code></pre></div>
+<p>For detailed setup instructions, see <code>QUICK_START.md</code>.</p>
+<p>For API documentation, see <code>WEB_UI_README.md</code>.</p>
+<p>For test suite details, see
+<code>VISUALIZATION_IMPROVEMENTS.md</code>.</p>
+</body>
+</html>

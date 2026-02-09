@@ -17,6 +17,10 @@ from haikugraph.graph.update_relations import (
     probe_and_update_relations,
 )
 from haikugraph.io.ingest import format_ingestion_summary, ingest_excel_to_duckdb
+from haikugraph.io.smart_ingest import (
+    smart_ingest_excel_to_duckdb,
+    format_smart_ingestion_summary,
+)
 from haikugraph.io.profile import format_profile_summary, profile_database
 from haikugraph.llm.plan_generator import generate_plan
 from haikugraph.planning.ambiguity import (
@@ -115,7 +119,7 @@ def main():
     help="Overwrite existing tables (default: True)",
 )
 def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
-    """Ingest Excel files from data directory into DuckDB."""
+    """Ingest Excel files from data directory into DuckDB (legacy - use smart-ingest instead)."""
     # Convert sheet to int if it's a numeric string
     sheet_arg = None
     if sheet is not None:
@@ -132,6 +136,55 @@ def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
     )
 
     summary = format_ingestion_summary(results)
+    click.echo(summary)
+
+    # Exit with non-zero if completely failed
+    if results["status"] == "failed":
+        raise click.Abort()
+
+
+@main.command("smart-ingest")
+@click.option(
+    "--data-dir",
+    default="./data",
+    type=click.Path(file_okay=False, dir_okay=True),
+    help="Directory containing Excel files (default: ./data)",
+)
+@click.option(
+    "--db-path",
+    default="./data/haikugraph.duckdb",
+    type=click.Path(),
+    help="Path to DuckDB database file (default: ./data/haikugraph.duckdb)",
+)
+@click.option(
+    "--sheet",
+    default=None,
+    help="Sheet name or index to read (default: first sheet)",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=True,
+    help="Overwrite existing tables (default: True)",
+)
+def smart_ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
+    """Intelligently ingest Excel files with automatic merging of related datasets."""
+    # Convert sheet to int if it's a numeric string
+    sheet_arg = None
+    if sheet is not None:
+        try:
+            sheet_arg = int(sheet)
+        except ValueError:
+            sheet_arg = sheet
+
+    results = smart_ingest_excel_to_duckdb(
+        data_dir=Path(data_dir),
+        db_path=Path(db_path),
+        sheet=sheet_arg,
+        force=force,
+    )
+
+    summary = format_smart_ingestion_summary(results)
     click.echo(summary)
 
     # Exit with non-zero if completely failed
@@ -531,8 +584,20 @@ def graph_probe_joins(
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
     help="Path to DuckDB database (required if --execute is used)",
 )
-def ask(question: str, graph_path: str, cards_dir: str, out: str, execute: bool, db_path: str):
-    """Plan how to answer a question (deterministic, no LLM)."""
+@click.option(
+    "--use-llm-resolver",
+    is_flag=True,
+    default=False,
+    help="Enable LLM resolver for ambiguous mentions (requires API key)",
+)
+@click.option(
+    "--followup",
+    is_flag=True,
+    default=False,
+    help="Treat as follow-up question (loads previous plan for context)",
+)
+def ask(question: str, graph_path: str, cards_dir: str, out: str, execute: bool, db_path: str, use_llm_resolver: bool, followup: bool):
+    """Plan how to answer a question (deterministic + optional LLM resolver)."""
     try:
         click.echo(f"Planning how to answer: {question}\n")
 
@@ -540,8 +605,64 @@ def ask(question: str, graph_path: str, cards_dir: str, out: str, execute: bool,
         graph = load_graph(Path(graph_path))
         cards = load_cards_data(Path(cards_dir))
 
-        # Build plan
-        plan = build_plan(question, graph, cards)
+        # Auto-detect followup questions if not explicitly specified
+        prev_plan_path = Path(out)
+        if not followup and prev_plan_path.exists():
+            from haikugraph.planning.followups import classify_followup
+            
+            try:
+                with open(prev_plan_path) as f:
+                    prev_plan = json.load(f)
+                
+                prev_question = prev_plan.get("original_question", "")
+                if prev_question:
+                    classification = classify_followup(question, prev_question, prev_plan)
+                    
+                    # Auto-enable followup if confidence is high enough
+                    if classification["is_followup"] and classification["confidence"] >= 0.8:
+                        followup = True
+                        click.echo(f"🔍 Auto-detected as follow-up: {classification['type']} (confidence: {classification['confidence']:.2f})\n")
+            except Exception:
+                # If auto-detection fails, proceed as new question
+                pass
+
+        # Handle followup questions
+        if followup:
+            from haikugraph.planning.followups import classify_followup, patch_plan
+            
+            # Load previous plan
+            prev_plan_path = Path(out)
+            if not prev_plan_path.exists():
+                click.echo("⚠️  No previous plan found. Building new plan instead.", err=True)
+                followup = False
+            else:
+                with open(prev_plan_path) as f:
+                    prev_plan = json.load(f)
+                
+                prev_question = prev_plan.get("original_question", "")
+                
+                # Classify if this is actually a followup
+                classification = classify_followup(question, prev_question, prev_plan)
+                
+                if classification["is_followup"]:
+                    click.echo(f"🔗 Follow-up detected: {classification['type']} (confidence: {classification['confidence']:.2f})")
+                    plan = patch_plan(prev_plan, classification, question, cards, use_llm=use_llm_resolver)
+                    click.echo("   ✅ Plan patched with previous context\n")
+                else:
+                    click.echo("⚠️  Question doesn't seem like a follow-up. Building new plan.\n")
+                    followup = False
+        
+        # Build new plan if not followup
+        if not followup:
+            plan = build_plan(question, graph, cards)
+        
+        # Enhance with LLM resolver if requested
+        if use_llm_resolver:
+            from haikugraph.planning.llm_resolver import enhance_plan_with_llm
+            click.echo("🔍 Using LLM resolver for ambiguous mentions...")
+            plan = enhance_plan_with_llm(plan, cards, enable_llm=True)
+            if plan.get("llm_resolutions"):
+                click.echo(f"   ✅ LLM resolved {len(plan['llm_resolutions'])} mentions\n")
 
         # Save plan
         save_plan(plan, Path(out))
@@ -754,6 +875,140 @@ def ask_llm(
         raise click.Abort()
 
 
+@main.command("ask-a6")
+@click.option(
+    "--question",
+    "-q",
+    required=True,
+    type=str,
+    help="Natural language question about your data",
+)
+@click.option(
+    "--db-path",
+    default="./data/haikugraph.duckdb",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False),
+    help="Path to DuckDB database (default: ./data/haikugraph.duckdb)",
+)
+@click.option(
+    "--out",
+    default="./data/plan_a6.json",
+    type=click.Path(),
+    help="Output plan file (default: ./data/plan_a6.json)",
+)
+def ask_a6(question: str, db_path: str, out: str):
+    """Generate and execute plan using local Ollama models (A6 POC).
+
+    Uses split LLM approach:
+    - Planner LLM: generates strict JSON Plan
+    - Narrator LLM: explains results in natural language
+
+    Requires Ollama to be running with models pulled.
+    Set HG_PLANNER_MODEL and HG_NARRATOR_MODEL env vars to customize.
+    """
+    try:
+        from haikugraph.llm.plan_generator import introspect_schema
+        from haikugraph.planning.llm_planner import generate_or_patch_plan
+        from haikugraph.explain.narrator import narrate
+
+        click.echo(f"🤖 Generating plan with Ollama for: {question}\n")
+
+        # Introspect schema
+        schema_text = introspect_schema(Path(db_path))
+
+        # Generate plan using Ollama planner
+        plan = generate_or_patch_plan(
+            question=question,
+            schema=schema_text,
+        )
+
+        # Save plan
+        save_plan(plan, Path(out))
+
+        # Print plan summary
+        click.echo("✅ Plan generated with Ollama\n")
+        click.echo(f"Subquestions: {len(plan['subquestions'])}")
+        for sq in plan["subquestions"]:
+            click.echo(f"  [{sq['id']}] Tables: {', '.join(sq['tables'])}")
+
+        if plan.get("constraints"):
+            click.echo(f"\nConstraints: {len(plan['constraints'])}")
+            for constraint in plan["constraints"]:
+                applies_to = constraint.get("applies_to", "all")
+                click.echo(
+                    f"  • {constraint['type']}: {constraint['expression']} "
+                    f"(applies_to: {applies_to})"
+                )
+
+        click.echo(f"\nPlan saved to: {Path(out).absolute()}")
+
+        # Execute plan
+        click.echo("\n" + "=" * 70)
+        click.echo("Executing plan...\n")
+
+        result = execute_plan(plan, Path(db_path))
+
+        # Format results and metadata for narrator
+        results_dict = {}
+        meta_dict = {}
+        for sq_result in result["subquestion_results"]:
+            sq_id = sq_result["id"]
+            results_dict[sq_id] = sq_result.get("preview_rows", [])
+            meta_dict[sq_id] = sq_result.get("metadata", {})
+
+        # Generate narrative explanation
+        click.echo("Generating explanation...\n")
+        explanation = narrate(
+            question=question,
+            plan=plan,
+            results=results_dict,
+            meta=meta_dict,
+            subquestion_results=result["subquestion_results"],
+        )
+
+        # Print explanation
+        click.echo("=" * 70)
+        click.echo("📊 Explanation:\n")
+        click.echo(explanation)
+        click.echo("\n" + "=" * 70)
+
+        # Save result
+        result_path = Path(out).parent / "result_a6.json"
+        save_result(result, result_path)
+        click.echo(f"\nResult saved to: {result_path.absolute()}")
+
+    except ConnectionError as e:
+        import os
+        from haikugraph.llm.router import DEFAULT_PLANNER_MODEL, DEFAULT_NARRATOR_MODEL
+        
+        click.echo(f"❌ Connection Error: {e}", err=True)
+        click.echo("\nMake sure Ollama is running:", err=True)
+        click.echo("  macOS: Start Ollama app or run 'ollama serve'", err=True)
+        
+        # Show actual model names from env vars (or defaults)
+        planner_model = os.environ.get("HG_PLANNER_MODEL", DEFAULT_PLANNER_MODEL)
+        narrator_model = os.environ.get("HG_NARRATOR_MODEL", DEFAULT_NARRATOR_MODEL)
+        
+        click.echo("\nPull required models:", err=True)
+        click.echo(f"  ollama pull {planner_model}", err=True)
+        click.echo(f"  ollama pull {narrator_model}", err=True)
+        click.echo("\nOr set custom models with env vars:", err=True)
+        click.echo("  export HG_PLANNER_MODEL=your-planner-model", err=True)
+        click.echo("  export HG_NARRATOR_MODEL=your-narrator-model", err=True)
+        raise click.Abort()
+    except ValueError as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        raise click.Abort()
+    except FileNotFoundError as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        click.echo("\nRun 'haikugraph ingest' first to create the database.", err=True)
+        raise click.Abort()
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        import traceback
+        traceback.print_exc()
+        raise click.Abort()
+
+
 @main.command()
 @click.option(
     "--plan",
@@ -886,6 +1141,230 @@ def doctor(data_dir: str, db_path: str):
             click.echo(f"   Error reading database: {e}")
 
     click.echo("\n✅ Environment check complete")
+
+
+@main.command("ask-demo")
+@click.argument("question")
+@click.option(
+    "--db-path",
+    default="./data/haikugraph.duckdb",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False),
+    help="Path to DuckDB database",
+)
+@click.option(
+    "--debug",
+    is_flag=True,
+    default=False,
+    help="Print intent + plan + SQL",
+)
+@click.option(
+    "--no-intent",
+    is_flag=True,
+    default=False,
+    help="Skip A8 intent classification",
+)
+@click.option(
+    "--raw",
+    is_flag=True,
+    default=False,
+    help="Print raw execution results only",
+)
+def ask_demo(question: str, db_path: str, debug: bool, no_intent: bool, raw: bool):
+    """A10: End-to-end demo of Question → Intent → Plan → Execute → Narrate.
+    
+    This command demonstrates the complete HaikuGraph pipeline:
+    1. Intent Classification (A8)
+    2. Plan Generation (A6-A7)
+    3. SQL Execution (A4-A5)
+    4. Narration (A9)
+    
+    Example:
+        haikugraph ask-demo "What is total revenue?"
+        haikugraph ask-demo "Revenue by barber" --debug
+        haikugraph ask-demo "Compare this month vs last month" --raw
+    """
+    import sys
+    import traceback
+    from pathlib import Path
+    
+    from haikugraph.planning.intent import classify_intent
+    from haikugraph.llm.plan_generator import introspect_schema
+    from haikugraph.planning.llm_planner import generate_or_patch_plan
+    from haikugraph.execution import execute_plan
+    from haikugraph.explain.narrator import narrate_results
+    
+    # Print question
+    if not raw:
+        click.echo("\n" + "=" * 70)
+        click.echo(f"Question: {question}")
+        click.echo("=" * 70)
+    
+    intent = None
+    plan = None
+    result = None
+    
+    try:
+        # ======================================================================
+        # STAGE 1: Intent Classification (A8)
+        # ======================================================================
+        if not no_intent:
+            if debug:
+                click.echo("\n[1/4] Classifying intent...")
+            
+            try:
+                intent = classify_intent(question)
+                
+                if debug:
+                    click.echo("\n✅ Intent:")
+                    click.echo(f"  Type: {intent.type.value}")
+                    click.echo(f"  Confidence: {intent.confidence:.2f}")
+                    click.echo(f"  Rationale: {intent.rationale}")
+                    click.echo(f"  Requires comparison: {intent.requires_comparison}")
+            
+            except Exception as e:
+                # Intent classification failed - non-fatal
+                if debug:
+                    click.echo(f"\n⚠️  Intent classification failed (non-fatal): {e}", err=True)
+                    click.echo("   Continuing without intent context...", err=True)
+                intent = None
+        
+        # ======================================================================
+        # STAGE 2: Plan Generation (A6-A7)
+        # ======================================================================
+        if debug:
+            click.echo("\n[2/4] Generating plan...")
+        
+        try:
+            # Introspect schema
+            schema_text = introspect_schema(Path(db_path))
+            
+            # Generate plan
+            plan = generate_or_patch_plan(
+                question=question,
+                schema=schema_text,
+                intent=intent,
+            )
+            
+            if debug:
+                click.echo("\n✅ Plan:")
+                click.echo(json.dumps(plan, indent=2))
+        
+        except Exception as e:
+            # Planner failed - FATAL
+            click.echo(f"\n❌ Planner failed: {e}", err=True)
+            if debug:
+                traceback.print_exc()
+            sys.exit(1)
+        
+        # ======================================================================
+        # STAGE 3: SQL Execution (A4-A5)
+        # ======================================================================
+        if debug:
+            click.echo("\n[3/4] Executing SQL...")
+        
+        try:
+            result = execute_plan(plan, Path(db_path))
+            
+            if debug:
+                click.echo("\n✅ Execution Results:")
+                for sq_result in result["subquestion_results"]:
+                    sq_id = sq_result["id"]
+                    status = sq_result["status"]
+                    sql = sq_result.get("sql", "N/A")
+                    
+                    status_icon = "✅" if status == "success" else "❌"
+                    click.echo(f"\n  {status_icon} {sq_id}:")
+                    click.echo(f"     SQL: {sql}")
+                    
+                    if status == "success":
+                        click.echo(f"     Rows: {sq_result['row_count']}")
+                        if sq_result.get("preview_rows"):
+                            click.echo(f"     Sample: {sq_result['preview_rows'][:3]}")
+                    else:
+                        click.echo(f"     Error: {sq_result.get('error', 'Unknown')}")  
+        
+        except Exception as e:
+            # Execution failed - FATAL
+            click.echo(f"\n❌ Execution failed: {e}", err=True)
+            if debug:
+                traceback.print_exc()
+            sys.exit(2)
+        
+        # ======================================================================
+        # RAW MODE: Just print results and exit
+        # ======================================================================
+        if raw:
+            click.echo(json.dumps(result, indent=2, default=str))
+            sys.exit(0)
+        
+        # ======================================================================
+        # STAGE 4: Narration (A9)
+        # ======================================================================
+        if debug:
+            click.echo("\n[4/4] Generating narrative explanation...")
+        
+        try:
+            # Convert execution results to narrator format
+            narrator_results = {}
+            for sq_result in result["subquestion_results"]:
+                sq_id = sq_result["id"]
+                
+                if sq_result["status"] == "success":
+                    narrator_results[sq_id] = {
+                        "rows": sq_result.get("preview_rows", []),
+                        "columns": list(sq_result["preview_rows"][0].keys()) if sq_result.get("preview_rows") else [],
+                        "row_count": sq_result["row_count"],
+                    }
+                else:
+                    narrator_results[sq_id] = {
+                        "rows": [],
+                        "columns": [],
+                        "row_count": 0,
+                        "error": sq_result.get("error", "Unknown error"),
+                    }
+            
+            # Call narrator
+            explanation = narrate_results(
+                original_question=question,
+                intent=intent,
+                plan=plan,
+                results=narrator_results,
+            )
+            
+            # Print answer
+            click.echo("\n" + "="  * 70)
+            click.echo("Answer:")
+            click.echo("=" * 70)
+            click.echo(f"\n{explanation}\n")
+            
+            sys.exit(0)
+        
+        except Exception as e:
+            # Narration failed - FATAL (but show raw results)
+            click.echo(f"\n❌ Narration failed: {e}", err=True)
+            if debug:
+                traceback.print_exc()
+            
+            # Fallback: show raw results
+            click.echo("\n📊 Raw Results:", err=True)
+            for sq_result in result["subquestion_results"]:
+                sq_id = sq_result["id"]
+                status_icon = "✅" if sq_result["status"] == "success" else "❌"
+                click.echo(f"\n  {status_icon} {sq_id}: {sq_result['row_count']} rows", err=True)
+                if sq_result.get("preview_rows"):
+                    click.echo(f"     {sq_result['preview_rows'][:3]}", err=True)
+            
+            sys.exit(3)
+    
+    except KeyboardInterrupt:
+        click.echo("\n\n⚠️  Interrupted by user", err=True)
+        sys.exit(130)
+    
+    except Exception as e:
+        click.echo(f"\n❌ Unexpected error: {e}", err=True)
+        if debug:
+            traceback.print_exc()
+        sys.exit(255)
 
 
 if __name__ == "__main__":

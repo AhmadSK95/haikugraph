@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.payment_amount",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "payment_amount",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 45.52,
+  "distinct_count": 6249,
+  "sample_values": [
+    "178811.97",
+    "11523.74",
+    "50009.30888",
+    "303011.03",
+    "601497.1153"
+  ],
+  "semantic_hints": [
+    "money_or_numeric"
+  ]
+}

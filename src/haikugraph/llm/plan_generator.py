@@ -179,8 +179,8 @@ that conforms to this structure:
       "description": "Description of what this subquestion answers",
       "tables": ["table_name"],
       "columns": ["column1", "column2"],
-      "group_by": ["column"] (optional),
-      "aggregations": [{{"agg": "sum|avg|count|min|max", "col": "column"}}] (optional)
+      "group_by": ["column"] OR [{{"type": "time_bucket", "grain": "month|year|day", "col": "date_column"}}] (optional),
+      "aggregations": [{{"agg": "sum|avg|count|min|max|count_distinct", "col": "column", "distinct": true (optional for count)}}] (optional)
     }}
   ],
   "intent": {{
@@ -237,6 +237,16 @@ CRITICAL RULES:
 7. For ambiguities, use issue strings like:
    - "Entity 'X' found in multiple tables"
    - "Multiple tables contain column"
+8. DISTINCT COUNTS:
+   - For "unique customers", "distinct values": use {{"agg": "count", "col": "column", "distinct": true}}
+   - OR use {{"agg": "count_distinct", "col": "column"}}
+   - NEVER put "DISTINCT" in the column name: WRONG: {{"col": "DISTINCT customer_id"}}
+   - Column names must be simple identifiers without spaces or SQL keywords
+9. TIME BUCKETING (for "monthly", "by month", "month-wise", "trend"):
+   - Use group_by with time_bucket: [{{"type": "time_bucket", "grain": "month", "col": "date_column"}}]
+   - Supported grains: "month", "year", "day", "week", "quarter"
+   - This produces monthly aggregation with ORDER BY month
+   - Example: "monthly revenue" -> group_by: [{{"type": "time_bucket", "grain": "month", "col": "created_at"}}]
 
 DATABASE SCHEMA:
 {schema_text}

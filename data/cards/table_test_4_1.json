@@ -28,5 +28,5 @@
     "count(test_4_1) -- row count"
   ],
   "gotchas": [],
-  "joins_suspected": 4
+  "joins_suspected": 2
 }

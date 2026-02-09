@@ -7,8 +7,8 @@
   "null_pct": 0.0,
   "distinct_count": 2,
   "sample_values": [
-    "ACTIVE",
-    "INACTIVE"
+    "INACTIVE",
+    "ACTIVE"
   ],
   "semantic_hints": [
     "status"

@@ -1,0 +1,17 @@
+{
+  "id": "column:test_1_1_merged.deal_details_customer_reference_no",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "deal_details_customer_reference_no",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 79.18,
+  "distinct_count": 273,
+  "sample_values": [
+    "KANJIFOR03112025960093",
+    "KANJIFOR23102025253842",
+    "KANJIFOR15122025319334",
+    "KANJIFOR14082025112269",
+    "KANJIFOR22092025995478"
+  ],
+  "semantic_hints": []
+}

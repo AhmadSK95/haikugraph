@@ -7,11 +7,11 @@
   "null_pct": 0.0,
   "distinct_count": 4356,
   "sample_values": [
-    "750",
-    "5000",
-    "1600",
-    "50",
-    "2900"
+    "5980",
+    "1900",
+    "2010",
+    "1500",
+    "9300"
   ],
   "semantic_hints": [
     "money_or_numeric"

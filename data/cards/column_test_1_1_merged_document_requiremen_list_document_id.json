@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.document_requiremen_list_document_id",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "document_requiremen_list_document_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 71.24,
+  "distinct_count": 2902,
+  "sample_values": [
+    "6906f0e915bb079a34a09f37",
+    "6907854c15bb079a34a0a11a",
+    "68bd9038afe08abaceab3651",
+    "6846850fe8dd13ca08c6ad0b",
+    "68bd90bfafe08abaceab3654"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

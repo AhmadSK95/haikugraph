@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.created_at",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "created_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 332,
+  "sample_values": [
+    "2025-08-30",
+    "2025-09-21",
+    "2025-05-08",
+    "2025-03-20",
+    "2025-08-31"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

@@ -397,7 +397,11 @@ def test_constraint_applies_to_invalid_subquestion_fails():
 
 
 def test_constraint_applies_to_valid_subquestion_passes():
-    """Test that constraint with valid applies_to passes validation."""
+    """Test that constraint with valid applies_to passes validation.
+    
+    Note: For comparison subquestions (_current, _comparison), BOTH must have
+    scoped time constraints for symmetric scoping.
+    """
     valid_plan = {
         "original_question": "Test question",
         "subquestions": [
@@ -407,14 +411,19 @@ def test_constraint_applies_to_valid_subquestion_passes():
         "constraints": [
             {
                 "type": "time",
+                "expression": "orders.created_at in this_month",
+                "applies_to": "SQ1_current",  # Symmetric constraint for current
+            },
+            {
+                "type": "time",
                 "expression": "orders.created_at in previous_month",
-                "applies_to": "SQ2_comparison",  # Valid ID
+                "applies_to": "SQ2_comparison",  # Symmetric constraint for comparison
             }
         ],
     }
 
     is_valid, errors = validate_plan(valid_plan)
-    assert is_valid, f"Plan with valid applies_to should pass, got errors: {errors}"
+    assert is_valid, f"Plan with valid symmetric applies_to should pass, got errors: {errors}"
     assert len(errors) == 0
 
     # Should not raise

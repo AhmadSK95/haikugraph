@@ -7,10 +7,10 @@
   "null_pct": 0.0,
   "distinct_count": 13,
   "sample_values": [
-    "JPY",
-    "HKD",
     "AED",
     "AUD",
+    "JPY",
+    "HKD",
     "ZAR"
   ],
   "semantic_hints": [

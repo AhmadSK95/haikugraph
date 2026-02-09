@@ -7,11 +7,11 @@
   "null_pct": 0.0,
   "distinct_count": 69,
   "sample_values": [
-    "ERITREA",
-    "DENMARK",
-    "BAHAMAS",
     "MARTINIQUE",
-    "LATVIA"
+    "LATVIA",
+    "BANGLADESH",
+    "LUXEMBOURG",
+    "NEW ZEALAND"
   ],
   "semantic_hints": [
     "geography"

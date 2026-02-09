@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.sha_id",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "sha_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 63581,
+  "sample_values": [
+    "a74500d318fa991ffbd7bb3a42f64550a2279d04",
+    "c3afcdcdc1a3b117d9ec3c7b64a65bde6192ce35",
+    "77528c16ac65c97ead07da11b51473197d698c47",
+    "d8f97be711afe2bcf87e62e3704a75b54161d6a1",
+    "1a45442844f9644597b637c02e7f16fda236470c"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

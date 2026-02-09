@@ -45,17 +45,25 @@ def test_comparison_followup_full_chain():
     assert "SQ1_current" in sq_ids, "Should have current period subquestion"
     assert "SQ2_comparison" in sq_ids, "Should have comparison period subquestion"
 
-    # Check constraints
+    # Check constraints - MUST have symmetric scoping for comparison queries
     assert "constraints" in patched_plan
-    assert len(patched_plan["constraints"]) > 0, "Should have at least one constraint"
+    assert len(patched_plan["constraints"]) >= 2, "Should have at least two constraints (one per subquestion)"
 
-    # Find scoped constraint
-    scoped_constraints = [
-        c for c in patched_plan["constraints"] if c.get("applies_to") == "SQ2_comparison"
+    # Find time constraints for both subquestions
+    sq1_constraints = [
+        c for c in patched_plan["constraints"] 
+        if c.get("type") == "time" and c.get("applies_to") == "SQ1_current"
     ]
-    assert len(scoped_constraints) == 1, "Should have one constraint scoped to SQ2"
-    assert scoped_constraints[0]["type"] == "time", "Scoped constraint should be time type"
-    assert "previous_month" in scoped_constraints[0]["expression"]
+    sq2_constraints = [
+        c for c in patched_plan["constraints"] 
+        if c.get("type") == "time" and c.get("applies_to") == "SQ2_comparison"
+    ]
+    
+    assert len(sq1_constraints) == 1, "Should have one time constraint scoped to SQ1_current"
+    assert len(sq2_constraints) == 1, "Should have one time constraint scoped to SQ2_comparison"
+    
+    assert "this_month" in sq1_constraints[0]["expression"], "SQ1 should have this_month"
+    assert "previous_month" in sq2_constraints[0]["expression"], "SQ2 should have previous_month"
 
     # Step 3: Validate schema
     validate_plan_or_raise(patched_plan)  # Should not raise
@@ -68,31 +76,31 @@ def test_comparison_followup_full_chain():
     sql1, meta1 = build_sql(sq1, patched_plan)
     sql2, meta2 = build_sql(sq2, patched_plan)
 
-    # Verify SQL for SQ1 (current) - should NOT have time constraint
-    assert len(meta1["constraints_applied"]) == 0, "Current period should have no constraints"
-    # Verify no time constraints in metadata (more robust than checking SQL text)
+    # Verify SQL for SQ1 (current) - NOW SHOULD have time constraint (symmetric scoping fix)
+    assert len(meta1["constraints_applied"]) == 1, "Current period should have 1 constraint"
     time_constraints_sq1 = [c for c in meta1["constraints_applied"] if c.get("type") == "time"]
-    assert len(time_constraints_sq1) == 0, "Current period should have no time constraints"
-
+    assert len(time_constraints_sq1) == 1, "Current period should have exactly 1 time constraint"
+    
     # Verify SQL for SQ2 (comparison) - SHOULD have time constraint
     assert len(meta2["constraints_applied"]) == 1, "Comparison period should have 1 constraint"
-    # Verify time constraint is present in metadata
     time_constraints_sq2 = [c for c in meta2["constraints_applied"] if c.get("type") == "time"]
     assert len(time_constraints_sq2) == 1, "Comparison period should have exactly 1 time constraint"
-    # Check the plan's original constraint (before SQL translation)
-    # Filter by both type AND applies_to to be resilient to future default time filters
-    plan_time_constraints = [
-        c
-        for c in patched_plan["constraints"]
+    
+    # Verify constraints are DIFFERENT for each subquestion
+    sq1_plan_constraints = [
+        c for c in patched_plan["constraints"]
+        if c.get("type") == "time" and c.get("applies_to") == "SQ1_current"
+    ]
+    sq2_plan_constraints = [
+        c for c in patched_plan["constraints"]
         if c.get("type") == "time" and c.get("applies_to") == "SQ2_comparison"
     ]
-    assert len(plan_time_constraints) == 1
-    assert (
-        plan_time_constraints[0].get("applies_to") == "SQ2_comparison"
-    ), "Time constraint must be scoped to SQ2_comparison"
-    assert (
-        "previous_month" in plan_time_constraints[0]["expression"]
-    ), "Original constraint should reference previous_month"
+    
+    assert len(sq1_plan_constraints) == 1, "SQ1 must have scoped time constraint"
+    assert len(sq2_plan_constraints) == 1, "SQ2 must have scoped time constraint"
+    
+    assert "this_month" in sq1_plan_constraints[0]["expression"], "SQ1 constraint should be this_month"
+    assert "previous_month" in sq2_plan_constraints[0]["expression"], "SQ2 constraint should be previous_month"
 
 
 def test_comparison_to_previous_year():
@@ -105,10 +113,15 @@ def test_comparison_to_previous_year():
     classification = classify_followup("compare to previous year", "Total sales?", prev_plan)
     patched_plan = patch_plan(prev_plan, classification, "compare to previous year")
 
-    # Check constraint has previous_year
+    # Check constraints have both this_year and previous_year (symmetric scoping)
     constraints = patched_plan["constraints"]
-    time_constraint = next(c for c in constraints if c["type"] == "time")
-    assert "previous_year" in time_constraint["expression"]
+    time_constraints = [c for c in constraints if c["type"] == "time"]
+    assert len(time_constraints) == 2, "Should have 2 time constraints"
+    
+    # Check that we have both this_year and previous_year
+    expressions = [c["expression"] for c in time_constraints]
+    assert any("this_year" in expr for expr in expressions), "Should have this_year constraint"
+    assert any("previous_year" in expr for expr in expressions), "Should have previous_year constraint"
 
     # Validate
     validate_plan_or_raise(patched_plan)
@@ -151,9 +164,13 @@ def test_comparison_vs_pattern():
     patched_plan = patch_plan(prev_plan, classification, "vs previous week")
     assert len(patched_plan["subquestions"]) == 2
 
-    # Check for previous_week in constraint
-    time_constraint = next(c for c in patched_plan["constraints"] if c.get("type") == "time")
-    assert "previous_week" in time_constraint["expression"]
+    # Check for both this_week and previous_week in constraints (symmetric scoping)
+    time_constraints = [c for c in patched_plan["constraints"] if c.get("type") == "time"]
+    assert len(time_constraints) == 2, "Should have 2 time constraints"
+    
+    expressions = [c["expression"] for c in time_constraints]
+    assert any("this_week" in expr for expr in expressions), "Should have this_week constraint"
+    assert any("previous_week" in expr for expr in expressions), "Should have previous_week constraint"
 
 
 def test_comparison_merged_question():
@@ -195,8 +212,8 @@ def test_comparison_with_existing_constraint():
     classification = classify_followup("compare to last month", "Orders for product X?", prev_plan)
     patched_plan = patch_plan(prev_plan, classification, "compare to last month")
 
-    # Should have 2 constraints: 1 filter (unscoped) + 1 time (scoped)
-    assert len(patched_plan["constraints"]) == 2
+    # Should have 3 constraints: 1 filter (unscoped) + 2 time (scoped for SQ1 and SQ2)
+    assert len(patched_plan["constraints"]) == 3
 
     # Build SQL for both (select by ID, not order)
     sq_by_id = {sq["id"]: sq for sq in patched_plan["subquestions"]}
@@ -210,6 +227,6 @@ def test_comparison_with_existing_constraint():
     assert "product_id" in sql1
     assert "product_id" in sql2
 
-    # Only SQ2 should have time filter
-    assert len(meta1["constraints_applied"]) == 1  # Just filter
+    # Both should have their own time constraints (symmetric scoping)
+    assert len(meta1["constraints_applied"]) == 2  # Filter + time
     assert len(meta2["constraints_applied"]) == 2  # Filter + time

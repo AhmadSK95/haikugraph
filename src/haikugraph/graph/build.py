@@ -105,7 +105,7 @@ def build_graph(
         is_weak = confidence < weak_threshold
 
         # Extract cardinality and sampling info from probe
-        probe = rel_card.get("probe", {})
+        probe = rel_card.get("probe", {}) or {}  # Handle None
         cardinality = probe.get("estimated_cardinality", "unknown")
         left_sampled = probe.get("left_sampled", False)
         right_sampled = probe.get("right_sampled", False)

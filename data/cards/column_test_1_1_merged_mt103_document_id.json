@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.mt103_document_id",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "mt103_document_id",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 81.19,
+  "distinct_count": 2490,
+  "sample_values": [
+    "693fd58b1022def2088446b3",
+    "6978b0389e241b62aaf4d49c",
+    "68ed0aa0ae6a2cf048fb5065",
+    "68e918e1ae6a2cf048fb3a65",
+    "68ed0a9cae6a2cf048fb5059"
+  ],
+  "semantic_hints": [
+    "identifier"
+  ]
+}

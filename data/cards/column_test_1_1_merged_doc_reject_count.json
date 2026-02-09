@@ -1,0 +1,17 @@
+{
+  "id": "column:test_1_1_merged.doc_reject_count",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "doc_reject_count",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 58.93,
+  "distinct_count": 13,
+  "sample_values": [
+    "0.0",
+    "2.0",
+    "14.0",
+    "6.0",
+    "8.0"
+  ],
+  "semantic_hints": []
+}

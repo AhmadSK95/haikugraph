@@ -1,0 +1,17 @@
+{
+  "id": "column:test_1_1_merged.deal_details_digi_ref_number",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "deal_details_digi_ref_number",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 79.62,
+  "distinct_count": 245,
+  "sample_values": [
+    "AD2TT26010601254",
+    "AD2TT25081406943",
+    "AD2TT25091905157",
+    "AD2TT25081406945",
+    "AD2TT25091904814"
+  ],
+  "semantic_hints": []
+}

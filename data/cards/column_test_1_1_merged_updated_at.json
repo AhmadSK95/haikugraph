@@ -1,0 +1,19 @@
+{
+  "id": "column:test_1_1_merged.updated_at",
+  "card_type": "column",
+  "table": "test_1_1_merged",
+  "column": "updated_at",
+  "duckdb_type": "VARCHAR",
+  "null_pct": 0.0,
+  "distinct_count": 29510,
+  "sample_values": [
+    "2025-11-02 20:54:51.330000+00:00",
+    "2025-06-06 01:49:11.367000+00:00",
+    "2025-06-06 13:29:47.334000+00:00",
+    "2025-06-06 22:01:26.348000+00:00",
+    "2026-01-06 15:01:50.423000+00:00"
+  ],
+  "semantic_hints": [
+    "timestamp"
+  ]
+}

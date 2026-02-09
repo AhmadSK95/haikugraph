@@ -9,9 +9,9 @@
   "sample_values": [
     "Less than 10L including current order",
     "More than 10L including current order",
+    "More than 7L excluding current order",
     "Less than 7L including current order",
-    "NOT APPLICABLE",
-    "More than 7L including current order"
+    "NOT APPLICABLE"
   ],
   "semantic_hints": []
 }

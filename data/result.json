@@ -1,0 +1,68 @@
+{
+  "applied_resolutions_summary": [
+    "Entity 'transaction' resolved to table test_1_1_merged"
+  ],
+  "executed_at": "2026-02-09T14:37:11.149570Z",
+  "final_summary": "Answered: \"how many transactions in December by platform\" | Executed 1 subquestion(s) | Total rows retrieved: 4",
+  "original_question": "how many transactions in December by platform",
+  "resolutions": [
+    {
+      "alternatives": [
+        "test_1_1_merged",
+        "test_3_1"
+      ],
+      "chosen": "test_1_1_merged",
+      "issue": "Entity 'transaction' found in multiple tables"
+    }
+  ],
+  "subquestion_results": [
+    {
+      "columns": [
+        "platform_name",
+        "count_distinct_transaction_id"
+      ],
+      "description": "Analyze transaction with count_distinct",
+      "id": "SQ1",
+      "metadata": {
+        "constraints_applied": [
+          {
+            "column": "a2_form_created_at",
+            "expression": "EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"a2_form_created_at\" AS TIMESTAMP)) = 12",
+            "month": 12,
+            "type": "time_month"
+          }
+        ],
+        "joins_used": [],
+        "resolutions": [],
+        "resolutions_applied": [
+          {
+            "chosen_table": "test_1_1_merged",
+            "entity": "transaction",
+            "kind": "entity_table"
+          }
+        ]
+      },
+      "preview_rows": [
+        {
+          "count_distinct_transaction_id": 9,
+          "platform_name": "B2B"
+        },
+        {
+          "count_distinct_transaction_id": 382,
+          "platform_name": "B2C-APP"
+        },
+        {
+          "count_distinct_transaction_id": 32,
+          "platform_name": "B2C-SPECIAL-OFFER"
+        },
+        {
+          "count_distinct_transaction_id": 55,
+          "platform_name": "B2C-WEB"
+        }
+      ],
+      "row_count": 4,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"a2_form_created_at\" AS TIMESTAMP)) = 12 GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "status": "success"
+    }
+  ]
+}

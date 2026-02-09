@@ -9,9 +9,9 @@
   "sample_values": [
     "0",
     "307",
-    "24000",
-    "500",
-    "3830"
+    "59400",
+    "3830",
+    "24000"
   ],
   "semantic_hints": [
     "money_or_numeric"

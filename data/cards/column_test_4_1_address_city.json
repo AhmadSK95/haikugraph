@@ -7,11 +7,11 @@
   "null_pct": 0.0,
   "distinct_count": 967,
   "sample_values": [
-    "Guildford",
-    "Croix",
-    "Stratford",
-    "STOCKPORT",
-    "Vilnius"
+    "NUREMBERG",
+    "KARLSRUHE",
+    "ITHACA",
+    "Magdeburg",
+    "Goettingen"
   ],
   "semantic_hints": [
     "geography"
