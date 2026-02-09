@@ -1,0 +1,1325 @@
+[
+  {
+    "index": 2,
+    "question": "What is the total revenue today?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'today' specified but no filter in SQL",
+        "expected": "WHERE clause with today filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 3,
+    "question": "What is the total revenue this week?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this week' specified but no filter in SQL",
+        "expected": "WHERE clause with this week filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 4,
+    "question": "What is the total revenue this month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this month' specified but no filter in SQL",
+        "expected": "WHERE clause with this month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 5,
+    "question": "What is the total revenue last month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last month' specified but no filter in SQL",
+        "expected": "WHERE clause with last month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 6,
+    "question": "What is the total revenue this year?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this year",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this year' specified but no filter in SQL",
+        "expected": "WHERE clause with this year filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this year'",
+        "expected": "calendar_year",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 7,
+    "question": "What is the total revenue last 7 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "last 7 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last 7 days' specified but no filter in SQL",
+        "expected": "WHERE clause with last 7 days filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 7 days'",
+        "expected": "rolling_days",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 8,
+    "question": "What is the total revenue last 30 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "last 30 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last 30 days' specified but no filter in SQL",
+        "expected": "WHERE clause with last 30 days filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 30 days'",
+        "expected": "rolling_days",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 9,
+    "question": "What is the total revenue December?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "December",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE EXTRACT(MONTH FROM \"test_5_1\".\"created_at\") = 12",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'December'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 11,
+    "question": "What is the total volume today?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'today' specified but no filter in SQL",
+        "expected": "WHERE clause with today filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 12,
+    "question": "What is the total volume this week?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this week' specified but no filter in SQL",
+        "expected": "WHERE clause with this week filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 13,
+    "question": "What is the total volume this month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this month' specified but no filter in SQL",
+        "expected": "WHERE clause with this month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 14,
+    "question": "What is the total volume last month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last month' specified but no filter in SQL",
+        "expected": "WHERE clause with last month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 15,
+    "question": "What is the total volume this year?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this year",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this year' specified but no filter in SQL",
+        "expected": "WHERE clause with this year filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this year'",
+        "expected": "calendar_year",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 16,
+    "question": "What is the total volume last 7 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "last 7 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last 7 days' specified but no filter in SQL",
+        "expected": "WHERE clause with last 7 days filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 7 days'",
+        "expected": "rolling_days",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 17,
+    "question": "What is the total volume last 30 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "last 30 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last 30 days' specified but no filter in SQL",
+        "expected": "WHERE clause with last 30 days filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 30 days'",
+        "expected": "rolling_days",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 18,
+    "question": "What is the total volume December?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "December",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE EXTRACT(MONTH FROM \"test_5_1\".\"created_at\") = 12",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'December'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 20,
+    "question": "How many transactions today?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"a2_form_created_at\" AS TIMESTAMP) >= now() - interval '30 days'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "rolling_days",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 21,
+    "question": "How many transactions this week?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"a2_form_created_at\" AS TIMESTAMP) >= now() - interval '30 days'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "rolling_days",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 22,
+    "question": "How many transactions this month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this month' specified but no filter in SQL",
+        "expected": "WHERE clause with this month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 23,
+    "question": "How many transactions last month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last month' specified but no filter in SQL",
+        "expected": "WHERE clause with last month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 29,
+    "question": "How many unique customers?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": null,
+      "intent_type": "metric",
+      "has_group_by": null,
+      "has_distinct": null,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      }
+    ],
+    "bucket": "distinct_missing"
+  },
+  {
+    "index": 30,
+    "question": "How many unique customers today?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": null,
+      "intent_type": "metric",
+      "has_group_by": null,
+      "has_distinct": null,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      }
+    ],
+    "bucket": "distinct_missing"
+  },
+  {
+    "index": 31,
+    "question": "How many unique customers this week?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": null,
+      "intent_type": "metric",
+      "has_group_by": null,
+      "has_distinct": null,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      }
+    ],
+    "bucket": "distinct_missing"
+  },
+  {
+    "index": 32,
+    "question": "How many unique customers this month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": null,
+      "intent_type": "metric",
+      "has_group_by": null,
+      "has_distinct": null,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      }
+    ],
+    "bucket": "distinct_missing"
+  },
+  {
+    "index": 33,
+    "question": "How many unique customers last month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": null,
+      "intent_type": "metric",
+      "has_group_by": null,
+      "has_distinct": null,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      }
+    ],
+    "bucket": "distinct_missing"
+  },
+  {
+    "index": 35,
+    "question": "How many unique transactions today?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"a2_form_created_at\" AS TIMESTAMP) >= now() - interval '30 days'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "rolling_days",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 36,
+    "question": "How many unique transactions this week?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"a2_form_created_at\" AS TIMESTAMP) >= now() - interval '30 days'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "rolling_days",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 37,
+    "question": "How many unique transactions this month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this month' specified but no filter in SQL",
+        "expected": "WHERE clause with this month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 38,
+    "question": "How many unique transactions last month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last month' specified but no filter in SQL",
+        "expected": "WHERE clause with last month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 45,
+    "question": "What is the average ticket size today?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'today' specified but no filter in SQL",
+        "expected": "WHERE clause with today filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 46,
+    "question": "What is the average ticket size this week?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this week' specified but no filter in SQL",
+        "expected": "WHERE clause with this week filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 47,
+    "question": "What is the average ticket size this month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this month' specified but no filter in SQL",
+        "expected": "WHERE clause with this month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 48,
+    "question": "What is the average ticket size last month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\"",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'last month' specified but no filter in SQL",
+        "expected": "WHERE clause with last month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 49,
+    "question": "What is the revenue by platform?",
+    "spec": {
+      "intent": "breakdown",
+      "metric": "revenue",
+      "time_window": null,
+      "breakdown": "by platform",
+      "expected_shape": "grouped",
+      "expected_group_by": true,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_4_1\".\"address_address_line1\", \"test_4_1\".\"customer_id\", \"test_4_1\".\"payee_id\" FROM \"test_4_1\" ORDER BY \"test_4_1\".\"address_address_line1\" LIMIT 200",
+      "intent_type": "breakdown",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_group_by",
+        "description": "breakdown query missing GROUP BY",
+        "expected": "GROUP BY for grouped result",
+        "actual": "No GROUP BY in SQL",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_missing"
+  },
+  {
+    "index": 50,
+    "question": "What is the revenue this month by platform?",
+    "spec": {
+      "intent": "breakdown",
+      "metric": "revenue",
+      "time_window": "this month",
+      "breakdown": "by platform",
+      "expected_shape": "grouped",
+      "expected_group_by": true,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_4_1\".\"address_address_line1\", \"test_4_1\".\"customer_id\", \"test_4_1\".\"payee_id\" FROM \"test_4_1\" ORDER BY \"test_4_1\".\"address_address_line1\" LIMIT 200",
+      "intent_type": "breakdown",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_group_by",
+        "description": "breakdown query missing GROUP BY",
+        "expected": "GROUP BY for grouped result",
+        "actual": "No GROUP BY in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this month' specified but no filter in SQL",
+        "expected": "WHERE clause with this month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_missing"
+  }
+]

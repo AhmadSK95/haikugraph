@@ -1,0 +1,42 @@
+[
+  {
+    "index": 50,
+    "question": "What is the revenue this month by platform?",
+    "spec": {
+      "intent": "breakdown",
+      "metric": "revenue",
+      "time_window": "this month",
+      "breakdown": "by platform",
+      "expected_shape": "grouped",
+      "expected_group_by": true,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_5_1\".\"platform\", SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" GROUP BY \"test_5_1\".\"platform\" ORDER BY \"test_5_1\".\"platform\"",
+      "intent_type": "breakdown",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "missing_time_filter",
+        "description": "Time window 'this month' specified but no filter in SQL",
+        "expected": "WHERE clause with this month filter",
+        "actual": "No time filter found",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  }
+]

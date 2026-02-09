@@ -1,0 +1,2272 @@
+[
+  {
+    "index": 1,
+    "question": "What is the total revenue?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 2,
+    "question": "What is the total revenue today?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 3,
+    "question": "What is the total revenue this week?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 4,
+    "question": "What is the total revenue this month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 5,
+    "question": "What is the total revenue last month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 6,
+    "question": "What is the total revenue this year?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this year",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this year'",
+        "expected": "calendar_year",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 7,
+    "question": "What is the total revenue last 7 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "last 7 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 7 days'",
+        "expected": "rolling_days",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 8,
+    "question": "What is the total revenue last 30 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "last 30 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 30 days'",
+        "expected": "rolling_days",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 9,
+    "question": "What is the total revenue December?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "December",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'December'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 10,
+    "question": "What is the total volume?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 11,
+    "question": "What is the total volume today?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 12,
+    "question": "What is the total volume this week?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 13,
+    "question": "What is the total volume this month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 14,
+    "question": "What is the total volume last month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 15,
+    "question": "What is the total volume this year?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this year",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this year'",
+        "expected": "calendar_year",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 16,
+    "question": "What is the total volume last 7 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "last 7 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 7 days'",
+        "expected": "rolling_days",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 17,
+    "question": "What is the total volume last 30 days?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "last 30 days",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last 30 days'",
+        "expected": "rolling_days",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 18,
+    "question": "What is the total volume December?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "December",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_metric query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'December'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 19,
+    "question": "How many transactions?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 20,
+    "question": "How many transactions today?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 21,
+    "question": "How many transactions this week?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 22,
+    "question": "How many transactions this month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 23,
+    "question": "How many transactions last month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 24,
+    "question": "How many customers?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "customers",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 25,
+    "question": "How many customers today?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "customers",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 26,
+    "question": "How many customers this week?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "customers",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 27,
+    "question": "How many customers this month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "customers",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 28,
+    "question": "How many customers last month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "customers",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_count query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 29,
+    "question": "How many unique customers?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 30,
+    "question": "How many unique customers today?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 31,
+    "question": "How many unique customers this week?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 32,
+    "question": "How many unique customers this month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 33,
+    "question": "How many unique customers last month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "customers",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique customers query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 34,
+    "question": "How many unique transactions?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique transactions query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 35,
+    "question": "How many unique transactions today?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique transactions query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 36,
+    "question": "How many unique transactions this week?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique transactions query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 37,
+    "question": "How many unique transactions this month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique transactions query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 38,
+    "question": "How many unique transactions last month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_unique query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "unique_missing_distinct",
+        "description": "Unique transactions query missing DISTINCT",
+        "expected": "COUNT(DISTINCT ...)",
+        "actual": "COUNT without DISTINCT",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 39,
+    "question": "What is the average revenue per transaction?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "revenue",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 40,
+    "question": "What is the average revenue per transaction today?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "revenue",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 41,
+    "question": "What is the average revenue per transaction this week?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "revenue",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 42,
+    "question": "What is the average revenue per transaction this month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "revenue",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 43,
+    "question": "What is the average revenue per transaction last month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "revenue",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 44,
+    "question": "What is the average ticket size?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": null,
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 45,
+    "question": "What is the average ticket size today?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 46,
+    "question": "What is the average ticket size this week?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 47,
+    "question": "What is the average ticket size this month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  },
+  {
+    "index": 48,
+    "question": "What is the average ticket size last month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT \"test_1_1_merged\".\"platform_name\", SUM(TRY_CAST(\"test_1_1_merged\".\"payment_amount\" AS DOUBLE)) AS \"sum_payment_amount\" FROM \"test_1_1_merged\" WHERE EXTRACT(MONTH FROM TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP)) = 12 AND test_1_1_merged.mt103_created_at IS NOT NULL GROUP BY \"test_1_1_merged\".\"platform_name\" ORDER BY \"test_1_1_merged\".\"platform_name\"",
+      "intent_type": "metric",
+      "has_group_by": true,
+      "has_distinct": false,
+      "row_count": 4,
+      "column_count": 2
+    },
+    "violations": [
+      {
+        "type": "scalar_has_group_by",
+        "description": "Scalar scalar_avg query has GROUP BY",
+        "expected": "No GROUP BY for scalar result",
+        "actual": "GROUP BY found in SQL",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_row_count",
+        "description": "Scalar query returned multiple rows",
+        "expected": "1 row",
+        "actual": "4 rows",
+        "severity": "error"
+      },
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "group_by_over_aggregation"
+  }
+]

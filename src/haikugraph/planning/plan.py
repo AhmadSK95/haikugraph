@@ -658,6 +658,7 @@ def build_subquestions(
                     "description": f"Compute {metric['name']}",
                     "tables": [table_name],
                     "columns": [col_name],
+                    "aggregations": [{"agg": metric["aggregation"], "col": col_name}],
                     "required_joins": [],
                     "confidence": metric["confidence"],
                 }

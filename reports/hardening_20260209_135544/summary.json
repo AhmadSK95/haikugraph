@@ -1,0 +1,14 @@
+{
+  "timestamp": "2026-02-09T13:55:56.650540",
+  "planner": "deterministic",
+  "total_questions": 50,
+  "passed": 1,
+  "failed": 49,
+  "pass_rate": 0.02,
+  "failure_buckets": {
+    "group_by_over_aggregation": 48,
+    "time_filter_error": 1
+  },
+  "db_path": "data/haikugraph.duckdb",
+  "output_dir": "reports/hardening_20260209_135544"
+}
