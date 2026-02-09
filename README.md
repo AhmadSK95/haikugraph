@@ -10,8 +10,6 @@
 - [Quick Start](#quick-start)
 - [System Structure](#system-structure)
 - [CLI Commands Reference](#cli-commands-reference)
-- [Web UI](#web-ui)
-- [Service Management](#service-management)
 - [Development](#development)
 
 ---
@@ -31,8 +29,8 @@ HaikuGraph is a natural language data assistant that allows users to ask questio
 ✅ **Semantic Data Cards**: Annotates columns with types (money, timestamp, identifier, etc.)  
 ✅ **Ambiguity Resolution**: Handles unclear queries with LLM-powered disambiguation  
 ✅ **Follow-up Conversations**: Maintains context across related questions  
-✅ **Rich Visualizations**: Auto-selects charts (bar, line, table) based on query intent  
-✅ **Local-First AI**: Uses Ollama for privacy-preserving LLM operations  
+✅ **CLI-First**: Pure command-line interface, no web dependencies  
+✅ **Local-First AI**: Uses Ollama for privacy-preserving LLM operations
 
 ---
 
@@ -69,13 +67,8 @@ Answer + Charts + SQL
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                   Web UI (React)                    │
-│  - Question input  - Charts  - Transparency panel   │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTP/JSON
-┌──────────────────────▼──────────────────────────────┐
-│              Backend API (FastAPI)                   │
-│  - /ask endpoint  - Intent → Plan → Execute → Explain│
+│                   CLI Interface                      │
+│  haikugraph ask --question "..." --execute          │
 └──────────────────────┬──────────────────────────────┘
                        │
         ┌──────────────┼──────────────┐
@@ -140,7 +133,6 @@ Answer + Charts + SQL
    ollama pull llama3.1:8b        # Planner model
    ollama pull qwen2.5:7b-instruct # Narrator model
    ```
-3. **Node.js 18+** (for Web UI)
 
 ### Install HaikuGraph
 
@@ -183,11 +175,8 @@ haikugraph profile
 haikugraph cards build
 haikugraph graph build
 
-# 5. Start Web UI
-./start_ui.sh
-
-# 6. Open browser and ask questions!
-# http://localhost:3000
+# 5. Ask questions via CLI
+haikugraph ask-a6 --question "How many transactions in December?"
 ```
 
 **Example questions to try:**
@@ -222,15 +211,8 @@ haikugraph/
 │   │   └── loader.py      # Card loading
 │   ├── graph/              # Relationship discovery
 │   │   └── builder.py     # Graph construction
-│   ├── api/                # Web API
-│   │   └── server.py      # FastAPI backend
 │   └── llm/                # LLM routing
 │       └── router.py      # Ollama integration
-├── ui/                      # React frontend
-│   ├── src/
-│   │   ├── components/
-│   │   └── App.tsx
-│   └── package.json
 ├── data/                    # Data directory (gitignored)
 │   ├── *.xlsx              # Excel input files
 │   ├── haikugraph.duckdb  # DuckDB database
@@ -238,7 +220,6 @@ haikugraph/
 │   ├── graph.json          # Table relationships
 │   ├── cards/              # Semantic annotations
 │   └── plan.json           # Last query plan (for followups)
-├── start_ui.sh             # UI launcher script
 └── README.md
 ```
 
@@ -417,191 +398,6 @@ Shows: Python version, DuckDB version, data directory status, database tables
 
 ---
 
-## Web UI
-
-### Starting the UI
-
-```bash
-# Start both backend and frontend
-./start_ui.sh
-```
-
-This launches:
-- **Backend**: FastAPI server on `http://localhost:8000` (with auto-reload)
-- **Frontend**: React dev server on `http://localhost:3000`
-
-**Open in browser:** http://localhost:3000
-
-### UI Features
-
-💬 **Question Input**: Natural language query box with auto-complete  
-📊 **Visualizations**: Auto-selects bar charts, line charts, tables, or numbers  
-🔍 **Transparency Panel**: View intent, plan JSON, SQL queries, metadata  
-📝 **Conversation History**: Maintains context for follow-up questions  
-⚠️ **Warnings**: Shows LLM fallback status and errors  
-
-### Example Queries in UI
-
-```
-❓ "How many transactions do we have?"
-   → Returns count with number display
-
-❓ "What is the revenue by platform?"
-   → Returns bar chart grouped by platform
-
-❓ "Compare this month vs last month revenue"
-   → Returns comparison card with delta % and direction
-
-❓ "Show me transactions in December"
-   → Returns data table with filters applied
-```
-
-### API Endpoints
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Ask question
-curl -X POST http://localhost:8000/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question": "How many transactions?"}'
-```
-
-**API Response:**
-```json
-{
-  "final_answer": "There are 25,056 transactions.",
-  "intent": {"type": "metric", "confidence": 0.95},
-  "plan": {...},
-  "queries": ["SELECT COUNT(DISTINCT ...) FROM ..."],
-  "results": [{"row_count": 1, "preview_rows": [...]}],
-  "metadata": {"execution_time_ms": 450},
-  "warnings": [],
-  "errors": []
-}
-```
-
----
-
-## Service Management
-
-### Checking Running Services
-
-```bash
-# Check if backend is running
-curl http://localhost:8000/health
-
-# Check if frontend is running
-curl http://localhost:3000
-
-# List processes
-ps aux | grep uvicorn  # Backend
-ps aux | grep "npm"     # Frontend
-```
-
-### Stopping Services
-
-#### Option 1: Graceful Shutdown (if started in terminal)
-
-```bash
-# If you started ./start_ui.sh in foreground:
-# Press Ctrl+C in the terminal
-```
-
-#### Option 2: Kill by Process Name
-
-```bash
-# Kill backend (FastAPI/uvicorn)
-pkill -f "uvicorn haikugraph.api.server:app"
-
-# Kill frontend (npm dev server)
-pkill -f "npm run dev"
-
-# Kill both at once
-pkill -f "uvicorn haikugraph.api.server:app" && pkill -f "npm run dev"
-```
-
-#### Option 3: Kill by Port
-
-```bash
-# Find and kill process on port 8000 (backend)
-lsof -ti:8000 | xargs kill -9
-
-# Find and kill process on port 3000 (frontend)
-lsof -ti:3000 | xargs kill -9
-```
-
-#### Option 4: Kill All Node/Python Processes (Nuclear Option)
-
-```bash
-# CAUTION: This kills ALL node and python processes!
-pkill node
-pkill python
-```
-
-### Restarting Services
-
-```bash
-# Stop services
-pkill -f "uvicorn haikugraph.api.server:app" && pkill -f "npm run dev"
-
-# Wait a moment
-sleep 2
-
-# Restart
-./start_ui.sh
-```
-
-### Checking Logs
-
-```bash
-# Backend logs (if started with start_ui.sh)
-tail -f nohup.out  # Backend output
-
-# Frontend logs
-tail -f ui/npm.log  # If logging to file
-
-# Check for errors
-grep -i error nohup.out
-```
-
-### Troubleshooting
-
-**Port already in use:**
-```bash
-# Find what's using port 8000
-lsof -i:8000
-
-# Kill it
-lsof -ti:8000 | xargs kill -9
-
-# Restart
-./start_ui.sh
-```
-
-**Ollama not running:**
-```bash
-# Check Ollama status
-ollama list
-
-# Start Ollama (if needed)
-ollama serve &
-
-# Test model
-ollama run llama3.1:8b "Hello"
-```
-
-**Frontend won't start:**
-```bash
-# Install dependencies
-cd ui
-npm install
-
-# Start manually
-npm run dev
-```
-
 ---
 
 ## Development
@@ -638,8 +434,7 @@ See [System Structure](#system-structure) section above for detailed directory l
 
 ### Key Technologies
 
-- **Backend**: Python 3.11+, FastAPI, DuckDB, Pydantic
-- **Frontend**: React, TypeScript, Vite, Recharts
+- **CLI**: Python 3.11+, Click, DuckDB, Pydantic
 - **LLM**: Ollama (llama3.1:8b, qwen2.5:7b-instruct)
 - **Data**: Pandas, Openpyxl
 
