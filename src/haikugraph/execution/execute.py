@@ -473,6 +473,52 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
                 })
             continue
         
+        # Handle time_relative constraints (today, this week, last month, etc.)
+        if constraint_type == "time_relative":
+            period = constraint.get("period")
+            time_col = constraint.get("column")
+            constraint_table = constraint.get("table")
+            days = constraint.get("days")  # For "last N days" patterns
+            
+            if constraint_table in tables:
+                # Get timestamp expression with proper casting
+                if conn:
+                    ts_expr = get_timestamp_expression(constraint_table, time_col, conn)
+                else:
+                    ts_expr = f'TRY_CAST("{constraint_table}"."{time_col}" AS TIMESTAMP)'
+                
+                # Translate period to SQL
+                if period == "today":
+                    sql_expr = f"CAST({ts_expr} AS DATE) = CURRENT_DATE"
+                elif period == "yesterday":
+                    sql_expr = f"CAST({ts_expr} AS DATE) = CURRENT_DATE - INTERVAL '1 day'"
+                elif period == "this_week":
+                    sql_expr = f"{ts_expr} >= DATE_TRUNC('week', CURRENT_DATE) AND {ts_expr} < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'"
+                elif period == "last_week":
+                    sql_expr = f"{ts_expr} >= DATE_TRUNC('week', CURRENT_DATE) - INTERVAL '1 week' AND {ts_expr} < DATE_TRUNC('week', CURRENT_DATE)"
+                elif period == "this_month":
+                    sql_expr = f"{ts_expr} >= DATE_TRUNC('month', CURRENT_DATE) AND {ts_expr} < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'"
+                elif period == "last_month":
+                    sql_expr = f"{ts_expr} >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND {ts_expr} < DATE_TRUNC('month', CURRENT_DATE)"
+                elif period == "this_year":
+                    sql_expr = f"{ts_expr} >= DATE_TRUNC('year', CURRENT_DATE) AND {ts_expr} < DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year'"
+                elif period == "last_year":
+                    sql_expr = f"{ts_expr} >= DATE_TRUNC('year', CURRENT_DATE) - INTERVAL '1 year' AND {ts_expr} < DATE_TRUNC('year', CURRENT_DATE)"
+                elif period == "last_N_days" and days:
+                    sql_expr = f"{ts_expr} >= CURRENT_DATE - INTERVAL '{days} days'"
+                else:
+                    # Fallback for unknown periods
+                    sql_expr = f"{ts_expr} >= CURRENT_DATE - INTERVAL '30 days'"
+                
+                where_clauses.append(sql_expr)
+                metadata["constraints_applied"].append({
+                    "type": "time_relative",
+                    "period": period,
+                    "column": time_col,
+                    "expression": sql_expr
+                })
+            continue
+        
         # Handle value_filter constraints
         if constraint_type == "value_filter":
             constraint_table = constraint.get("table")

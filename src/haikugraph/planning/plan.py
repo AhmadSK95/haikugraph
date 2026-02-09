@@ -186,7 +186,7 @@ def detect_metrics(question: str, cards: dict, original_question: str, entities:
 
     # Aggregation patterns
     agg_patterns = {
-        "sum": [r"\btotal\b", r"\bsum\b", r"\baggregate\b"],
+        "sum": [r"\btotal\b", r"\bsum\b", r"\baggregate\b", r"\brevenue\b", r"\bvolume\b", r"\bsales\b"],
         "count": [r"\bcount\b", r"\bnumber of\b", r"\bhow many\b"],
         "avg": [r"\baverage\b", r"\bmean\b", r"\bavg\b"],
         "max": [r"\bmaximum\b", r"\bmax\b", r"\bhighest\b"],
@@ -424,21 +424,79 @@ def detect_constraints(
                 "confidence": 0.9,
             })
     
-    # Time constraints - symbolic (today, yesterday, etc.)
-    time_keywords = ["today", "yesterday", "week", "year", "recent"]
-    if any(kw in question for kw in time_keywords) and not month_match:
+    # Time constraints - relative periods (today, this month, last week, etc.)
+    # Check for specific patterns
+    relative_time_patterns = {
+        r"\btoday\b": "today",
+        r"\byesterday\b": "yesterday",
+        r"\bthis\s+week\b": "this_week",
+        r"\blast\s+week\b": "last_week",
+        r"\bthis\s+month\b": "this_month",
+        r"\blast\s+month\b": "last_month",
+        r"\bthis\s+year\b": "this_year",
+        r"\blast\s+year\b": "last_year",
+        r"\blast\s+(\d+)\s+days?\b": "last_N_days",  # e.g., "last 7 days", "last 30 days"
+    }
+    
+    detected_period = None
+    days_count = None
+    
+    # Find which pattern matches
+    for pattern, period_name in relative_time_patterns.items():
+        match = re.search(pattern, question)
+        if match:
+            detected_period = period_name
+            # Extract days count for "last N days" pattern
+            if period_name == "last_N_days":
+                days_count = match.group(1)
+            break
+    
+    if detected_period and not month_match:
+        # Find timestamp column in context tables (same logic as month detection)
+        timestamp_candidates = []
         for col_card in cards.get("column_cards", []):
             if "timestamp" in col_card.get("semantic_hints", []):
                 table = col_card.get("table", "")
+                # Skip if we have context tables and this isn't one of them
+                if context_tables and table not in context_tables:
+                    continue
                 col = col_card.get("column", "")
-                constraints.append(
-                    {
-                        "type": "time",
-                        "expression": f"{table}.{col} in last_30_days",
-                        "confidence": 0.6,
-                    }
-                )
-                break
+                # Score columns by preference
+                score = 0
+                if col == "created_at":
+                    score = 3
+                elif col == "updated_at":
+                    score = 2
+                elif "created" in col:
+                    score = 1
+                # STRONG preference for primary table if specified
+                if primary_table and table == primary_table:
+                    score += 100
+                # Bonus if table is in context
+                elif table in context_tables:
+                    score += 10
+                timestamp_candidates.append((score, table, col))
+        
+        if timestamp_candidates:
+            # Pick highest scoring timestamp column
+            timestamp_candidates.sort(reverse=True)
+            _, table, col = timestamp_candidates[0]
+            
+            # Build expression based on period type
+            if days_count:
+                expression = f"{table}.{col} in last_{days_count}_days"
+            else:
+                expression = f"{table}.{col} in {detected_period}"
+            
+            constraints.append({
+                "type": "time_relative",
+                "expression": expression,
+                "period": detected_period,
+                "days": days_count,
+                "column": col,
+                "table": table,
+                "confidence": 0.8,
+            })
     
     # Column value constraints (e.g., "with mt103", "where status = X")
     # Look for patterns like "with <value>" or "where <column> <value>"

@@ -1,0 +1,794 @@
+[
+  {
+    "index": 2,
+    "question": "What is the total revenue today?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE CAST(\"test_5_1\".\"created_at\" AS DATE) = CURRENT_DATE",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 3,
+    "question": "What is the total revenue this week?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('week', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 4,
+    "question": "What is the total revenue this month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('month', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 5,
+    "question": "What is the total revenue last month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND \"test_5_1\".\"created_at\" < DATE_TRUNC('month', CURRENT_DATE)",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 6,
+    "question": "What is the total revenue this year?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "this year",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('year', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this year'",
+        "expected": "calendar_year",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 9,
+    "question": "What is the total revenue December?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "revenue",
+      "time_window": "December",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE EXTRACT(MONTH FROM \"test_5_1\".\"created_at\") = 12",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'December'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 11,
+    "question": "What is the total volume today?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE CAST(\"test_5_1\".\"created_at\" AS DATE) = CURRENT_DATE",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 12,
+    "question": "What is the total volume this week?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('week', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 13,
+    "question": "What is the total volume this month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('month', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 14,
+    "question": "What is the total volume last month?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND \"test_5_1\".\"created_at\" < DATE_TRUNC('month', CURRENT_DATE)",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 15,
+    "question": "What is the total volume this year?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "this year",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('year', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('year', CURRENT_DATE) + INTERVAL '1 year'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this year'",
+        "expected": "calendar_year",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 18,
+    "question": "What is the total volume December?",
+    "spec": {
+      "intent": "scalar_metric",
+      "metric": "volume",
+      "time_window": "December",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT SUM(\"test_5_1\".\"linked_txn_amount\") AS \"sum_linked_txn_amount\" FROM \"test_5_1\" WHERE EXTRACT(MONTH FROM \"test_5_1\".\"created_at\") = 12",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'December'",
+        "expected": "calendar_month",
+        "actual": "month_only",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 20,
+    "question": "How many transactions today?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE CAST(TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) AS DATE) = CURRENT_DATE",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 21,
+    "question": "How many transactions this week?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) >= DATE_TRUNC('week', CURRENT_DATE) AND TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 22,
+    "question": "How many transactions this month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) >= DATE_TRUNC('month', CURRENT_DATE) AND TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 23,
+    "question": "How many transactions last month?",
+    "spec": {
+      "intent": "scalar_count",
+      "metric": "transactions",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) < DATE_TRUNC('month', CURRENT_DATE)",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 35,
+    "question": "How many unique transactions today?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE CAST(TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) AS DATE) = CURRENT_DATE",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 36,
+    "question": "How many unique transactions this week?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) >= DATE_TRUNC('week', CURRENT_DATE) AND TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 37,
+    "question": "How many unique transactions this month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) >= DATE_TRUNC('month', CURRENT_DATE) AND TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 38,
+    "question": "How many unique transactions last month?",
+    "spec": {
+      "intent": "scalar_unique",
+      "metric": "transactions",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": true
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT COUNT(DISTINCT \"test_1_1_merged\".\"transaction_id\") AS \"count_distinct_transaction_id\" FROM \"test_1_1_merged\" WHERE TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND TRY_CAST(\"test_1_1_merged\".\"created_at\" AS TIMESTAMP) < DATE_TRUNC('month', CURRENT_DATE)",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": true,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 45,
+    "question": "What is the average ticket size today?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "today",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\" WHERE CAST(\"test_5_1\".\"created_at\" AS DATE) = CURRENT_DATE",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'today'",
+        "expected": "specific_date",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 46,
+    "question": "What is the average ticket size this week?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "this week",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('week', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this week'",
+        "expected": "calendar_week",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 47,
+    "question": "What is the average ticket size this month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "this month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('month', CURRENT_DATE) AND \"test_5_1\".\"created_at\" < DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month'",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'this month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  },
+  {
+    "index": 48,
+    "question": "What is the average ticket size last month?",
+    "spec": {
+      "intent": "scalar_avg",
+      "metric": "ticket_size",
+      "time_window": "last month",
+      "breakdown": null,
+      "expected_shape": "scalar",
+      "expected_group_by": false,
+      "expected_distinct": false
+    },
+    "result": {
+      "exit_code": 0,
+      "error": null,
+      "sql": "SELECT AVG(\"test_5_1\".\"linked_txn_amount\") AS \"avg_linked_txn_amount\" FROM \"test_5_1\" WHERE \"test_5_1\".\"created_at\" >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '1 month' AND \"test_5_1\".\"created_at\" < DATE_TRUNC('month', CURRENT_DATE)",
+      "intent_type": "metric",
+      "has_group_by": false,
+      "has_distinct": false,
+      "row_count": null,
+      "column_count": null
+    },
+    "violations": [
+      {
+        "type": "wrong_time_filter",
+        "description": "Time filter type mismatch for 'last month'",
+        "expected": "calendar_month",
+        "actual": "unknown",
+        "severity": "warning"
+      }
+    ],
+    "bucket": "time_filter_error"
+  }
+]
