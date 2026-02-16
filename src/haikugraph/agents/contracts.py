@@ -404,6 +404,22 @@ class AssistantQueryResponse(BaseModel):
     # Trace
     trace_id: str = Field(..., description="Trace ID for debugging")
     runtime: dict[str, Any] = Field(default_factory=dict, description="Runtime metadata")
+    agent_trace: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per-agent execution trace for the run",
+    )
+    chart_spec: dict[str, Any] | None = Field(
+        None,
+        description="Suggested visualization specification",
+    )
+    evidence_packets: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Structured evidence objects produced by agents",
+    )
+    data_quality: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Data quality and audit score summary",
+    )
     
     # Errors
     error: str | None = Field(None, description="Error message if failed")

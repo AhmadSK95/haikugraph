@@ -1,0 +1,1769 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>dataDa Agentic Benchmark Report</title>
+  <style>
+    body {
+      font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+      margin: 0;
+      background: #eef3f8;
+      color: #102430;
+      padding: 20px;
+    }
+    h1, h2 { margin: 0 0 10px; color: #0c3d58; }
+    .section {
+      background: #fff;
+      border: 1px solid #d5e2eb;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 14px;
+      box-shadow: 0 10px 26px rgba(7, 45, 62, 0.06);
+    }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px; }
+    .chip { border: 1px solid #dde8ef; border-radius: 10px; padding: 8px 10px; background: #fbfdff; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    th, td { border-bottom: 1px solid #e8eef3; text-align: left; padding: 7px 8px; vertical-align: top; }
+    th { background: #f4f9fc; position: sticky; top: 0; }
+    .table-wrap { overflow: auto; max-height: 460px; border: 1px solid #dde8ef; border-radius: 10px; }
+    code { font-family: 'IBM Plex Mono', Menlo, monospace; font-size: 0.76rem; }
+  </style>
+</head>
+<body>
+  <div class="section">
+    <h1>dataDa Agentic POC Benchmark</h1>
+    <div class="meta">
+      <div class="chip"><strong>Generated (UTC):</strong> 2026-02-16T20:35:22.060481Z</div>
+      <div class="chip"><strong>Database:</strong> data/haikugraph.db</div>
+      <div class="chip"><strong>Health:</strong> ok | semantic_ready=True</div>
+      <div class="chip"><strong>Default Mode:</strong> auto | <strong>Recommended:</strong> local</div>
+      <div class="chip"><strong>Total Runs:</strong> 100 (25 queries × 4 modes)</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Provider Availability</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Provider</th><th>Available</th><th>Reason</th></tr></thead>
+        <tbody>
+        <tr>
+          <td>ollama</td>
+          <td>YES</td>
+          <td>reachable at http://localhost:11434; models=5; intent=qwen2.5:7b-instruct; narrator=llama3.1:8b</td>
+        </tr>
+        
+        <tr>
+          <td>openai</td>
+          <td>YES</td>
+          <td>package + key detected</td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Mode Performance Summary</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Mode</th><th>Queries</th><th>Successes</th><th>Success Rate</th>
+            <th>Avg Latency (ms)</th><th>P50</th><th>P95</th><th>Max</th>
+            <th>Avg Confidence</th><th>LLM Used Rate</th><th>LLM Effective Rate</th><th>Fallback Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td>deterministic</td>
+          <td>25</td>
+          <td>25</td>
+          <td>100.0%</td>
+          <td>35.76</td>
+          <td>27.07</td>
+          <td>72.5</td>
+          <td>146.62</td>
+          <td>0.82</td>
+          <td>0.0%</td>
+          <td>0.0%</td>
+          <td>0.0%</td>
+        </tr>
+        
+        <tr>
+          <td>local</td>
+          <td>25</td>
+          <td>25</td>
+          <td>100.0%</td>
+          <td>6372.45</td>
+          <td>6030.92</td>
+          <td>9744.58</td>
+          <td>10552.16</td>
+          <td>0.82</td>
+          <td>100.0%</td>
+          <td>100.0%</td>
+          <td>0.0%</td>
+        </tr>
+        
+        <tr>
+          <td>openai</td>
+          <td>25</td>
+          <td>25</td>
+          <td>100.0%</td>
+          <td>5631.51</td>
+          <td>4917.89</td>
+          <td>8966.11</td>
+          <td>10241.71</td>
+          <td>0.82</td>
+          <td>100.0%</td>
+          <td>100.0%</td>
+          <td>0.0%</td>
+        </tr>
+        
+        <tr>
+          <td>auto</td>
+          <td>25</td>
+          <td>25</td>
+          <td>100.0%</td>
+          <td>6262.01</td>
+          <td>5235.93</td>
+          <td>10841.41</td>
+          <td>11522.63</td>
+          <td>0.82</td>
+          <td>100.0%</td>
+          <td>100.0%</td>
+          <td>100.0%</td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Failure Buckets</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Error</th><th>Count</th></tr></thead>
+        <tbody><tr><td colspan='2'>No failures</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Detailed Run Matrix</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Query</th><th>Requested</th><th>Actual</th><th>Provider</th>
+            <th>Intent Model</th><th>Narrator Model</th><th>Success</th><th>LLM Effective</th><th>Latency (ms)</th><th>Rows</th><th>Confidence</th><th>Error</th><th>SQL (prefix)</th>
+          </tr>
+        </thead>
+        <tbody>
+        <tr>
+          <td>Total transactions</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>146.62</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total transactions in December 2025</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>135.25</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Top 5 platforms by transaction count in December 2025</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>35.68</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(MONTH FROM event_ts) = 12 GROUP BY 1 ORDER BY 2 DESC NULLS</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund count in December 2025</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>33.74</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_refund THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund rate by platform</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>16.6</td>
+          <td>10</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_refund THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 count in December 2025</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>34.09</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 rate by platform</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>19.73</td>
+          <td>10</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_mt103 THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average payment amount by platform</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>28.0</td>
+          <td>10</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by state</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>29.2</td>
+          <td>16</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;state&quot; AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by month</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>72.5</td>
+          <td>12</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT DATE_TRUNC(&#x27;month&#x27;, event_ts) AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 1 LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Unique customers</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>15.83</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Transaction count by txn_flow</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>28.99</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;txn_flow&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this month vs last month transaction count</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>41.52</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND DATE_TRUNC(&#x27;month&#x27;, event_ts) = DATE_TRUNC(&#x27;month&#x27;, CURRENT_DATE) UNION SEL</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this year vs last year total amount</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>48.84</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = EXTRACT(YEAR FROM CURRENT_DATE) UNION SELECT &#x27;comparison&#x27; AS peri</code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>26.16</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume by from_currency</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>27.07</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total quote value</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>27.53</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average quote value by from_currency</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>24.8</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, AVG(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>13.36</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count by country</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>13.48</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>University count by country</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>13.69</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, SUM(CASE WHEN is_university THEN 1 ELSE 0 END) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Payee count by state</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>14.8</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_state&quot; AS dimension, COUNT(DISTINCT payee_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Booking count</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>13.72</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT booking_key) AS metric_value FROM datada_mart_bookings WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total booked amount by currency</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>12.64</td>
+          <td>14</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;currency&quot; AS dimension, SUM(booked_amount) AS metric_value FROM datada_mart_bookings WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average rate by deal_type</td>
+          <td>deterministic</td>
+          <td>deterministic</td>
+          <td>None</td>
+          <td></td>
+          <td></td>
+          <td>YES</td>
+          <td>NO</td>
+          <td>20.26</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total transactions</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5694.38</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total transactions in December 2025</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5126.32</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Top 5 platforms by transaction count in December 2025</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8503.43</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund count in December 2025</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5024.57</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_refund THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund rate by platform</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>7284.95</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_refund THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 5</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 count in December 2025</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5217.66</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 rate by platform</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8361.83</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_mt103 THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 5</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average payment amount by platform</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>7003.39</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 5</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by state</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>7780.74</td>
+          <td>16</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;state&quot; AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by month</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>10144.44</td>
+          <td>12</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT DATE_TRUNC(&#x27;month&#x27;, event_ts) AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 1 LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Unique customers</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3869.43</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Transaction count by txn_flow</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>7116.62</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;txn_flow&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this month vs last month transaction count</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5544.44</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND DATE_TRUNC(&#x27;month&#x27;, event_ts) = DATE_TRUNC(&#x27;month&#x27;, CURRENT_DATE) UNION SEL</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this year vs last year total amount</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>6030.92</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = EXTRACT(YEAR FROM CURRENT_DATE) UNION SELECT &#x27;comparison&#x27; AS peri</code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3522.67</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume by from_currency</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4891.14</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total quote value</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>7119.23</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average quote value by from_currency</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5206.91</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, AVG(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3512.2</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count by country</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>10552.16</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>University count by country</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>9744.58</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, SUM(CASE WHEN is_university THEN 1 ELSE 0 END) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Payee count by state</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>6689.73</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_state&quot; AS dimension, COUNT(DISTINCT payee_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Booking count</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3548.19</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT booking_key) AS metric_value FROM datada_mart_bookings WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total booked amount by currency</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8163.25</td>
+          <td>14</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;currency&quot; AS dimension, SUM(booked_amount) AS metric_value FROM datada_mart_bookings WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average rate by deal_type</td>
+          <td>local</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3658.05</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total transactions</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4603.79</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total transactions in December 2025</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5834.74</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Top 5 platforms by transaction count in December 2025</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>7166.38</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund count in December 2025</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4446.77</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_refund THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund rate by platform</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8966.11</td>
+          <td>10</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_refund THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 count in December 2025</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5427.93</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 rate by platform</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8497.89</td>
+          <td>10</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_mt103 THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average payment amount by platform</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>10241.71</td>
+          <td>10</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by state</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>9624.51</td>
+          <td>16</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;state&quot; AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by month</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8806.37</td>
+          <td>12</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT DATE_TRUNC(&#x27;month&#x27;, event_ts) AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 1 LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Unique customers</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3993.32</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Transaction count by txn_flow</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5024.13</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;txn_flow&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this month vs last month transaction count</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4807.81</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND DATE_TRUNC(&#x27;month&#x27;, event_ts) = DATE_TRUNC(&#x27;month&#x27;, CURRENT_DATE - INTERVAL</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this year vs last year total amount</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5220.91</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND event_ts &gt;= CURRENT_DATE - INTERVAL &#x27;30 days&#x27; UNION SELECT &#x27;comparison&#x27; AS period, SUM(amount) </code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3378.24</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume by from_currency</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3743.34</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total quote value</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3527.5</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average quote value by from_currency</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3892.61</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, AVG(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4506.32</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count by country</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5733.67</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>University count by country</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5050.17</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, SUM(CASE WHEN is_university THEN 1 ELSE 0 END) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Payee count by state</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4884.27</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_state&quot; AS dimension, COUNT(DISTINCT payee_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Booking count</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4091.19</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT booking_key) AS metric_value FROM datada_mart_bookings WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total booked amount by currency</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4917.89</td>
+          <td>14</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;currency&quot; AS dimension, SUM(booked_amount) AS metric_value FROM datada_mart_bookings WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average rate by deal_type</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>openai</td>
+          <td>gpt-4o-mini</td>
+          <td>gpt-4o-mini</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4400.12</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total transactions</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3322.94</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total transactions in December 2025</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4703.18</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Top 5 platforms by transaction count in December 2025</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8128.3</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund count in December 2025</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4749.65</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_refund THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>Refund rate by platform</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>6956.5</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_refund THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 5</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 count in December 2025</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5004.22</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = 2025 AND EXTRACT(MONTH FROM event_ts) = 12</code></td>
+        </tr>
+        
+        <tr>
+          <td>MT103 rate by platform</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8363.56</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(CASE WHEN has_mt103 THEN 1.0 ELSE 0.0 END) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 5</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average payment amount by platform</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>7691.44</td>
+          <td>5</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;platform_name&quot; AS dimension, AVG(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 5</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by state</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>10941.97</td>
+          <td>16</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;state&quot; AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total amount by month</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>11522.63</td>
+          <td>12</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT DATE_TRUNC(&#x27;month&#x27;, event_ts) AS dimension, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 1 LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Unique customers</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3368.1</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Transaction count by txn_flow</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4290.9</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;txn_flow&quot; AS dimension, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this month vs last month transaction count</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5330.08</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND DATE_TRUNC(&#x27;month&#x27;, event_ts) = DATE_TRUNC(&#x27;month&#x27;, CURRENT_DATE) UNION SEL</code></td>
+        </tr>
+        
+        <tr>
+          <td>Compare this year vs last year total amount</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5889.29</td>
+          <td>2</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &#x27;current&#x27; AS period, SUM(amount) AS metric_value FROM datada_mart_transactions WHERE 1=1 AND event_ts IS NOT NULL AND EXTRACT(YEAR FROM event_ts) = EXTRACT(YEAR FROM CURRENT_DATE) UNION SELECT &#x27;comparison&#x27; AS peri</code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3949.14</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Quote volume by from_currency</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>5235.93</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total quote value</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4318.08</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT SUM(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average quote value by from_currency</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>4391.92</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;from_currency&quot; AS dimension, AVG(total_amount_to_be_paid) AS metric_value FROM datada_mart_quotes WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3240.98</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Customer count by country</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8709.22</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, COUNT(DISTINCT customer_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>University count by country</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>9597.53</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_country&quot; AS dimension, SUM(CASE WHEN is_university THEN 1 ELSE 0 END) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Payee count by state</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>8588.01</td>
+          <td>20</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;address_state&quot; AS dimension, COUNT(DISTINCT payee_key) AS metric_value FROM datada_dim_customers WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Booking count</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3423.66</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT booking_key) AS metric_value FROM datada_mart_bookings WHERE 1=1</code></td>
+        </tr>
+        
+        <tr>
+          <td>Total booked amount by currency</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>10841.41</td>
+          <td>14</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT &quot;currency&quot; AS dimension, SUM(booked_amount) AS metric_value FROM datada_mart_bookings WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 20</code></td>
+        </tr>
+        
+        <tr>
+          <td>Average rate by deal_type</td>
+          <td>auto</td>
+          <td>local</td>
+          <td>ollama</td>
+          <td>qwen2.5:7b-instruct</td>
+          <td>llama3.1:8b</td>
+          <td>YES</td>
+          <td>YES</td>
+          <td>3991.51</td>
+          <td>1</td>
+          <td>high (0.82)</td>
+          <td></td>
+          <td><code>SELECT COUNT(DISTINCT transaction_key) AS metric_value FROM datada_mart_transactions WHERE 1=1</code></td>
+        </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</body>
+</html>
