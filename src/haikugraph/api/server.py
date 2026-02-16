@@ -980,7 +980,7 @@ def get_ui_html() -> str:
     </script>
 </body>
 </html>
-"""
+""".replace('\\"', '"')
 
 
 app = create_app()
