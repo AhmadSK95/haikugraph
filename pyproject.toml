@@ -1,7 +1,7 @@
 [project]
 name = "haikugraph"
 version = "0.1.0"
-description = "Data assistant with graph-based analysis"
+description = "dataDa intelligent data assistant"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -10,6 +10,7 @@ dependencies = [
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
     "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
     "requests>=2.31.0",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
@@ -17,6 +18,8 @@ dependencies = [
 
 [project.scripts]
 haikugraph = "haikugraph.cli:main"
+datada = "haikugraph.cli:main"
+datada-web = "haikugraph.api.server:main"
 
 [tool.ruff]
 line-length = 100

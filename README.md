@@ -1,6 +1,19 @@
-# HaikuGraph
+# dataDa (formerly HaikuGraph)
 
 **A hybrid AI data assistant that combines deterministic planning with LLM enhancement for natural language queries over structured data.**
+
+## Quick Launch (Web)
+
+```bash
+source .venv/bin/activate
+./run.sh
+```
+
+Open `http://localhost:8000` and use the `LLM Mode` selector:
+- `Auto`: choose local Ollama first, then OpenAI, else deterministic fallback.
+- `Local Ollama`: force local model usage.
+- `OpenAI`: force OpenAI API usage.
+- `Deterministic`: run without an LLM.
 
 ## Table of Contents
 

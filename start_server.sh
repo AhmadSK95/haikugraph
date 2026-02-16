@@ -1,27 +1,17 @@
 #!/bin/bash
 
-# HaikuGraph Backend Server Startup Script
+# dataDa server startup script
+set -e
 
-echo "🚀 Starting HaikuGraph Backend Server..."
-echo ""
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-# Activate virtual environment if it exists
 if [ -d ".venv" ]; then
-    echo "📦 Activating virtual environment..."
-    source .venv/bin/activate
+  source .venv/bin/activate
 fi
 
-# Check if database exists
-if [ ! -f "./data/haikugraph.duckdb" ]; then
-    echo "⚠️  Warning: Database not found at ./data/haikugraph.duckdb"
-    echo "   Run 'haikugraph ingest' first to set up the database."
-    echo ""
-fi
+echo "Starting dataDa server..."
+echo "Web UI:   http://localhost:8000"
+echo "API docs: http://localhost:8000/docs"
 
-# Start the server
-echo "🌐 Server will be available at: http://localhost:8000"
-echo "📊 API docs available at: http://localhost:8000/docs"
-echo ""
-
-cd "$(dirname "$0")"
-uvicorn haikugraph.api.server:app --host 0.0.0.0 --port 8000 --reload
+exec uvicorn haikugraph.api.server:app --host 0.0.0.0 --port 8000 --reload
