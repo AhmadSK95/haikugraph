@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -118,29 +119,31 @@ class SemanticLayerManager:
         self.db_path = Path(db_path)
         self._prepared_mtime: float | None = None
         self._catalog: dict[str, Any] | None = None
+        self._lock = threading.RLock()
 
     def prepare(self, *, force: bool = False) -> dict[str, Any]:
-        if not self.db_path.exists():
-            raise FileNotFoundError(f"Database not found: {self.db_path}")
+        with self._lock:
+            if not self.db_path.exists():
+                raise FileNotFoundError(f"Database not found: {self.db_path}")
 
-        mtime = self.db_path.stat().st_mtime
-        if not force and self._catalog is not None and self._prepared_mtime == mtime:
-            return self._catalog
+            mtime = self.db_path.stat().st_mtime
+            if not force and self._catalog is not None and self._prepared_mtime == mtime:
+                return self._catalog
 
-        conn = duckdb.connect(str(self.db_path), read_only=False)
-        try:
-            source_tables = self._detect_source_tables(conn)
-            self._build_transactions_view(conn, source_tables.get("transactions"))
-            self._build_quotes_view(conn, source_tables.get("quotes"))
-            self._build_customers_view(conn, source_tables.get("customers"))
-            self._build_bookings_view(conn, source_tables.get("bookings"))
-            catalog = self._build_catalog(conn, source_tables)
-        finally:
-            conn.close()
+            conn = duckdb.connect(str(self.db_path), read_only=False)
+            try:
+                source_tables = self._detect_source_tables(conn)
+                self._build_transactions_view(conn, source_tables.get("transactions"))
+                self._build_quotes_view(conn, source_tables.get("quotes"))
+                self._build_customers_view(conn, source_tables.get("customers"))
+                self._build_bookings_view(conn, source_tables.get("bookings"))
+                catalog = self._build_catalog(conn, source_tables)
+            finally:
+                conn.close()
 
-        self._catalog = catalog
-        self._prepared_mtime = mtime
-        return catalog
+            self._catalog = catalog
+            self._prepared_mtime = mtime
+            return catalog
 
     def _detect_source_tables(self, conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
         tables = [
@@ -629,19 +632,36 @@ class AgenticAnalyticsTeam:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
-    def run(self, goal: str, runtime: RuntimeSelection) -> AssistantQueryResponse:
+    def run(
+        self,
+        goal: str,
+        runtime: RuntimeSelection,
+        *,
+        conversation_context: list[dict[str, Any]] | None = None,
+        storyteller_mode: bool = False,
+    ) -> AssistantQueryResponse:
         trace_id = str(uuid.uuid4())
         trace: list[dict[str, Any]] = []
         started = time.perf_counter()
+        history = conversation_context or []
 
         try:
+            effective_goal = self._run_agent(
+                trace,
+                "ContextAgent",
+                "followup_resolution",
+                self._resolve_contextual_goal,
+                goal,
+                history,
+                runtime,
+            )
             catalog = self._run_agent(trace, "DataEngineeringTeam", "semantic_layer", self.semantic.prepare)
             mission = self._run_agent(
                 trace,
                 "ChiefAnalystAgent",
                 "supervision",
                 self._chief_analyst,
-                goal,
+                effective_goal,
                 runtime,
                 catalog,
             )
@@ -650,7 +670,7 @@ class AgenticAnalyticsTeam:
                 "IntakeAgent",
                 "goal_structuring",
                 self._intake_agent,
-                goal,
+                effective_goal,
                 runtime,
                 mission,
                 catalog,
@@ -661,7 +681,7 @@ class AgenticAnalyticsTeam:
                 "GovernanceAgent",
                 "policy_gate",
                 self._governance_precheck,
-                goal,
+                effective_goal,
             )
             if not pre_gov["allowed"]:
                 return AssistantQueryResponse(
@@ -686,6 +706,61 @@ class AgenticAnalyticsTeam:
                     agent_trace=trace,
                     suggested_questions=["Ask an aggregated business metric instead."],
                     data_quality=catalog.get("quality", {}),
+                )
+
+            if intake.get("intent") == "data_overview":
+                overview = self._run_agent(
+                    trace,
+                    "CatalogExplainerAgent",
+                    "dataset_overview",
+                    self._data_overview_agent,
+                    goal,
+                    catalog,
+                    storyteller_mode,
+                )
+                total_ms = (time.perf_counter() - started) * 1000
+                trace.append(
+                    {
+                        "agent": "ChiefAnalystAgent",
+                        "role": "finalize_response",
+                        "status": "success",
+                        "duration_ms": round(total_ms, 2),
+                        "summary": "overview response assembled",
+                    }
+                )
+                return AssistantQueryResponse(
+                    success=True,
+                    answer_markdown=overview["answer_markdown"],
+                    confidence=ConfidenceLevel.HIGH,
+                    confidence_score=0.95,
+                    definition_used="semantic catalog overview",
+                    evidence=[
+                        EvidenceItem(
+                            description="Semantic marts available",
+                            value=str(len(catalog.get("marts", {}))),
+                            source="semantic layer",
+                            sql_reference=None,
+                        )
+                    ],
+                    sanity_checks=[
+                        SanityCheck(
+                            check_name="catalog_ready",
+                            passed=True,
+                            message="Semantic marts built and discoverable.",
+                        )
+                    ],
+                    trace_id=trace_id,
+                    runtime=self._runtime_payload(runtime),
+                    agent_trace=trace,
+                    chart_spec={
+                        "type": "table",
+                        "columns": ["mart", "row_count"],
+                        "title": "Available semantic marts",
+                    },
+                    data_quality=catalog.get("quality", {}),
+                    sample_rows=overview.get("sample_rows", []),
+                    columns=["mart", "row_count"],
+                    suggested_questions=overview.get("suggested_questions", []),
                 )
 
             retrieval = self._run_agent(
@@ -769,6 +844,8 @@ class AgenticAnalyticsTeam:
                 execution,
                 audit,
                 runtime,
+                storyteller_mode,
+                history,
             )
             chart_spec = self._run_agent(
                 trace,
@@ -932,6 +1009,104 @@ class AgenticAnalyticsTeam:
             "available_marts": list(catalog.get("marts", {}).keys()),
         }
 
+    def _resolve_contextual_goal(
+        self,
+        goal: str,
+        conversation_context: list[dict[str, Any]],
+        runtime: RuntimeSelection,
+    ) -> str:
+        if not conversation_context:
+            return goal
+
+        lower = goal.lower().strip()
+        followup = (
+            len(lower) < 48
+            or lower.startswith(("and ", "also ", "what about", "now ", "for that"))
+            or any(token in lower for token in ["same", "that", "those", "it", "them"])
+        )
+        if not followup:
+            return goal
+
+        last_turn = conversation_context[-1]
+        last_goal = str(last_turn.get("goal") or last_turn.get("user_goal") or "").strip()
+        if not last_goal:
+            return goal
+
+        if runtime.use_llm and runtime.provider:
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "Rewrite the follow-up question as a standalone analytics question. "
+                        "Return JSON only with key standalone_goal."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "previous_question": last_goal,
+                            "follow_up": goal,
+                        }
+                    ),
+                },
+            ]
+            try:
+                raw = call_llm(
+                    messages,
+                    role="intent",
+                    provider=runtime.provider,
+                    model=runtime.intent_model,
+                    timeout=20,
+                )
+                parsed = _extract_json_payload(raw)
+                rewritten = parsed.get("standalone_goal") if isinstance(parsed, dict) else None
+                if isinstance(rewritten, str) and rewritten.strip():
+                    return rewritten.strip()
+            except Exception:
+                pass
+
+        return f"{goal}. Context: previous question was '{last_goal}'."
+
+    def _data_overview_agent(
+        self,
+        goal: str,
+        catalog: dict[str, Any],
+        storyteller_mode: bool,
+    ) -> dict[str, Any]:
+        marts = catalog.get("marts", {})
+        rows = [
+            {"mart": mart, "row_count": meta.get("row_count", 0)}
+            for mart, meta in marts.items()
+        ]
+        rows.sort(key=lambda x: x["row_count"], reverse=True)
+
+        bullets = []
+        for row in rows:
+            bullets.append(f"- `{row['mart']}`: {_fmt_number(row['row_count'])} rows")
+
+        intro = "Here is the map of your data." if storyteller_mode else "Here is what data you currently have."
+        answer = (
+            f"**{goal}**\n\n"
+            f"{intro}\n\n"
+            + "\n".join(bullets)
+            + "\n\nI can answer questions on transactions, quotes, customers, and bookings."
+        )
+        if storyteller_mode:
+            answer += (
+                "\n\nThink of this as four chapters: payments, quotes, customer profiles, and booking activity."
+            )
+
+        return {
+            "answer_markdown": answer,
+            "sample_rows": rows,
+            "suggested_questions": [
+                "Show total transaction amount by month",
+                "Show MT103 count by month and platform",
+                "Which countries have the most customers?",
+            ],
+        }
+
     def _intake_agent(
         self,
         goal: str,
@@ -964,7 +1139,7 @@ class AgenticAnalyticsTeam:
                 "role": "system",
                 "content": (
                     "You are IntakeAgent in an analytics team. "
-                    "Return only JSON with keys: intent, domain, metric, dimension, "
+                    "Return only JSON with keys: intent, domain, metric, dimension, dimensions, "
                     "top_n, time_filter, and value_filters."
                 ),
             },
@@ -994,9 +1169,35 @@ class AgenticAnalyticsTeam:
         lower = g.lower()
 
         intent = "metric"
-        if any(k in lower for k in [" vs ", " versus ", "compare", "compared"]):
+        if any(
+            k in lower
+            for k in [
+                "what kind of data",
+                "what kinda data",
+                "what data do i have",
+                "what can i ask",
+                "show available data",
+                "describe my data",
+                "what tables do i have",
+            ]
+        ):
+            intent = "data_overview"
+        elif any(k in lower for k in [" vs ", " versus ", "compare", "compared"]):
             intent = "comparison"
-        elif any(k in lower for k in ["top ", "split by", "breakdown", " by ", " per ", "each "]):
+        elif any(
+            k in lower
+            for k in [
+                "top ",
+                "split by",
+                "breakdown",
+                " by ",
+                " per ",
+                "each ",
+                "month wise",
+                "platform wise",
+                "country wise",
+            ]
+        ):
             intent = "grouped_metric"
         elif any(k in lower for k in ["list", "show rows", "display rows", "show me all"]):
             intent = "lookup"
@@ -1053,43 +1254,62 @@ class AgenticAnalyticsTeam:
             else:
                 metric = "customer_count"
 
-        dimension = None
-        if any(k in lower for k in ["by month", "monthly", "month-wise", "trend"]):
-            dimension = "__month__"
-        else:
-            dim_candidates = {
-                "transactions": {
-                    "platform": "platform_name",
-                    "state": "state",
-                    "status": "payment_status",
-                    "flow": "txn_flow",
-                    "customer": "customer_id",
-                },
-                "quotes": {
-                    "from currency": "from_currency",
-                    "to currency": "to_currency",
-                    "currency": "from_currency",
-                    "status": "status",
-                    "purpose": "purpose_code",
-                },
-                "customers": {
-                    "country": "address_country",
-                    "state": "address_state",
-                    "status": "status",
-                    "type": "type",
-                    "university": "is_university",
-                },
-                "bookings": {
-                    "currency": "currency",
-                    "status": "status",
-                    "deal": "deal_type",
-                    "linked": "linked_txn_status",
-                },
-            }
-            for key, col in dim_candidates.get(domain, {}).items():
-                if key in lower and any(t in lower for t in [" by ", "split", "breakdown", "top"]):
-                    dimension = col
-                    break
+        dim_candidates = {
+            "transactions": {
+                "platform": "platform_name",
+                "state": "state",
+                "status": "payment_status",
+                "flow": "txn_flow",
+                "customer": "customer_id",
+                "month": "__month__",
+            },
+            "quotes": {
+                "from currency": "from_currency",
+                "to currency": "to_currency",
+                "currency": "from_currency",
+                "status": "status",
+                "purpose": "purpose_code",
+                "month": "__month__",
+            },
+            "customers": {
+                "country": "address_country",
+                "state": "address_state",
+                "status": "status",
+                "type": "type",
+                "university": "is_university",
+                "month": "__month__",
+            },
+            "bookings": {
+                "currency": "currency",
+                "status": "status",
+                "deal": "deal_type",
+                "linked": "linked_txn_status",
+                "month": "__month__",
+            },
+        }
+
+        dimensions: list[str] = []
+        if re.search(r"\b(by month|monthly|month[\s-]?wise|trend)\b", lower):
+            dimensions.append("__month__")
+
+        dim_signal = any(
+            t in lower for t in [" by ", "split", "breakdown", "top", "wise", "per ", "month wise"]
+        )
+        for key, col in dim_candidates.get(domain, {}).items():
+            if key == "month":
+                continue
+            if key in lower and dim_signal and col not in dimensions:
+                dimensions.append(col)
+
+        if intent == "grouped_metric" and not dimensions and domain in dim_candidates:
+            # Fallback grouped intent: prefer first stable dimension for readable grouping.
+            default_col = next(iter(dim_candidates[domain].values()))
+            if default_col != "__month__":
+                dimensions.append(default_col)
+
+        if len(dimensions) > 2:
+            dimensions = dimensions[:2]
+        dimension = dimensions[0] if dimensions else None
 
         top_n = 20
         top_match = re.search(r"\btop\s+(\d+)\b", lower)
@@ -1141,6 +1361,7 @@ class AgenticAnalyticsTeam:
             "domain": domain,
             "metric": metric,
             "dimension": dimension,
+            "dimensions": dimensions,
             "top_n": top_n,
             "time_filter": time_filter,
             "value_filters": value_filters,
@@ -1178,9 +1399,21 @@ class AgenticAnalyticsTeam:
             fallback_metric, metric_expr = next(iter(retrieval["metrics"].items()))
             intake["metric"] = fallback_metric
 
-        dimension = intake.get("dimension")
-        if dimension and dimension != "__month__" and dimension not in retrieval["columns"]:
-            dimension = None
+        raw_dims = intake.get("dimensions")
+        if not isinstance(raw_dims, list):
+            raw_dims = [intake.get("dimension")] if intake.get("dimension") else []
+        dimensions: list[str] = []
+        for dim in raw_dims:
+            if not isinstance(dim, str):
+                continue
+            if dim == "__month__":
+                dimensions.append(dim)
+                continue
+            if dim in retrieval["columns"]:
+                dimensions.append(dim)
+        if len(dimensions) > 2:
+            dimensions = dimensions[:2]
+        dimension = dimensions[0] if dimensions else None
 
         return {
             "intent": intake["intent"],
@@ -1188,13 +1421,14 @@ class AgenticAnalyticsTeam:
             "metric": intake["metric"],
             "metric_expr": metric_expr,
             "dimension": dimension,
+            "dimensions": dimensions,
             "time_column": retrieval.get("preferred_time_column"),
             "time_filter": intake.get("time_filter"),
             "value_filters": intake.get("value_filters", []),
             "top_n": max(1, min(100, int(intake.get("top_n", 20)))),
             "definition_used": (
                 f"{intake['metric']} on {retrieval['table']}"
-                + (f" grouped by {dimension}" if dimension else "")
+                + (f" grouped by {', '.join(dimensions)}" if dimensions else "")
             ),
             "row_count_hint": retrieval["row_count"],
         }
@@ -1264,21 +1498,26 @@ class AgenticAnalyticsTeam:
                 f"UNION "
                 f"SELECT 'comparison' AS period, {metric_expr} AS metric_value FROM {table} WHERE {previous_where}"
             )
-        elif intent in {"grouped_metric"} and plan.get("dimension"):
-            if plan["dimension"] == "__month__" and time_col:
-                dim_expr = f"DATE_TRUNC('month', {time_col})"
-                order_expr = "1"
-            elif plan["dimension"] == "__month__":
-                dim_expr = "'unknown_month'"
-                order_expr = "2 DESC"
-            else:
-                dim_expr = _q(plan["dimension"])
-                order_expr = "2 DESC NULLS LAST, 1 ASC"
+        elif intent in {"grouped_metric"} and (plan.get("dimensions") or plan.get("dimension")):
+            dims = plan.get("dimensions") or [plan.get("dimension")]
+            select_parts: list[str] = []
+            for dim in dims:
+                if dim == "__month__" and time_col:
+                    select_parts.append(f"DATE_TRUNC('month', {time_col}) AS month_bucket")
+                elif dim == "__month__":
+                    select_parts.append("'unknown_month' AS month_bucket")
+                else:
+                    # Keep semantic dimension names in output for readability.
+                    select_parts.append(f"{_q(dim)} AS {_q(dim)}")
 
+            metric_idx = len(select_parts) + 1
+            group_by = ", ".join(str(i) for i in range(1, len(select_parts) + 1))
+            order_parts = [f"{metric_idx} DESC NULLS LAST"]
+            order_parts.extend(f"{i} ASC" for i in range(1, len(select_parts) + 1))
             sql = (
-                f"SELECT {dim_expr} AS dimension, {metric_expr} AS metric_value "
+                f"SELECT {', '.join(select_parts)}, {metric_expr} AS metric_value "
                 f"FROM {table} WHERE {where_clause} "
-                f"GROUP BY 1 ORDER BY {order_expr} LIMIT {plan['top_n']}"
+                f"GROUP BY {group_by} ORDER BY {', '.join(order_parts)} LIMIT {plan['top_n']}"
             )
         elif intent == "lookup":
             sql = f"SELECT * FROM {table} WHERE {where_clause} LIMIT {plan['top_n']}"
@@ -1302,7 +1541,9 @@ class AgenticAnalyticsTeam:
             if not col:
                 continue
             safe_value = value.replace("'", "''")
-            clauses.append(f"LOWER(COALESCE({_q(col)}, '')) = LOWER('{safe_value}')")
+            clauses.append(
+                f"LOWER(COALESCE(CAST({_q(col)} AS VARCHAR), '')) = LOWER('{safe_value}')"
+            )
 
         return " AND ".join(clauses)
 
@@ -1437,8 +1678,10 @@ class AgenticAnalyticsTeam:
         execution: dict[str, Any],
         audit: dict[str, Any],
         runtime: RuntimeSelection,
+        storyteller_mode: bool,
+        conversation_context: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        fallback = self._narrative_deterministic(goal, plan, execution)
+        fallback = self._narrative_deterministic(goal, plan, execution, storyteller_mode)
 
         if not runtime.use_llm or not runtime.provider or not execution["success"]:
             fallback["suggested_questions"] = self._suggested_questions(plan)
@@ -1452,16 +1695,21 @@ class AgenticAnalyticsTeam:
                 "metric": plan["metric"],
                 "intent": plan["intent"],
                 "dimension": plan.get("dimension"),
+                "dimensions": plan.get("dimensions", []),
             },
             "rows": execution["sample_rows"][:8],
             "row_count": execution["row_count"],
             "audit_warnings": audit.get("warnings", []),
+            "conversation_context": conversation_context[-3:],
+            "style": "storyteller" if storyteller_mode else "professional_conversational",
         }
         messages = [
             {
                 "role": "system",
                 "content": (
                     "You are NarrativeAgent in a data analytics team. "
+                    "Write clear, friendly answers. Avoid jargon. "
+                    "If style is storyteller, explain insights as a short story with context and next action. "
                     "Return JSON only with keys: answer_markdown and suggested_questions."
                 ),
             },
@@ -1482,7 +1730,7 @@ class AgenticAnalyticsTeam:
             parsed = _extract_json_payload(raw)
             if parsed and isinstance(parsed.get("answer_markdown"), str):
                 return {
-                    "answer_markdown": parsed["answer_markdown"],
+                    "answer_markdown": self._clean_llm_answer_markdown(parsed["answer_markdown"]),
                     "headline_value": fallback.get("headline_value"),
                     "suggested_questions": self._normalize_suggested_questions(
                         parsed.get("suggested_questions"),
@@ -1498,7 +1746,7 @@ class AgenticAnalyticsTeam:
                     fallback["llm_narrative_used"] = False
                     return fallback
                 return {
-                    "answer_markdown": raw_text,
+                    "answer_markdown": self._clean_llm_answer_markdown(raw_text),
                     "headline_value": fallback.get("headline_value"),
                     "suggested_questions": self._suggested_questions(plan),
                     "llm_narrative_used": True,
@@ -1515,6 +1763,7 @@ class AgenticAnalyticsTeam:
         goal: str,
         plan: dict[str, Any],
         execution: dict[str, Any],
+        storyteller_mode: bool = False,
     ) -> dict[str, Any]:
         if not execution["success"]:
             return {
@@ -1543,12 +1792,14 @@ class AgenticAnalyticsTeam:
             line = f"Difference: {_fmt_number(delta)}"
             if delta_pct is not None:
                 line += f" ({delta_pct:+.2f}%)"
+            intro = "Here is the story in two snapshots:" if storyteller_mode else ""
             return {
                 "answer_markdown": (
                     f"**Comparison result for: {goal}**\n\n"
-                    f"- Current: {_fmt_number(current)}\n"
-                    f"- Comparison: {_fmt_number(other)}\n"
-                    f"- {line}"
+                    + (f"{intro}\n\n" if intro else "")
+                    + f"- Current: {_fmt_number(current)}\n"
+                    + f"- Comparison: {_fmt_number(other)}\n"
+                    + f"- {line}"
                 ),
                 "headline_value": current,
             }
@@ -1569,14 +1820,22 @@ class AgenticAnalyticsTeam:
             bullets = []
             for row in preview:
                 keys = list(row.keys())
-                if len(keys) >= 2:
+                if len(keys) == 2:
                     bullets.append(f"- {row[keys[0]]}: {_fmt_number(row[keys[1]])}")
+                elif len(keys) >= 3:
+                    left = " | ".join(str(row[k]) for k in keys[:-1])
+                    bullets.append(f"- {left}: {_fmt_number(row[keys[-1]])}")
+            intro = (
+                "I looked at the pattern across groups and here are the leaders:"
+                if storyteller_mode
+                else f"Top {len(preview)} groups:"
+            )
             return {
                 "answer_markdown": (
                     f"**{goal}**\n\n"
-                    f"Top {len(preview)} groups:\n" + "\n".join(bullets)
+                    f"{intro}\n" + "\n".join(bullets)
                 ),
-                "headline_value": preview[0].get(list(preview[0].keys())[1]) if preview else None,
+                "headline_value": preview[0].get(list(preview[0].keys())[-1]) if preview else None,
             }
 
         return {
@@ -1601,12 +1860,17 @@ class AgenticAnalyticsTeam:
             }
 
         if plan["intent"] == "grouped_metric" and len(cols) >= 2:
-            chart_type = "line" if plan.get("dimension") == "__month__" else "bar"
+            dims = plan.get("dimensions") or [plan.get("dimension")]
+            chart_type = "line" if "__month__" in dims else "bar"
+            x_col = cols[0]
+            y_col = cols[-1]
+            series_col = cols[1] if len(cols) >= 3 else None
             return {
                 "type": chart_type,
-                "x": cols[0],
-                "y": cols[1],
-                "title": f"{plan['metric']} by {plan.get('dimension') or cols[0]}",
+                "x": x_col,
+                "y": y_col,
+                "series": series_col,
+                "title": f"{plan['metric']} by {', '.join([d for d in dims if d]) or x_col}",
             }
 
         if len(cols) == 1 and execution["row_count"] == 1:
@@ -1658,6 +1922,17 @@ class AgenticAnalyticsTeam:
             if isinstance(value, str) and value.strip():
                 cleaned[key] = value.strip()
 
+        raw_dims = parsed.get("dimensions")
+        dims: list[str] = []
+        if isinstance(raw_dims, list):
+            for item in raw_dims:
+                if isinstance(item, str) and item.strip():
+                    dims.append(item.strip())
+        if dims:
+            cleaned["dimensions"] = dims[:2]
+            if "dimension" not in cleaned:
+                cleaned["dimension"] = dims[0]
+
         top_n = parsed.get("top_n")
         if top_n is not None:
             try:
@@ -1701,6 +1976,17 @@ class AgenticAnalyticsTeam:
         if isinstance(value, str) and value.strip():
             return [value.strip()]
         return self._suggested_questions(plan)
+
+    def _clean_llm_answer_markdown(self, text: str) -> str:
+        cleaned = text.strip()
+        cleaned = re.sub(r"^\**\s*answer markdown\s*\**\s*:?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"^\s*```(?:markdown|md)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned, flags=re.IGNORECASE)
+        fenced = re.match(r"^```(?:markdown|md)?\s*(.*?)\s*```$", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        if fenced:
+            cleaned = fenced.group(1).strip()
+        cleaned = cleaned.replace("\r\n", "\n").strip()
+        return cleaned or text.strip()
 
     def _to_confidence(self, score: float) -> ConfidenceLevel:
         if score >= 0.8:

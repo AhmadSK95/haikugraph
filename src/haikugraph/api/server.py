@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import socket
+import threading
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,8 @@ class QueryRequest(BaseModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
     llm_mode: LLMMode = Field(default=LLMMode.AUTO)
     local_model: str | None = Field(default=None)
+    session_id: str | None = Field(default=None, max_length=128)
+    storyteller_mode: bool = Field(default=False)
 
 
 class LegacyAskRequest(BaseModel):
@@ -469,6 +472,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     app.state.db_path = db_path or _get_db_path()
     app.state.team = AgenticAnalyticsTeam(app.state.db_path)
+    app.state.sessions: dict[str, list[dict[str, Any]]] = {}
+    app.state.sessions_lock = threading.RLock()
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
@@ -659,7 +664,39 @@ def _register_routes(app: FastAPI) -> None:
                 )
 
         runtime = _resolve_runtime(request.llm_mode)
-        return app.state.team.run(request.goal, runtime)
+        session_id = (request.session_id or "default").strip()[:128] or "default"
+
+        with app.state.sessions_lock:
+            history = list(app.state.sessions.get(session_id, []))
+
+        response = app.state.team.run(
+            request.goal,
+            runtime,
+            conversation_context=history,
+            storyteller_mode=request.storyteller_mode,
+        )
+
+        turn = {
+            "goal": request.goal,
+            "user_goal": request.goal,
+            "answer_markdown": response.answer_markdown,
+            "success": response.success,
+            "sql": response.sql,
+            "confidence_score": response.confidence_score,
+        }
+        with app.state.sessions_lock:
+            turns = app.state.sessions.setdefault(session_id, [])
+            turns.append(turn)
+            if len(turns) > 20:
+                del turns[:-20]
+            conversation_turns = len(turns)
+
+        response.runtime = {
+            **(response.runtime or {}),
+            "session_id": session_id,
+            "conversation_turns": conversation_turns,
+        }
+        return response
 
     @app.post("/ask", response_model=LegacyAskResponse)
     async def ask(request: LegacyAskRequest) -> LegacyAskResponse:
@@ -691,373 +728,625 @@ def get_ui_html() -> str:
   <title>dataDa</title>
   <style>
     :root {
-      --ink: #0f2430;
-      --muted: #617783;
+      --canvas: #f1f7f8;
       --panel: #ffffff;
-      --canvas: #eef4f8;
-      --accent: #0ea37f;
-      --accent2: #0f3f5b;
-      --line: #d7e3ea;
-      --ok: #1c8a4d;
-      --warn: #b15b13;
+      --ink: #092532;
+      --subtle: #617784;
+      --line: #d6e4e8;
+      --brand: #0ca57d;
+      --brand-dark: #0e5677;
+      --ok-bg: #e8f8ef;
+      --ok-ink: #217a4d;
+      --warn-bg: #fff4e7;
+      --warn-ink: #9f5d1d;
+      --chip: #f7fbfd;
       --mono: "IBM Plex Mono", Menlo, Consolas, monospace;
       --sans: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+      --soft-shadow: 0 10px 26px rgba(5, 44, 63, 0.08);
     }
 
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: var(--sans);
-      background:
-        radial-gradient(circle at 90% -5%, #d2f7ec 0%, transparent 35%),
-        radial-gradient(circle at -10% 8%, #d9ecff 0%, transparent 40%),
-        var(--canvas);
-      color: var(--ink);
       min-height: 100vh;
+      font-family: var(--sans);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0% 0%, #d8ecff 0%, transparent 34%),
+        radial-gradient(circle at 100% 0%, #c9f7eb 0%, transparent 32%),
+        var(--canvas);
     }
 
-    .container {
-      max-width: 1120px;
+    .app {
+      max-width: 1300px;
       margin: 0 auto;
-      padding: 24px 14px 40px;
-    }
-
-    .hero, .panel, .result-panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      box-shadow: 0 12px 28px rgba(6, 44, 58, 0.06);
+      padding: 18px 14px 28px;
     }
 
     .hero {
-      padding: 22px;
-      margin-bottom: 14px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #ffffff 0%, #fdfefe 100%);
+      border-radius: 16px;
+      box-shadow: var(--soft-shadow);
+      padding: 16px;
+      margin-bottom: 12px;
     }
 
-    h1 {
+    .hero-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .title {
       margin: 0;
-      font-size: clamp(1.7rem, 3vw, 2.4rem);
-      color: var(--accent2);
+      font-size: clamp(1.7rem, 2.8vw, 2.4rem);
+      color: var(--brand-dark);
       letter-spacing: -0.02em;
     }
 
-    .sub {
-      color: var(--muted);
-      margin-top: 6px;
+    .subtitle {
+      margin: 4px 0 0;
+      color: var(--subtle);
       max-width: 780px;
     }
 
+    .session-chip {
+      background: #ecf8f3;
+      color: #236845;
+      border: 1px solid #badfcc;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 0.78rem;
+      font-weight: 700;
+    }
+
     .status-grid {
-      margin-top: 14px;
+      margin-top: 12px;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 8px;
     }
 
     .status-card {
       border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px 12px;
-      background: #fcfefe;
+      border-radius: 11px;
+      padding: 9px 10px;
+      background: #fcffff;
     }
 
     .status-card label {
       display: block;
+      margin-bottom: 4px;
       font-size: 11px;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
-      color: var(--muted);
-      letter-spacing: 0.08em;
-      margin-bottom: 5px;
+      color: var(--subtle);
     }
 
     .status-card .value {
-      font-weight: 700;
       font-size: 0.92rem;
-      word-break: break-word;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(330px, 440px) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
     }
 
     .panel {
-      padding: 16px;
-      margin-bottom: 14px;
-    }
-
-    .query-row {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-    }
-
-    textarea, select, button {
       border: 1px solid var(--line);
-      border-radius: 12px;
+      background: var(--panel);
+      border-radius: 14px;
+      box-shadow: var(--soft-shadow);
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+
+    .panel h3 {
+      margin: 0 0 6px;
+      font-size: 1.02rem;
+      color: var(--brand-dark);
+    }
+
+    .hint {
+      color: var(--subtle);
+      font-size: 0.86rem;
+    }
+
+    textarea,
+    select,
+    button,
+    input[type="checkbox"] {
       font-family: var(--sans);
     }
 
-    textarea {
-      min-height: 84px;
-      width: 100%;
-      padding: 12px;
-      font-size: 0.96rem;
-      resize: vertical;
-      background: #fbfefe;
-      color: var(--ink);
+    textarea,
+    select,
+    button {
+      border: 1px solid var(--line);
+      border-radius: 11px;
     }
 
-    .controls {
-      margin-top: 10px;
+    textarea {
+      width: 100%;
+      min-height: 94px;
+      resize: vertical;
+      padding: 10px 11px;
+      font-size: 0.95rem;
+      color: var(--ink);
+      background: #fbfefe;
+    }
+
+    .composer-actions {
+      margin-top: 8px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .row {
+      margin-top: 8px;
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
       align-items: end;
     }
 
     select {
       width: 100%;
-      padding: 10px;
+      padding: 9px;
       font-size: 0.9rem;
       background: #fff;
     }
 
-    button {
-      padding: 10px 16px;
-      cursor: pointer;
+    .btn {
+      padding: 9px 12px;
       font-weight: 700;
-      transition: transform 120ms ease;
-    }
-
-    button:hover { transform: translateY(-1px); }
-    button:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
-
-    .primary {
-      border: none;
-      background: linear-gradient(120deg, var(--accent), #2dbb90);
-      color: #fff;
-      box-shadow: 0 8px 18px rgba(15, 163, 127, 0.24);
-    }
-
-    .ghost {
-      background: #fff;
-      color: var(--accent2);
-    }
-
-    .examples {
-      margin-top: 10px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .model-catalog {
-      margin-top: 10px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .pill {
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: #fff;
-      padding: 6px 10px;
-      font-size: 0.82rem;
-      color: var(--muted);
       cursor: pointer;
+      transition: transform 120ms ease;
+      font-size: 0.86rem;
+      background: #fff;
+      color: var(--ink);
     }
 
+    .btn:hover { transform: translateY(-1px); }
+    .btn:disabled { opacity: 0.62; cursor: not-allowed; transform: none; }
+
+    .btn.primary {
+      background: linear-gradient(120deg, var(--brand), #2bbb95);
+      border: none;
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(12, 165, 125, 0.26);
+    }
+
+    .btn.ghost {
+      color: var(--brand-dark);
+      background: #fff;
+    }
+
+    .btn.warn {
+      color: var(--warn-ink);
+      border-color: #efd6b3;
+      background: #fffdfa;
+    }
+
+    .examples,
+    .model-catalog,
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 8px;
+    }
+
+    .pill,
     .model-pill {
       border-radius: 999px;
       border: 1px solid var(--line);
-      background: #fff;
-      padding: 6px 10px;
-      font-size: 0.79rem;
-      color: var(--accent2);
+      padding: 5px 10px;
+      background: var(--chip);
+      color: #325463;
+      font-size: 0.78rem;
       cursor: pointer;
     }
 
     .model-pill.install {
-      color: var(--warn);
       border-style: dashed;
+      color: var(--warn-ink);
+      background: #fffaf5;
     }
 
     .model-pill.active {
-      background: #e8f8ef;
-      border-color: #92d7b8;
-      color: var(--ok);
+      border-color: #95dcbc;
+      color: var(--ok-ink);
+      background: #ebfaf1;
       font-weight: 700;
     }
 
-    .result-panel {
-      padding: 14px;
-      display: none;
+    .toggle-row {
+      margin-top: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      padding: 8px 10px;
+      background: #f8fcfe;
+      font-size: 0.85rem;
     }
 
-    .result-panel.visible { display: block; }
+    .toggle-row input { transform: scale(1.12); }
 
-    .card {
+    .chat-shell {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      box-shadow: var(--soft-shadow);
+      min-height: 480px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .thread {
+      display: grid;
+      gap: 12px;
+    }
+
+    .empty-state {
+      border: 1px dashed #bfd4dc;
+      border-radius: 12px;
+      padding: 18px;
+      color: var(--subtle);
+      background: #fbfeff;
+    }
+
+    .turn {
       border: 1px solid var(--line);
       border-radius: 12px;
-      padding: 12px;
-      margin-bottom: 10px;
       background: #fff;
+      overflow: hidden;
     }
 
-    .card h3 {
-      margin: 0 0 8px;
-      color: var(--accent2);
-      font-size: 1rem;
-    }
-
-    .mono {
-      font-family: var(--mono);
-      font-size: 0.8rem;
-      white-space: pre-wrap;
-      background: #f6fbfe;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 8px;
-      margin: 0;
-    }
-
-    .grid-2 {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    .turn-head {
+      padding: 8px 10px;
+      border-bottom: 1px solid #edf4f7;
+      display: flex;
+      justify-content: space-between;
       gap: 8px;
+      align-items: center;
+      background: #fcfefe;
+      font-size: 0.8rem;
+      color: var(--subtle);
+    }
+
+    .turn-body { padding: 10px; }
+
+    .bubble {
+      border-radius: 10px;
+      padding: 10px 11px;
+      margin-bottom: 8px;
+      line-height: 1.45;
+      font-size: 0.92rem;
+    }
+
+    .bubble.user {
+      background: #ecf5ff;
+      border: 1px solid #c8def6;
+      color: #17415f;
+    }
+
+    .bubble.assistant {
+      background: #f9fffc;
+      border: 1px solid #cae8d8;
+      color: #184a39;
+    }
+
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    .kpi {
+      border-radius: 10px;
+      padding: 9px;
+      border: 1px solid var(--line);
+      background: #fafefe;
+    }
+
+    .kpi.label {
+      background: linear-gradient(135deg, #e7fbf3, #f8fffd);
+      border-color: #bce5d1;
+    }
+
+    .kpi .k {
+      font-size: 0.72rem;
+      color: var(--subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .kpi .v {
+      margin-top: 3px;
+      font-size: 1.16rem;
+      font-weight: 700;
+      color: #124f39;
+      overflow-wrap: anywhere;
     }
 
     .tag {
       display: inline-block;
       border-radius: 999px;
-      padding: 3px 8px;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+      padding: 3px 8px;
       margin-right: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
 
-    .tag.ok { background: #e8f8ef; color: var(--ok); }
-    .tag.warn { background: #fff2e4; color: var(--warn); }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.84rem;
-    }
-
-    th, td {
-      border-bottom: 1px solid #ecf2f6;
-      text-align: left;
-      padding: 7px 8px;
-      white-space: nowrap;
-    }
-
-    th {
-      background: #f8fcff;
-      color: #21475f;
-      position: sticky;
-      top: 0;
-    }
+    .tag.ok { background: var(--ok-bg); color: var(--ok-ink); }
+    .tag.warn { background: var(--warn-bg); color: var(--warn-ink); }
 
     .table-wrap {
       overflow: auto;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 9px;
+      margin-top: 8px;
     }
 
-    .timeline {
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    th, td {
+      border-bottom: 1px solid #edf4f7;
+      text-align: left;
+      padding: 7px;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #f7fcff;
+      color: #1a516e;
+      position: sticky;
+      top: 0;
+    }
+
+    details {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fcfeff;
+      padding: 6px 8px;
+    }
+
+    summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: #194a63;
+      font-size: 0.84rem;
+    }
+
+    .mono {
+      margin-top: 6px;
+      font-family: var(--mono);
+      font-size: 0.77rem;
+      white-space: pre-wrap;
+      line-height: 1.35;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px;
+      background: #f6fbfd;
+      color: #143546;
+    }
+
+    .trace {
       display: grid;
       gap: 6px;
+      margin-top: 6px;
     }
 
-    .step {
+    .trace-step {
       border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 8px;
-      font-size: 0.83rem;
-      background: #fcfeff;
+      border-radius: 8px;
+      padding: 7px;
+      background: #fff;
+      font-size: 0.79rem;
     }
 
-    .step .head {
+    .trace-step .head {
       display: flex;
       justify-content: space-between;
       gap: 8px;
+      color: #1a516e;
+      font-weight: 700;
+      margin-bottom: 3px;
+    }
+
+    .architecture {
+      margin-top: 8px;
+      display: none;
+    }
+
+    .architecture.visible { display: block; }
+
+    .arch-flow {
+      display: grid;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .arch-step {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 7px;
+      background: #fbfeff;
+      font-size: 0.83rem;
+    }
+
+    .arch-agents {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 7px;
+    }
+
+    .arch-agent {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 8px;
+      background: #fff;
+    }
+
+    .arch-agent h4 {
+      margin: 0 0 4px;
+      font-size: 0.9rem;
+      color: var(--brand-dark);
+    }
+
+    .arch-agent .role {
+      color: #2f657f;
+      font-size: 0.76rem;
       margin-bottom: 5px;
     }
 
-    .step .head strong { color: var(--accent2); }
-    .hint { color: var(--muted); font-size: 0.88rem; }
-
-    @media (max-width: 760px) {
-      .query-row { grid-template-columns: 1fr; }
-      .container { padding: 16px 10px 28px; }
+    @media (max-width: 1020px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .chat-shell {
+        min-height: 420px;
+      }
     }
   </style>
 </head>
 <body>
-  <main class="container">
+  <main class="app">
     <section class="hero">
-      <h1>dataDa</h1>
-      <p class="sub">Agentic analytics team over your data. Each response is generated by a coordinated set of agents with evidence, SQL trace, and audit confidence.</p>
+      <div class="hero-top">
+        <div>
+          <h1 class="title">dataDa</h1>
+          <p class="subtitle">A conversational, agentic data analytics teammate. Ask broad questions, ask follow-ups, and the system keeps context in your active session.</p>
+        </div>
+        <div class="session-chip" id="sessionChip">session: initializing...</div>
+      </div>
       <div class="status-grid">
         <div class="status-card"><label>Database</label><div class="value" id="dbPath">checking...</div></div>
         <div class="status-card"><label>Health</label><div class="value" id="healthState">checking...</div></div>
         <div class="status-card"><label>Semantic Layer</label><div class="value" id="semanticState">checking...</div></div>
-        <div class="status-card"><label>Recommended Runtime</label><div class="value" id="recommendedMode">loading...</div></div>
+        <div class="status-card"><label>Recommended Runtime</label><div class="value" id="recommendedMode">checking...</div></div>
       </div>
     </section>
 
-    <section class="panel">
-      <div class="query-row">
-        <textarea id="queryInput" placeholder="Ask: Total transactions in December 2025 split by platform"></textarea>
-        <button id="runBtn" class="primary">Run Query</button>
-      </div>
-      <div class="controls">
-        <label>
-          <div class="hint">LLM Mode</div>
-          <select id="llmMode">
-            <option value="auto">Auto</option>
-            <option value="local">Local Ollama</option>
-            <option value="openai">OpenAI</option>
-            <option value="deterministic">Deterministic</option>
-          </select>
-        </label>
-        <label>
-          <div class="hint">Local Model (try higher quality)</div>
-          <select id="localModel">
-            <option value="">Auto-select</option>
-          </select>
-        </label>
-        <button id="archBtn" class="ghost" type="button">View Architecture</button>
-      </div>
-      <div class="controls">
-        <button id="refreshModelsBtn" class="ghost" type="button">Refresh Local Models</button>
-      </div>
-      <div class="model-catalog" id="modelCatalog"></div>
-      <div class="examples" id="examples"></div>
-      <div class="hint" id="statusText" style="margin-top:10px;">Ready.</div>
-    </section>
+    <section class="layout">
+      <aside>
+        <section class="panel">
+          <h3>Ask dataDa</h3>
+          <div class="hint">Try a business question, a vague exploration prompt, or a follow-up from the previous answer.</div>
+          <textarea id="queryInput" placeholder="Example: Total MT103 transaction count split month wise and platform wise"></textarea>
+          <div class="composer-actions">
+            <button class="btn primary" id="runBtn" type="button">Run Query</button>
+            <button class="btn ghost" id="newSessionBtn" type="button">New Session</button>
+            <button class="btn warn" id="clearThreadBtn" type="button">Clear Thread</button>
+          </div>
 
-    <section class="result-panel" id="resultPanel"></section>
+          <div class="row">
+            <label>
+              <div class="hint">LLM Mode</div>
+              <select id="llmMode">
+                <option value="auto">Auto</option>
+                <option value="local">Local Ollama</option>
+                <option value="openai">OpenAI</option>
+                <option value="deterministic">Deterministic</option>
+              </select>
+            </label>
+            <label>
+              <div class="hint">Local Model</div>
+              <select id="localModel">
+                <option value="">Auto-select</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="toggle-row">
+            <label for="storyMode"><strong>Storyteller mode</strong> (friendlier narration)</label>
+            <input type="checkbox" id="storyMode" />
+          </div>
+
+          <div class="composer-actions">
+            <button class="btn ghost" id="refreshModelsBtn" type="button">Refresh Models</button>
+            <button class="btn ghost" id="toggleArchBtn" type="button">View Agent Team Map</button>
+          </div>
+          <div class="model-catalog" id="modelCatalog"></div>
+          <div class="examples" id="examples"></div>
+          <div class="hint" id="statusText" style="margin-top:9px;">Ready.</div>
+        </section>
+
+        <section class="panel architecture" id="architecturePanel">
+          <h3>Agent Team Map</h3>
+          <div class="hint">Each agent owns one responsibility. Together they act like a compact analytics + data engineering pod.</div>
+          <div id="archContent" style="margin-top:8px;"></div>
+        </section>
+      </aside>
+
+      <section class="chat-shell">
+        <div class="thread" id="thread"></div>
+      </section>
+    </section>
   </main>
 
   <script>
-    const queryInput = document.getElementById('queryInput');
-    const runBtn = document.getElementById('runBtn');
-    const modeSelect = document.getElementById('llmMode');
-    const localModelSelect = document.getElementById('localModel');
-    const refreshModelsBtn = document.getElementById('refreshModelsBtn');
-    const resultPanel = document.getElementById('resultPanel');
-    const statusText = document.getElementById('statusText');
-    let localModelState = null;
-
     const EXAMPLES = [
-      'Total transactions in December 2025',
-      'Top 5 platforms by transaction count in December 2025',
-      'Total amount by month',
-      'Refund rate by platform',
-      'Quote volume by from_currency',
-      'Compare this month vs last month transaction count'
+      'What kind of data do I have?',
+      'Total MT103 transactions count split by month wise and platform wise',
+      'Top 5 platforms by total transaction amount in December 2025',
+      'Compare this month vs last month transaction count',
+      'Now show that by state',
+      'Explain like I am new: what changed in bookings this year?'
     ];
+
+    const STORAGE_SESSION_KEY = 'datada_session_id';
+    const STORAGE_THREAD_KEY = 'datada_thread';
+
+    const els = {
+      queryInput: document.getElementById('queryInput'),
+      runBtn: document.getElementById('runBtn'),
+      newSessionBtn: document.getElementById('newSessionBtn'),
+      clearThreadBtn: document.getElementById('clearThreadBtn'),
+      modeSelect: document.getElementById('llmMode'),
+      localModelSelect: document.getElementById('localModel'),
+      refreshModelsBtn: document.getElementById('refreshModelsBtn'),
+      modelCatalog: document.getElementById('modelCatalog'),
+      examples: document.getElementById('examples'),
+      statusText: document.getElementById('statusText'),
+      thread: document.getElementById('thread'),
+      storyMode: document.getElementById('storyMode'),
+      sessionChip: document.getElementById('sessionChip'),
+      architecturePanel: document.getElementById('architecturePanel'),
+      toggleArchBtn: document.getElementById('toggleArchBtn'),
+      archContent: document.getElementById('archContent'),
+      dbPath: document.getElementById('dbPath'),
+      healthState: document.getElementById('healthState'),
+      semanticState: document.getElementById('semanticState'),
+      recommendedMode: document.getElementById('recommendedMode')
+    };
+
+    const state = {
+      sessionId: null,
+      turns: [],
+      architectureLoaded: false
+    };
 
     function esc(value) {
       return String(value ?? '')
@@ -1068,69 +1357,122 @@ def get_ui_html() -> str:
 
     function md(text) {
       if (!text) return '';
-      return esc(text)
+      const html = esc(text)
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
         .replace(/\\n/g, '<br/>');
+      return html;
     }
 
     function fmt(v) {
       if (typeof v === 'number') {
-        return Number.isInteger(v) ? v.toLocaleString() : v.toLocaleString(undefined, { maximumFractionDigits: 4 });
+        return Number.isInteger(v)
+          ? v.toLocaleString()
+          : v.toLocaleString(undefined, { maximumFractionDigits: 4 });
       }
-      return String(v ?? '');
+      if (v === null || v === undefined) return '';
+      return String(v);
     }
 
-    function setStatus(msg) { statusText.textContent = msg; }
+    function setStatus(msg) {
+      els.statusText.textContent = msg;
+    }
 
-    function renderModelCatalog(state) {
-      const box = document.getElementById('modelCatalog');
-      if (!state || !state.options || state.options.length === 0) {
-        box.innerHTML = '<span class="hint">No local model metadata.</span>';
+    function newSessionId() {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      return `sess-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+    }
+
+    function saveState() {
+      localStorage.setItem(STORAGE_SESSION_KEY, state.sessionId);
+      localStorage.setItem(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(-30)));
+    }
+
+    function loadState() {
+      const existingSession = localStorage.getItem(STORAGE_SESSION_KEY);
+      state.sessionId = existingSession || newSessionId();
+      try {
+        const raw = localStorage.getItem(STORAGE_THREAD_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        if (Array.isArray(parsed)) state.turns = parsed;
+      } catch (err) {
+        state.turns = [];
+      }
+      updateSessionChip();
+    }
+
+    function updateSessionChip() {
+      const shortId = state.sessionId ? state.sessionId.slice(0, 12) : 'none';
+      els.sessionChip.textContent = `session: ${shortId}`;
+    }
+
+    function resetSession(clearThread = true) {
+      state.sessionId = newSessionId();
+      if (clearThread) state.turns = [];
+      saveState();
+      renderThread();
+      updateSessionChip();
+      setStatus('Started a fresh session.');
+    }
+
+    function renderExamples() {
+      els.examples.innerHTML = EXAMPLES
+        .map((q) => `<button class="pill" type="button">${esc(q)}</button>`)
+        .join('');
+      Array.from(els.examples.querySelectorAll('button')).forEach((btn, idx) => {
+        btn.addEventListener('click', () => {
+          els.queryInput.value = EXAMPLES[idx];
+          els.queryInput.focus();
+        });
+      });
+    }
+
+    function renderModelCatalog(modelState) {
+      if (!modelState || !Array.isArray(modelState.options) || modelState.options.length === 0) {
+        els.modelCatalog.innerHTML = '<span class="hint">No local model metadata.</span>';
         return;
       }
-      box.innerHTML = state.options.map(opt => {
+
+      const active = els.localModelSelect.value;
+      els.modelCatalog.innerHTML = modelState.options.map((opt) => {
         const cls = [
           'model-pill',
           opt.installed ? '' : 'install',
-          localModelSelect.value === opt.name ? 'active' : ''
+          active === opt.name ? 'active' : ''
         ].join(' ').trim();
         const action = opt.installed ? 'Select' : 'Download';
-        return `<button type="button" class="${cls}" data-model="${esc(opt.name)}" data-installed="${opt.installed ? '1' : '0'}">${esc(opt.name)} (${esc(opt.tier)}) • ${action}</button>`;
+        return `<button type="button" class="${cls}" data-model="${esc(opt.name)}" data-installed="${opt.installed ? '1' : '0'}">${esc(opt.name)} • ${esc(opt.tier)} • ${action}</button>`;
       }).join('');
 
-      Array.from(box.querySelectorAll('button[data-model]')).forEach(btn => {
+      Array.from(els.modelCatalog.querySelectorAll('button[data-model]')).forEach((btn) => {
         btn.addEventListener('click', async () => {
           const model = btn.getAttribute('data-model');
           const installed = btn.getAttribute('data-installed') === '1';
-          if (installed) {
-            await selectLocalModel(model);
-          } else {
-            await pullLocalModel(model);
-          }
+          if (installed) await selectLocalModel(model);
+          else await pullLocalModel(model);
         });
       });
     }
 
     async function loadLocalModels() {
       try {
-        const state = await fetch('/api/assistant/models/local').then(r => r.json());
-        localModelState = state;
-        const installed = (state.options || []).filter(o => o.installed);
-        localModelSelect.innerHTML =
+        const stateResp = await fetch('/api/assistant/models/local').then((r) => r.json());
+        const installed = (stateResp.options || []).filter((o) => o.installed);
+        els.localModelSelect.innerHTML =
           '<option value="">Auto-select</option>' +
-          installed.map(o => `<option value="${esc(o.name)}">${esc(o.name)} (${esc(o.tier)})</option>`).join('');
-        if (state.active_intent_model && installed.some(o => o.name === state.active_intent_model)) {
-          localModelSelect.value = state.active_intent_model;
+          installed.map((o) => `<option value="${esc(o.name)}">${esc(o.name)} (${esc(o.tier)})</option>`).join('');
+
+        const active = stateResp.active_intent_model || '';
+        if (active && installed.some((o) => o.name === active)) {
+          els.localModelSelect.value = active;
         }
-        renderModelCatalog(state);
+        renderModelCatalog(stateResp);
       } catch (err) {
-        document.getElementById('modelCatalog').innerHTML =
-          `<span class="hint">Local models unavailable: ${esc(err.message)}</span>`;
+        els.modelCatalog.innerHTML = `<span class="hint">Local model service unavailable: ${esc(err.message)}</span>`;
       }
     }
 
     async function selectLocalModel(modelName) {
-      setStatus(`Activating local model ${modelName}...`);
+      setStatus(`Activating ${modelName}...`);
       try {
         const response = await fetch('/api/assistant/models/local/select', {
           method: 'POST',
@@ -1138,8 +1480,8 @@ def get_ui_html() -> str:
           body: JSON.stringify({ model: modelName, narrator_model: modelName })
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || data.message || 'Failed to select model');
-        localModelSelect.value = modelName;
+        if (!response.ok) throw new Error(data.detail || data.message || 'Model activation failed');
+        els.localModelSelect.value = modelName;
         setStatus(data.message || `Activated ${modelName}`);
         await loadLocalModels();
       } catch (err) {
@@ -1148,7 +1490,7 @@ def get_ui_html() -> str:
     }
 
     async function pullLocalModel(modelName) {
-      setStatus(`Downloading model ${modelName}. This can take several minutes...`);
+      setStatus(`Downloading ${modelName}. This may take a few minutes...`);
       try {
         const response = await fetch('/api/assistant/models/local/pull', {
           method: 'POST',
@@ -1156,143 +1498,197 @@ def get_ui_html() -> str:
           body: JSON.stringify({ model: modelName, activate_after_download: true })
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || data.message || 'Failed to pull model');
+        if (!response.ok) throw new Error(data.detail || data.message || 'Model pull failed');
+        setStatus(data.message || `${modelName} downloaded`);
         if (data.active_intent_model) {
-          localModelSelect.value = data.active_intent_model;
+          els.localModelSelect.value = data.active_intent_model;
         }
-        setStatus(data.message || `Model ${modelName} downloaded`);
         await loadLocalModels();
       } catch (err) {
         setStatus(`Model download failed: ${err.message}`);
       }
     }
 
-    function renderExamples() {
-      const box = document.getElementById('examples');
-      box.innerHTML = EXAMPLES.map(q => `<button class="pill" type="button">${esc(q)}</button>`).join('');
-      Array.from(box.querySelectorAll('button')).forEach((btn, i) => {
-        btn.addEventListener('click', () => {
-          queryInput.value = EXAMPLES[i];
-          queryInput.focus();
-        });
-      });
-    }
-
     function renderTable(columns, rows) {
-      if (!columns || columns.length === 0 || !rows || rows.length === 0) {
+      if (!Array.isArray(columns) || columns.length === 0 || !Array.isArray(rows) || rows.length === 0) {
         return '<div class="hint">No rows returned.</div>';
       }
-      const head = `<tr>${columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr>`;
-      const body = rows.map(r => `<tr>${columns.map(c => `<td>${esc(fmt(r[c]))}</td>`).join('')}</tr>`).join('');
+      const head = `<tr>${columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>`;
+      const body = rows.map((row) => (
+        `<tr>${columns.map((c) => `<td>${esc(fmt(row[c]))}</td>`).join('')}</tr>`
+      )).join('');
       return `<div class="table-wrap"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
     }
 
     function renderTrace(trace) {
-      if (!trace || trace.length === 0) return '<div class="hint">No agent trace.</div>';
-      return `<div class="timeline">${trace.map(s => `
-        <div class="step">
-          <div class="head"><strong>${esc(s.agent)}</strong><span>${esc(s.status)} • ${esc(s.duration_ms)} ms</span></div>
-          <div class="hint">${esc(s.role || '')}</div>
-          <div>${esc(s.summary || '')}</div>
+      if (!Array.isArray(trace) || trace.length === 0) return '<div class="hint">No trace.</div>';
+      return `<div class="trace">${trace.map((step) => `
+        <div class="trace-step">
+          <div class="head"><span>${esc(step.agent || 'agent')}</span><span>${esc(step.status || '')} • ${esc(step.duration_ms || 0)} ms</span></div>
+          <div class="hint">${esc(step.role || '')}</div>
+          <div>${esc(step.summary || '')}</div>
         </div>
       `).join('')}</div>`;
     }
 
-    function renderChecks(checks) {
-      if (!checks || checks.length === 0) return '<div class="hint">No checks.</div>';
-      return checks.map(c => {
-        const ok = c.passed;
-        return `<span class="tag ${ok ? 'ok' : 'warn'}">${ok ? 'PASS' : 'WARN'} ${esc(c.check_name)}</span>`;
+    function checksHtml(checks) {
+      if (!Array.isArray(checks) || checks.length === 0) return '<span class="hint">No checks.</span>';
+      return checks.map((c) => {
+        const ok = !!c.passed;
+        return `<span class="tag ${ok ? 'ok' : 'warn'}">${ok ? 'PASS' : 'WARN'} ${esc(c.check_name || 'check')}</span>`;
       }).join(' ');
     }
 
-    function renderResponse(data) {
-      const runtime = data.runtime || {};
-      const modeTag = `<span class="tag ${data.success ? 'ok' : 'warn'}">${esc(runtime.mode || 'unknown')}</span>`;
-
-      resultPanel.innerHTML = `
-        <div class="card">
-          <h3>Answer</h3>
-          <div>${md(data.answer_markdown)}</div>
-        </div>
-
-        <div class="card grid-2">
-          <div>
-            <h3>Runtime</h3>
-            <div>${modeTag} Provider: <strong>${esc(runtime.provider || 'none')}</strong></div>
-            <div class="hint">${esc(runtime.reason || '')}</div>
-            <div class="hint">Intent model: ${esc(runtime.intent_model || 'n/a')} | Narrator model: ${esc(runtime.narrator_model || 'n/a')}</div>
-            <div style="margin-top:6px;">Trace: <code>${esc(data.trace_id)}</code></div>
-          </div>
-          <div>
-            <h3>Confidence</h3>
-            <div><strong>${esc(data.confidence)}</strong> (${Math.round((data.confidence_score || 0) * 100)}%)</div>
-            <div class="hint">Rows: ${esc(data.row_count)} | SQL time: ${esc(data.execution_time_ms)} ms</div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h3>Sanity Checks</h3>
-          <div>${renderChecks(data.sanity_checks || [])}</div>
-        </div>
-
-        <div class="card">
-          <h3>Result Preview</h3>
-          ${renderTable(data.columns || [], data.sample_rows || [])}
-        </div>
-
-        <div class="card">
-          <h3>SQL</h3>
-          <pre class="mono">${esc(data.sql || 'No SQL')}</pre>
-        </div>
-
-        <div class="card">
-          <h3>Agent Trace</h3>
-          ${renderTrace(data.agent_trace || [])}
-        </div>
-
-        <div class="card grid-2">
-          <div>
-            <h3>Chart Spec</h3>
-            <pre class="mono">${esc(JSON.stringify(data.chart_spec || {}, null, 2))}</pre>
-          </div>
-          <div>
-            <h3>Data Quality</h3>
-            <pre class="mono">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</pre>
-          </div>
-        </div>
-      `;
-      resultPanel.classList.add('visible');
+    function pickHeadlineValue(data) {
+      if (!data || !Array.isArray(data.sample_rows) || data.sample_rows.length === 0) return null;
+      const row0 = data.sample_rows[0] || {};
+      if (Object.prototype.hasOwnProperty.call(row0, 'metric_value')) {
+        return row0.metric_value;
+      }
+      const cols = Array.isArray(data.columns) ? data.columns : [];
+      if (cols.length === 1) return row0[cols[0]];
+      const numericCandidate = Object.entries(row0).find(([, v]) => typeof v === 'number');
+      return numericCandidate ? numericCandidate[1] : null;
     }
 
-    async function init() {
-      try {
-        const [h, p] = await Promise.all([
-          fetch('/api/assistant/health').then(r => r.json()),
-          fetch('/api/assistant/providers').then(r => r.json()),
-        ]);
-        document.getElementById('dbPath').textContent = h.db_path;
-        document.getElementById('healthState').textContent = h.status;
-        document.getElementById('semanticState').textContent = h.semantic_ready ? 'ready' : 'not ready';
-        document.getElementById('recommendedMode').textContent = p.recommended_mode;
-        modeSelect.value = p.default_mode || 'auto';
-      } catch (err) {
-        document.getElementById('healthState').textContent = 'unreachable';
+    function responseCard(turn) {
+      const data = turn.response;
+      if (!data) return `<div class="bubble assistant">Thinking...</div>`;
+      const runtime = data.runtime || {};
+      const confidencePct = Math.round((data.confidence_score || 0) * 100);
+      const headline = pickHeadlineValue(data);
+
+      const suggestions = (data.suggested_questions || []).slice(0, 4);
+      const suggestionHtml = suggestions.length
+        ? `<div class="suggestions">${suggestions.map((q) => `<button class="pill suggest" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
+        : '';
+
+      return `
+        <div class="bubble assistant">${md(data.answer_markdown || '')}</div>
+        <div class="kpi-grid">
+          <div class="kpi label">
+            <div class="k">Key result</div>
+            <div class="v">${headline === null || headline === undefined ? 'n/a' : esc(fmt(headline))}</div>
+          </div>
+          <div class="kpi">
+            <div class="k">Confidence</div>
+            <div class="v">${esc(data.confidence || 'unknown')} (${confidencePct}%)</div>
+          </div>
+          <div class="kpi">
+            <div class="k">Execution</div>
+            <div class="v">${esc(fmt(data.execution_time_ms || 0))} ms</div>
+          </div>
+        </div>
+        <div style="margin-bottom:6px;">
+          <span class="tag ${data.success ? 'ok' : 'warn'}">${data.success ? 'SUCCESS' : 'DEGRADED'}</span>
+          <span class="tag ${data.success ? 'ok' : 'warn'}">${esc(runtime.mode || 'unknown')}</span>
+          <span class="hint">rows: ${esc(fmt(data.row_count || 0))}</span>
+        </div>
+        ${checksHtml(data.sanity_checks || [])}
+        ${suggestionHtml}
+        ${renderTable(data.columns || [], data.sample_rows || [])}
+        <details>
+          <summary>Technical details (SQL, trace, quality)</summary>
+          <div class="mono">${esc(data.sql || 'No SQL generated')}</div>
+          ${renderTrace(data.agent_trace || [])}
+          <div class="mono">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</div>
+        </details>
+      `;
+    }
+
+    function renderThread() {
+      if (!state.turns.length) {
+        els.thread.innerHTML = `
+          <div class="empty-state">
+            Ask a question to start. Try:
+            <br/>• "What kind of data do I have?"
+            <br/>• "Total MT103 transactions count split by month wise and platform wise"
+            <br/>• Then ask a follow-up like "Now only for December 2025."
+          </div>
+        `;
+        return;
       }
-      await loadLocalModels();
+
+      els.thread.innerHTML = state.turns.map((turn, idx) => `
+        <article class="turn">
+          <div class="turn-head">
+            <span>Turn ${idx + 1}</span>
+            <span>${turn.response && turn.response.trace_id ? esc(turn.response.trace_id.slice(0, 12)) : 'pending'}</span>
+          </div>
+          <div class="turn-body">
+            <div class="bubble user">${esc(turn.goal)}</div>
+            ${responseCard(turn)}
+          </div>
+        </article>
+      `).join('');
+
+      Array.from(els.thread.querySelectorAll('button.suggest')).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const q = btn.getAttribute('data-q');
+          els.queryInput.value = q || '';
+          els.queryInput.focus();
+        });
+      });
+    }
+
+    async function loadArchitecture() {
+      try {
+        const data = await fetch('/api/assistant/architecture').then((r) => r.json());
+        const flow = (data.pipeline_flow || []).map((line) => line.replace(/^\\d+\\.\\s*/, ''));
+        const guardrails = (data.guardrails || []).map((g) => `<li>${esc(g)}</li>`).join('');
+        const agents = (data.agents || []).map((a) => `
+          <div class="arch-agent">
+            <h4>${esc(a.name)}</h4>
+            <div class="role">${esc(a.role)}</div>
+            <div class="hint">${esc(a.description)}</div>
+            <div class="hint" style="margin-top:4px;">In: ${esc((a.inputs || []).join(', '))}</div>
+            <div class="hint">Out: ${esc((a.outputs || []).join(', '))}</div>
+          </div>
+        `).join('');
+
+        els.archContent.innerHTML = `
+          <div class="arch-flow">${flow.map((f) => `<div class="arch-step">${esc(f)}</div>`).join('')}</div>
+          <div class="hint" style="margin-bottom:6px;"><strong>Guardrails:</strong></div>
+          <ul style="margin: 0 0 8px 18px; color: #355969; font-size: 0.82rem;">${guardrails}</ul>
+          <div class="arch-agents">${agents}</div>
+        `;
+        state.architectureLoaded = true;
+      } catch (err) {
+        els.archContent.innerHTML = `<div class="hint">Failed to load architecture: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function initSystemStatus() {
+      try {
+        const [health, providers] = await Promise.all([
+          fetch('/api/assistant/health').then((r) => r.json()),
+          fetch('/api/assistant/providers').then((r) => r.json())
+        ]);
+        els.dbPath.textContent = health.db_path;
+        els.healthState.textContent = health.status;
+        els.semanticState.textContent = health.semantic_ready ? 'ready' : 'not ready';
+        els.recommendedMode.textContent = providers.recommended_mode;
+        els.modeSelect.value = providers.default_mode || 'auto';
+      } catch (err) {
+        els.healthState.textContent = 'unreachable';
+        els.semanticState.textContent = 'unknown';
+      }
     }
 
     async function runQuery() {
-      const goal = queryInput.value.trim();
+      const goal = els.queryInput.value.trim();
       if (!goal) {
         setStatus('Enter a question first.');
         return;
       }
 
-      runBtn.disabled = true;
+      const turn = { goal, response: null };
+      state.turns.push(turn);
+      saveState();
+      renderThread();
+
+      els.runBtn.disabled = true;
       setStatus('Running agent team...');
-      resultPanel.classList.add('visible');
-      resultPanel.innerHTML = '<div class="card"><div class="hint">Processing...</div></div>';
 
       try {
         const response = await fetch('/api/assistant/query', {
@@ -1300,49 +1696,85 @@ def get_ui_html() -> str:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             goal,
-            llm_mode: modeSelect.value,
-            local_model: localModelSelect.value || null
+            llm_mode: els.modeSelect.value,
+            local_model: els.localModelSelect.value || null,
+            session_id: state.sessionId,
+            storyteller_mode: !!els.storyMode.checked
           })
         });
         const data = await response.json();
-        renderResponse(data);
+        if (!response.ok) {
+          throw new Error(data.detail || data.error || 'Query failed');
+        }
+        turn.response = data;
+        if (data.runtime && data.runtime.session_id) {
+          state.sessionId = data.runtime.session_id;
+          updateSessionChip();
+        }
+        saveState();
+        renderThread();
         setStatus('Done.');
       } catch (err) {
+        turn.response = {
+          success: false,
+          answer_markdown: `**Request failed**\\n\\n${err.message}`,
+          confidence: 'uncertain',
+          confidence_score: 0,
+          sanity_checks: [],
+          columns: [],
+          sample_rows: [],
+          runtime: { mode: 'error' },
+          execution_time_ms: 0,
+          row_count: 0
+        };
+        saveState();
+        renderThread();
         setStatus(`Request failed: ${err.message}`);
-        resultPanel.innerHTML = `<div class="card"><div class="hint">${esc(err.message)}</div></div>`;
       } finally {
-        runBtn.disabled = false;
+        els.runBtn.disabled = false;
       }
     }
 
-    async function showArchitecture() {
-      try {
-        const data = await fetch('/api/assistant/architecture').then(r => r.json());
-        resultPanel.classList.add('visible');
-        resultPanel.innerHTML = `
-          <div class="card"><h3>${esc(data.system_name)}</h3><div class="hint">${esc(data.description)}</div></div>
-          <div class="card"><h3>Pipeline</h3><pre class="mono">${esc((data.pipeline_flow || []).join('\\\\n'))}</pre></div>
-          <div class="card"><h3>Guardrails</h3><pre class="mono">${esc((data.guardrails || []).join('\\\\n'))}</pre></div>
-        `;
-      } catch (err) {
-        resultPanel.classList.add('visible');
-        resultPanel.innerHTML = `<div class="card"><div class="hint">${esc(err.message)}</div></div>`;
-      }
+    function wireEvents() {
+      els.runBtn.addEventListener('click', runQuery);
+      els.refreshModelsBtn.addEventListener('click', loadLocalModels);
+      els.localModelSelect.addEventListener('change', async () => {
+        const model = els.localModelSelect.value;
+        if (!model) return;
+        await selectLocalModel(model);
+      });
+      els.newSessionBtn.addEventListener('click', () => resetSession(true));
+      els.clearThreadBtn.addEventListener('click', () => {
+        state.turns = [];
+        saveState();
+        renderThread();
+        setStatus('Thread cleared in this session.');
+      });
+      els.toggleArchBtn.addEventListener('click', async () => {
+        const visible = els.architecturePanel.classList.contains('visible');
+        if (visible) {
+          els.architecturePanel.classList.remove('visible');
+          els.toggleArchBtn.textContent = 'View Agent Team Map';
+          return;
+        }
+        if (!state.architectureLoaded) await loadArchitecture();
+        els.architecturePanel.classList.add('visible');
+        els.toggleArchBtn.textContent = 'Hide Agent Team Map';
+      });
+      els.queryInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runQuery();
+      });
     }
 
-    runBtn.addEventListener('click', runQuery);
-    document.getElementById('archBtn').addEventListener('click', showArchitecture);
-    refreshModelsBtn.addEventListener('click', loadLocalModels);
-    localModelSelect.addEventListener('change', async () => {
-      const value = localModelSelect.value;
-      if (!value) return;
-      await selectLocalModel(value);
-    });
-    queryInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runQuery();
-    });
+    async function init() {
+      loadState();
+      renderExamples();
+      renderThread();
+      wireEvents();
+      await Promise.all([initSystemStatus(), loadLocalModels()]);
+      setStatus('Ready.');
+    }
 
-    renderExamples();
     init();
   </script>
 </body>

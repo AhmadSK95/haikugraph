@@ -82,10 +82,13 @@ class SafeSQLExecutor:
         self._conn: duckdb.DuckDBPyConnection | None = None
     
     def _get_connection(self) -> duckdb.DuckDBPyConnection:
-        """Get or create database connection."""
-        if self._conn is None:
-            self._conn = duckdb.connect(str(self.db_path), read_only=self.read_only)
-        return self._conn
+        """Create a fresh connection per execution.
+
+        A single shared DuckDB connection is not thread-safe under concurrent
+        FastAPI requests. Returning a short-lived connection prevents cross-request
+        contention and "connection file with different configuration" failures.
+        """
+        return duckdb.connect(str(self.db_path), read_only=self.read_only)
     
     def close(self) -> None:
         """Close database connection."""
@@ -156,6 +159,7 @@ class SafeSQLExecutor:
         
         # Step 4: Execute with timeout handling
         start_time = time.perf_counter()
+        conn: duckdb.DuckDBPyConnection | None = None
         
         try:
             conn = self._get_connection()
@@ -237,6 +241,12 @@ class SafeSQLExecutor:
                 query_stats=query_stats,
                 executed_at=executed_at,
             )
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
     
     def execute_probe(
         self,
