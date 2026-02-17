@@ -1610,7 +1610,7 @@ def get_ui_html() -> str:
 
     function md(text) {
       if (!text) return '';
-      const lines = String(text).replace(/\r\n/g, '\n').split('\n');
+      const lines = String(text).replace(/\\r\\n/g, '\\n').split('\\n');
       const html = [];
       let listMode = null; // "ul" | "ol" | null
 
