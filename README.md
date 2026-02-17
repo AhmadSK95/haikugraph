@@ -15,12 +15,25 @@ Open `http://localhost:8000` and use the `LLM Mode` selector:
 - `OpenAI`: force OpenAI API usage.
 - `Deterministic`: run without an LLM.
 
+## Ground-Truth Accuracy Audit
+
+Run canonical SQL accuracy checks against the semantic marts and generate an HTML report:
+
+```bash
+source .venv/bin/activate
+python scripts/run_accuracy_audit.py --db-path data/haikugraph.db --out-dir reports
+```
+
+Reference canonical SQL definitions:
+- `docs/canonical_queries.sql`
+
 ## Table of Contents
 
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Ground-Truth Accuracy Audit](#ground-truth-accuracy-audit)
 - [System Structure](#system-structure)
 - [CLI Commands Reference](#cli-commands-reference)
 - [Development](#development)

@@ -46,3 +46,12 @@ htmlcov/
 # Data directory (user-specific data, databases, profiles)
 data/
 !data/.gitkeep
+
+# Generated reports/artifacts
+reports/agentic_benchmark_*.html
+reports/agentic_benchmark_*.json
+reports/accuracy_audit_*.html
+reports/accuracy_audit_*.json
+reports/demo_report_*.html
+reports/validated_report_*.html
+reports/hardening_*/

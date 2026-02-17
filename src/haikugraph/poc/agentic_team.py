@@ -941,10 +941,13 @@ class AgenticAnalyticsTeam:
     ) -> dict[str, Any]:
         parsed = self._intake_deterministic(goal, catalog)
         parsed["_llm_intake_used"] = False
+        explicit_top = bool(re.search(r"\btop\s+\d+\b", goal.lower()))
         if runtime.use_llm and runtime.provider:
             llm_parsed = self._intake_with_llm(goal, runtime, parsed)
             if llm_parsed:
                 cleaned = self._sanitize_intake_payload(llm_parsed)
+                if not explicit_top:
+                    cleaned.pop("top_n", None)
                 if cleaned:
                     parsed.update({k: v for k, v in cleaned.items() if v not in (None, "")})
                     parsed["_llm_intake_used"] = True
@@ -1100,7 +1103,7 @@ class AgenticAnalyticsTeam:
                 month = number
                 break
 
-        years = re.findall(r"\b(20\d{{2}})\b", lower)
+        years = re.findall(r"\b(20\d{2})\b", lower)
         year = int(years[0]) if years else None
 
         if month is not None:
@@ -1270,7 +1273,7 @@ class AgenticAnalyticsTeam:
                 order_expr = "2 DESC"
             else:
                 dim_expr = _q(plan["dimension"])
-                order_expr = "2 DESC NULLS LAST"
+                order_expr = "2 DESC NULLS LAST, 1 ASC"
 
             sql = (
                 f"SELECT {dim_expr} AS dimension, {metric_expr} AS metric_value "
