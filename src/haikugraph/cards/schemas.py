@@ -32,6 +32,7 @@ class ColumnCard(BaseModel):
     duckdb_type: str
     null_pct: float
     distinct_count: int
+    is_unique: bool = False
     sample_values: list[str] = Field(default_factory=list)
     semantic_hints: list[str] = Field(default_factory=list)
 

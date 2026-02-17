@@ -22,16 +22,19 @@ from haikugraph.planning.intent import Intent, IntentType
 
 # Narrator prompt templates
 
-NARRATOR_SYSTEM_PROMPT = """You are a data narrator. Convert query results into clear, user-facing explanations.
+NARRATOR_SYSTEM_PROMPT = """You are a senior data analyst assistant. Your job is to present query results in a clear, detailed, and professional format that a business user can immediately understand and share.
 
-Rules:
+You MUST:
+- Present numbers with proper formatting (commas for thousands, 2 decimal places for currency)
+- Use markdown tables when presenting multiple rows/columns of data
+- Provide context and interpretation, not just raw numbers
+- Respond as a knowledgeable assistant, not a chatbot
+- Include ALL data rows in the results (do not truncate or summarize away data)
 - Output ONLY valid JSON: {"text": "<explanation>"}
-- Describe ONLY what exists in results (no speculation)
-- No SQL, no schema, no technical jargon
-- No markdown, no formatting beyond plain text
-- Be concise and direct"""
+- Describe ONLY what exists in results (no speculation, no invented data)
+- No SQL, no schema names, no technical database jargon"""
 
-NARRATOR_USER_PROMPT_TEMPLATE = """Explain these query results to the user.
+NARRATOR_USER_PROMPT_TEMPLATE = """Present these query results to a business user.
 
 Original Question: {question}
 
@@ -45,17 +48,20 @@ Instructions based on intent:
 
 {intent_instructions}
 
-General rules:
-- Describe data generically ("revenue", "appointments") based on context
-- For comparisons: explicit contrast (increase/decrease, delta if calculable)
-- For groups: bullet list or short description
-- For lookups: describe what was listed + count
-- For diagnostics: cautious, descriptive, no causal claims
+Formatting rules:
+- Start with a direct one-line answer to the question in **bold**
+- For single values: state the value clearly, then add brief context (e.g. what period, what was counted)
+- For grouped data: ALWAYS use a markdown table with headers. Include ALL rows.
+- For comparisons: show both values, the delta, and percentage change clearly
+- Format large numbers with commas (e.g. 1,962 not 1962)
+- Format currency values appropriately (e.g. ₹83.14 Cr or ₹8,31,40,000)
+- If results are empty or zero, say so explicitly and explain what it means
+- Add a brief "Summary" line at the end with key takeaway
 - Include row counts where relevant
 
 Output format (JSON only):
 {{
-  "text": "<clear, 1-3 sentence explanation>"
+  "text": "<detailed explanation with tables and formatting>"
 }}
 
 Generate the explanation now. Output ONLY the JSON object."""
@@ -80,43 +86,50 @@ Return ONLY the corrected JSON."""
 INTENT_INSTRUCTIONS = {
     IntentType.METRIC: """
 METRIC: Single aggregated value
-- One summary sentence with the value
-- Example: "Total revenue is $X" or "There are X appointments"
+- State the answer in **bold** on the first line
+- Include context: what metric, what time period, what entity
+- If the value is 0 or NULL, explicitly state "No data found for this period" and explain why (e.g. no transactions recorded yet)
+- Example: "**Total revenue in December 2025: ₹83.14 Cr**\n\nThis represents the sum of all transaction amounts recorded in December 2025 across 1,962 transactions."
 """,
     IntentType.GROUPED_METRIC: """
 GROUPED_METRIC: Aggregation by dimension
-- Bullet list or short table description
-- Mention top values if many rows
-- Example: "Revenue by barber: Alice ($X), Bob ($Y), Charlie ($Z)"
+- State the overall finding in **bold** first
+- ALWAYS present data in a markdown table with proper headers
+- Include a total/summary row at the bottom if applicable
+- Add brief interpretation (e.g. which segment dominates, notable patterns)
+- Example:
+  "**Revenue breakdown by platform (December 2025)**\n\n| Platform | Revenue | Transactions |\n|----------|---------|-------------|\n| B2C-APP | ₹7.2 Cr | 224 |\n| B2B | ₹33 L | 4 |\n\n**Summary:** B2C-APP dominates with 87% of total revenue."
 """,
     IntentType.COMPARISON: """
 COMPARISON: Contrast between periods/cohorts
 - A11 REQUIREMENT: Use ONLY the normalized comparison structure provided
 - NEVER compute delta or percentage yourself
+- Present as a comparison table
 - Use pre-computed current.value, comparison.value, delta, delta_pct, and direction
-- Format: "<metric> <current_period> (<current_value>) vs <comparison_period> (<comparison_value>) - <direction> by <delta> (<delta_pct>%)"
-- If delta_pct is null (division by zero), omit percentage
-- Example: "Revenue this_year ($30,000) vs previous_year ($25,000) - up by $5,000 (20%)"
-- Example with flat: "Revenue this_month ($1,000) vs previous_month ($1,000) - flat"
-- Example with zero base: "Revenue this_month ($100) vs previous_month ($0) - up by $100"
+- Include a clear up/down indicator and percentage
+- Example:
+  "**Revenue Comparison: This Month vs Last Month**\n\n| Period | Revenue |\n|--------|---------|\n| This Month | ₹10.5 Cr |\n| Last Month | ₹8.2 Cr |\n| **Change** | **+₹2.3 Cr (+28%)** ⬆️ |\n\nRevenue increased by 28% compared to the previous month."
 """,
     IntentType.LOOKUP: """
 LOOKUP: Raw rows listing
-- Describe what was listed
-- Include row count
-- Example: "Found X recent appointments. First few: ..."
+- State what was found and the count
+- Present data in a markdown table
+- Show all available columns
+- If many rows, show first 10-20 with a note about total count
+- Example: "**Found 284 transactions**\n\n| Transaction ID | Amount | Date | Status |\n|...|...|...|...|\n\nShowing first 10 of 284 results."
 """,
     IntentType.DIAGNOSTIC: """
 DIAGNOSTIC: Health/anomalies/gaps
 - Cautious, descriptive tone
 - NO causal claims (no "because", "due to")
+- Present observations in a table if multiple data points
 - Describe patterns observed
-- Example: "Revenue shows X pattern. Observed Y in period Z."
 """,
     IntentType.UNKNOWN: """
 UNKNOWN: Default explanation
-- Simple description of results
-- Mention row count and key values
+- Present data clearly with tables if multiple rows
+- Include row count and key values
+- Add brief interpretation
 """,
 }
 
@@ -128,7 +141,7 @@ def narrate_results(
     results: dict[str, dict],
     *,
     comparison: dict | None = None,
-    max_retries: int = 1,
+    max_retries: int = 2,
     _legacy_mode: bool = False,
 ) -> str:
     """Convert execution results into user-facing explanation.
@@ -451,10 +464,10 @@ def _build_results_summary(results: dict[str, dict]) -> str:
         if columns:
             lines.append(f"  Columns: {', '.join(columns)}")
         
-        # Show first few rows for context
+        # Show data rows (include more rows for table rendering)
         if rows:
-            lines.append("  Sample data:")
-            for i, row in enumerate(rows[:5], 1):
+            lines.append("  Data:")
+            for i, row in enumerate(rows[:20], 1):
                 # Format row as key: value pairs
                 if isinstance(row, dict):
                     row_str = ", ".join(f"{k}={v}" for k, v in row.items())
@@ -462,8 +475,8 @@ def _build_results_summary(results: dict[str, dict]) -> str:
                 else:
                     lines.append(f"    {i}. {row}")
             
-            if len(rows) > 5:
-                lines.append(f"    ... ({len(rows) - 5} more rows)")
+            if len(rows) > 20:
+                lines.append(f"    ... ({len(rows) - 20} more rows)")
     
     return "\n".join(lines) if lines else "No results"
 
@@ -540,7 +553,7 @@ def narrate(
 
 
 def _parse_json_strict(response: str) -> dict[str, Any]:
-    """Parse JSON from LLM response, handling markdown code blocks.
+    """Parse JSON from LLM response, handling various formatting issues.
     
     Args:
         response: Raw LLM response text
@@ -551,9 +564,11 @@ def _parse_json_strict(response: str) -> dict[str, Any]:
     Raises:
         json.JSONDecodeError: If response is not valid JSON
     """
+    import re
+    
     text = response.strip()
     
-    # Strip markdown code blocks if present
+    # Strip markdown code blocks if present (```json ... ``` or ``` ... ```)
     if text.startswith("```"):
         lines = text.split("\n")
         # Remove first line (```json or ```)
@@ -563,4 +578,27 @@ def _parse_json_strict(response: str) -> dict[str, Any]:
             lines = lines[:-1]
         text = "\n".join(lines).strip()
     
+    # Try direct parse first
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to extract JSON object from text (LLM might add preamble/postamble)
+    json_match = re.search(r'\{[^{}]*"text"\s*:\s*"[^"]*(?:\\.[^"]*)*"[^{}]*\}', text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
+            pass
+    
+    # Try to find any JSON object
+    json_match = re.search(r'\{.*\}', text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group())
+        except json.JSONDecodeError:
+            pass
+    
+    # Last resort: try the original text
     return json.loads(text)

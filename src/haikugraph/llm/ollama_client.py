@@ -41,12 +41,19 @@ def ollama_chat(
     
     endpoint = f"{base_url}/api/chat"
     
+    # num_ctx must be large enough to hold the full prompt + response.
+    # The planner prompt with schema annotations can reach ~4K tokens;
+    # default Ollama context (2048) silently truncates and the model
+    # copies the example instead of reading the question.
+    num_ctx = int(os.environ.get("HG_OLLAMA_NUM_CTX", "8192"))
+
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
         "options": {
             "temperature": temperature,
+            "num_ctx": num_ctx,
         },
     }
     
@@ -118,3 +125,83 @@ def ollama_chat(
     
     # Should not reach here, but just in case
     raise ValueError(f"Failed after {max_retries} retries. Last error: {last_error}")
+
+
+class OllamaClient:
+    """Client wrapper for Ollama LLM.
+    
+    Provides a simple interface for generating text with Ollama models.
+    """
+    
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+    ):
+        """Initialize Ollama client.
+        
+        Args:
+            model: Ollama model name (default: from HG_OLLAMA_MODEL env or qwen2.5:7b-instruct)
+            base_url: Ollama API base URL (default: from HG_OLLAMA_BASE_URL env or localhost:11434)
+        """
+        self.model = model or os.environ.get("HG_OLLAMA_MODEL", "qwen2.5:7b-instruct")
+        self.base_url = base_url or os.environ.get("HG_OLLAMA_BASE_URL", "http://localhost:11434")
+    
+    def generate(
+        self,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        timeout: int = 60,
+    ) -> str:
+        """Generate text from prompt.
+        
+        Args:
+            prompt: User prompt
+            system_prompt: Optional system prompt
+            temperature: Sampling temperature
+            max_tokens: Max tokens in response
+            timeout: Request timeout
+        
+        Returns:
+            Generated text
+        """
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        return ollama_chat(
+            messages,
+            model=self.model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+    
+    def chat(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0.1,
+        max_tokens: int | None = None,
+        timeout: int = 60,
+    ) -> str:
+        """Chat completion with messages.
+        
+        Args:
+            messages: List of {"role": ..., "content": ...} dicts
+            temperature: Sampling temperature
+            max_tokens: Max tokens in response
+            timeout: Request timeout
+        
+        Returns:
+            Generated text
+        """
+        return ollama_chat(
+            messages,
+            model=self.model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )

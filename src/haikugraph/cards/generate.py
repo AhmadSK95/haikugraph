@@ -218,6 +218,24 @@ def generate_table_card(
     if len(high_null_cols) / len(columns) > 0.3:
         gotchas.append(f"sparse_table_many_nulls: {len(high_null_cols)} cols >50% null")
 
+    # Detect non-unique _id columns (need COUNT DISTINCT when counting)
+    non_unique_ids = []
+    for col in columns:
+        col_name = col["name"].lower()
+        distinct_count = col.get("distinct_count", 0)
+        if (
+            col_name.endswith("_id")
+            and row_count > 0
+            and distinct_count > 0
+            and distinct_count < 0.98 * row_count
+        ):
+            dup_ratio = round(row_count / distinct_count, 1)
+            non_unique_ids.append(f"{col['name']} ({dup_ratio}x duplicates)")
+    if non_unique_ids:
+        gotchas.append(
+            f"non_unique_id_columns: {', '.join(non_unique_ids)} — use COUNT(DISTINCT) when counting"
+        )
+
     # Count suspected joins (will be updated when building relations)
     joins_suspected = 0
 
@@ -238,7 +256,7 @@ def generate_table_card(
     )
 
 
-def generate_column_card(table_name: str, col_profile: dict) -> ColumnCard:
+def generate_column_card(table_name: str, col_profile: dict, row_count: int = 0) -> ColumnCard:
     """Generate a ColumnCard from column profile."""
     col_name = col_profile["name"]
     card_id = f"column:{table_name}.{col_name}"
@@ -246,13 +264,22 @@ def generate_column_card(table_name: str, col_profile: dict) -> ColumnCard:
     # Get semantic hints
     semantic_hints = infer_semantic_hints(col_name, col_profile.get("duckdb_type", ""))
 
+    # Determine uniqueness: distinct_count >= 98% of row_count
+    distinct_count = col_profile.get("distinct_count", 0)
+    is_unique = (
+        row_count > 0
+        and distinct_count > 0
+        and distinct_count >= 0.98 * row_count
+    )
+
     return ColumnCard(
         id=card_id,
         table=table_name,
         column=col_name,
         duckdb_type=col_profile.get("duckdb_type", "UNKNOWN"),
         null_pct=col_profile.get("null_pct", 0.0),
-        distinct_count=col_profile.get("distinct_count", 0),
+        distinct_count=distinct_count,
+        is_unique=is_unique,
         sample_values=col_profile.get("sample_values", [])[:5],  # Limit to 5
         semantic_hints=semantic_hints,
     )
@@ -360,8 +387,9 @@ def generate_cards_from_profile(profile_path: Path, out_dir: Path) -> dict:
     # Generate column cards
     column_cards = []
     for table_name, table_profile in all_tables.items():
+        row_count = table_profile.get("row_count", 0)
         for col_profile in table_profile["columns"]:
-            card = generate_column_card(table_name, col_profile)
+            card = generate_column_card(table_name, col_profile, row_count)
             column_cards.append(card)
 
     # Generate relation cards

@@ -16,6 +16,7 @@ import duckdb
 from haikugraph.planning.ambiguity import validate_no_unresolved_ambiguities
 from haikugraph.planning.schema import validate_plan_or_raise
 from haikugraph.execution.comparison import extract_comparison_from_results, ComparisonResult
+from haikugraph.rules import load_rules, apply_entity_rules
 
 
 def execute_plan(plan: dict, db_path: Path) -> dict:
@@ -292,16 +293,26 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
             agg_col = agg_spec["col"]
             is_distinct = agg_spec.get("distinct", False)
             
+            # Handle count_distinct as alias for count with distinct=true
+            if agg_func == "COUNT_DISTINCT":
+                agg_func = "COUNT"
+                is_distinct = True
+            
+            # Safety net: auto-apply DISTINCT for COUNT on _id columns
+            # These columns typically have duplicates in merged/denormalized tables,
+            # and counting without DISTINCT inflates the result.
+            if (
+                agg_func == "COUNT"
+                and not is_distinct
+                and agg_col.lower().endswith("_id")
+            ):
+                is_distinct = True
+            
             # Build alias
             if is_distinct:
                 alias = f"{agg_spec['agg']}_distinct_{agg_col}"
             else:
                 alias = f"{agg_spec['agg']}_{agg_col}"
-            
-            # Handle count_distinct as alias for count with distinct=true
-            if agg_func == "COUNT_DISTINCT":
-                agg_func = "COUNT"
-                is_distinct = True
             
             # Build column expression with improved type detection
             if agg_func in ("SUM", "AVG", "MIN", "MAX"):
@@ -438,8 +449,10 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
                         "column": time_col
                     })
     
-    # Apply plan-level constraints
-    constraints = plan.get("constraints", [])
+    # Apply plan-level constraints AND subquestion-level constraints
+    plan_constraints = plan.get("constraints", [])
+    sq_constraints = sq.get("constraints", [])
+    constraints = plan_constraints + sq_constraints
 
     for constraint in constraints:
         expr = constraint.get("expression", "")
@@ -453,8 +466,9 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
         # Handle time_month constraints
         if constraint_type == "time_month":
             month_num = constraint.get("month")
+            year_num = constraint.get("year")
             time_col = constraint.get("column")
-            constraint_table = constraint.get("table")
+            constraint_table = constraint.get("table") or primary_table  # Default to primary table if missing
             
             if constraint_table in tables:
                 # Get timestamp expression with proper casting
@@ -464,10 +478,13 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
                     ts_expr = f'TRY_CAST("{constraint_table}"."{time_col}" AS TIMESTAMP)'
                 
                 sql_expr = f"EXTRACT(MONTH FROM {ts_expr}) = {month_num}"
+                if year_num:
+                    sql_expr += f" AND EXTRACT(YEAR FROM {ts_expr}) = {year_num}"
                 where_clauses.append(sql_expr)
                 metadata["constraints_applied"].append({
                     "type": "time_month",
                     "month": month_num,
+                    "year": year_num,
                     "column": time_col,
                     "expression": sql_expr
                 })
@@ -521,14 +538,46 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
         
         # Handle value_filter constraints
         if constraint_type == "value_filter":
-            constraint_table = constraint.get("table")
-            if constraint_table in tables:
-                sql_expr = expr  # Use expression as-is (e.g., "table.column IS NOT NULL")
+            constraint_table = constraint.get("table") or primary_table
+            col = constraint.get("column")
+            operator = constraint.get("operator", "eq")
+            value = constraint.get("value")
+            
+            if constraint_table in tables and col:
+                # Build SQL expression based on operator
+                col_ref = f'"{constraint_table}"."{col}"'
+                if operator == "is_not_null":
+                    sql_expr = f"{col_ref} IS NOT NULL"
+                elif operator == "is_null":
+                    sql_expr = f"{col_ref} IS NULL"
+                elif operator == "eq" and value is not None:
+                    # Escape single quotes in value
+                    safe_value = str(value).replace("'", "''")
+                    sql_expr = f"{col_ref} = '{safe_value}'"
+                elif operator == "neq" and value is not None:
+                    safe_value = str(value).replace("'", "''")
+                    sql_expr = f"{col_ref} != '{safe_value}'"
+                elif operator == "gt" and value is not None:
+                    sql_expr = f"{col_ref} > {value}"
+                elif operator == "lt" and value is not None:
+                    sql_expr = f"{col_ref} < {value}"
+                elif operator == "gte" and value is not None:
+                    sql_expr = f"{col_ref} >= {value}"
+                elif operator == "lte" and value is not None:
+                    sql_expr = f"{col_ref} <= {value}"
+                elif expr:
+                    # Fallback: use expression as-is
+                    sql_expr = expr
+                else:
+                    continue
+                
                 where_clauses.append(sql_expr)
                 metadata["constraints_applied"].append({
                     "type": "value_filter",
-                    "expression": sql_expr,
-                    "value": constraint.get("value")
+                    "column": col,
+                    "operator": operator,
+                    "value": value,
+                    "expression": sql_expr
                 })
             continue
 
@@ -545,6 +594,35 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
             metadata["constraints_applied"].append(
                 {"type": constraint_type, "expression": sql_expr}
             )
+
+    # ==========================================================================
+    # APPLY DATA RULES FROM rules.yaml
+    # ==========================================================================
+    # Load and apply configured data rules (validity rules, default filters, etc.)
+    # These rules are applied AFTER plan constraints but BEFORE assembling WHERE clause.
+    try:
+        original_question = plan.get("original_question", "")
+        where_clauses, applied_rules = apply_entity_rules(
+            table_name=primary_table,
+            existing_where_clauses=where_clauses,
+            question=original_question,
+            include_defaults=True,
+            include_global=True,
+        )
+        
+        # Track applied rules in metadata
+        if applied_rules:
+            metadata["data_rules_applied"] = applied_rules
+            for rule in applied_rules:
+                metadata["constraints_applied"].append({
+                    "type": f"data_rule:{rule['type']}",
+                    "expression": rule["condition"],
+                    "source": "rules.yaml",
+                })
+    except Exception as e:
+        # Rules loading failed - log but don't break query execution
+        # This allows queries to work even if rules.yaml has issues
+        print(f"Warning: Failed to apply data rules: {e}")
 
     where_clause = ""
     if where_clauses:

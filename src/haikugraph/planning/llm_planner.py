@@ -70,13 +70,15 @@ Rules for Plan JSON:
     - Use group_by with time_bucket dict: [{{"type": "time_bucket", "grain": "month", "col": "date_col"}}]
     - Supported grains: "month", "year", "day", "week", "quarter"
     - Example: "monthly unique customers" -> group_by: [{{"type": "time_bucket", "grain": "month", "col": "created_at"}}]
-12. MONTH FILTERS for "in December", "during January", "[month name]" queries:
-    - Add a constraint to filter by specific month
-    - Constraint format: {{"type": "time_month", "expression": "table.date_col month=N", "month": N, "column": "date_col", "table": "table_name"}}
+12. MONTH FILTERS for "in December", "during January", "December 2025", "[month name] [year]" queries:
+    - Add a constraint to filter by specific month AND year (when mentioned)
+    - Constraint format: {{"type": "time_month", "expression": "table.date_col month=N year=YYYY", "month": N, "year": YYYY, "column": "date_col", "table": "table_name"}}
+    - CRITICAL: When the question mentions a year (e.g. "December 2025"), you MUST include the "year" field
     - Month numbers: January=1, February=2, March=3, April=4, May=5, June=6, July=7, August=8, September=9, October=10, November=11, December=12
     - Examples:
-      * "transactions in December" -> constraint: {{"type": "time_month", "expression": "orders.created_at month=12", "month": 12, "column": "created_at", "table": "orders"}}
-      * "January payments" -> constraint: {{"type": "time_month", "expression": "payments.payment_date month=1", "month": 1, "column": "payment_date", "table": "payments"}}
+      * "transactions in December 2025" -> constraint: {{"type": "time_month", "expression": "orders.created_at month=12 year=2025", "month": 12, "year": 2025, "column": "created_at", "table": "orders"}}
+      * "January 2026 payments" -> constraint: {{"type": "time_month", "expression": "payments.payment_date month=1 year=2026", "month": 1, "year": 2026, "column": "payment_date", "table": "payments"}}
+      * "in December" (no year) -> constraint: {{"type": "time_month", "expression": "orders.created_at month=12", "month": 12, "column": "created_at", "table": "orders"}}
 13. SPLIT BY / BREAKDOWN queries for "split by X", "breakdown by X", "by each X", "per X":
     - These are GROUPED_METRIC queries, NOT comparisons
     - Use ONE subquestion (SQ1) with group_by containing the dimension column NAME (simple string)
@@ -107,6 +109,39 @@ Rules for Plan JSON:
     - Example: "count transactions" → ONLY count, DO NOT add revenue or customer details
     - Keep it minimal - one subquestion unless comparison or multi-step calculation required
 15. Column names must be simple identifiers - NO spaces, NO SQL keywords like DISTINCT
+16. COUNTING ENTITIES (transactions, customers, etc.):
+    - When counting _id columns (transaction_id, customer_id, etc.), ALWAYS use distinct=true
+    - The database has denormalized tables where _id columns have many duplicate rows
+    - CORRECT: {{"agg": "count", "col": "transaction_id", "distinct": true}}
+    - WRONG: {{"agg": "count", "col": "transaction_id"}} (counts duplicate rows, inflates result)
+    - For "how many transactions": use COUNT(DISTINCT transaction_id)
+    - For "how many customers": use COUNT(DISTINCT customer_id)
+17. TIME COLUMN SELECTION:
+    - The schema marks one column per table as [PRIMARY TIMESTAMP] — ALWAYS use that column for time filters
+    - Other timestamp columns are sparsely populated and will produce incorrect/incomplete results
+    - For time_month constraints, ALWAYS set "column" to the PRIMARY TIMESTAMP column
+    - Example: if schema says created_at [PRIMARY TIMESTAMP], use "column": "created_at", NOT "payment_created_at"
+18. AMOUNT / MONEY COLUMN SELECTION:
+    - The schema marks one column per table as [PRIMARY AMOUNT] — ALWAYS use that column for "transaction amount", "revenue", "average amount", "total amount" queries
+    - Other amount columns (amount_collected, deal_details_amount, charges, fees) are secondary and represent different financial concepts
+    - For SUM or AVG on transaction amounts: use the PRIMARY AMOUNT column
+    - Example: if schema says payment_amount [PRIMARY AMOUNT], use "col": "payment_amount", NOT "amount_collected"
+19. TABLE SELECTION — each table has [DOMAINS: ...] tags showing its business role:
+    - "how many transactions", "transaction amount", "transaction count" → use the table with domain "transactions"
+    - "how many customers", "unique customers" → use the table with domain "customers"
+    - "by platform", "platform breakdown" → use the table with domain "platforms"
+    - "revenue", "total amount to be paid", "settlement" → use the table with domain "settlements"
+    - "charges", "fees", "GST" → use the table with domain "charges"
+    - "payee", "beneficiary" → use the table with domain "payees/beneficiaries"
+    - "booking", "deal", "forex rate" → use the table with domain "bookings" or "deals"
+    - When a question combines concepts (e.g. "transaction amount"), prefer the table whose domain matches the primary noun ("transactions")
+20. ENTITY EXISTENCE FILTERS for "with mt103", "with invoice", "with refund", "[platform name]" queries:
+    - "with mt103" → add constraint: {{"type": "value_filter", "column": "mt103_created_at", "operator": "is_not_null", "table": "table_name"}}
+    - "with invoice" → add constraint: {{"type": "value_filter", "column": "invoice_document_document_id", "operator": "is_not_null", "table": "table_name"}}
+    - "with refund" → add constraint: {{"type": "value_filter", "column": "refund_refund_id", "operator": "is_not_null", "table": "table_name"}}
+    - "B2C-APP transactions" or "platform_name = X" → add constraint: {{"type": "value_filter", "column": "platform_name", "operator": "eq", "value": "B2C-APP", "table": "table_name"}}
+    - These filters ensure we only count/sum records that HAVE the specified entity
+    - Example: "transactions with mt103 in December 2025" needs BOTH time_month AND value_filter constraints
 
 EXAMPLE for "What is total revenue?":
 {{

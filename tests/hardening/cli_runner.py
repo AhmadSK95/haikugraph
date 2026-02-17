@@ -59,12 +59,11 @@ def run_question_through_cli(
     Returns:
         CLITestResult with captured artifacts
     """
-    # Create temp files for plan and result
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as plan_file:
-        plan_path = Path(plan_file.name)
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as result_file:
-        result_path = Path(result_file.name)
+    # Create isolated temp directory for this test to prevent state pollution
+    import tempfile
+    temp_dir = Path(tempfile.mkdtemp(prefix='hg_test_'))
+    plan_path = temp_dir / "plan.json"
+    result_path = temp_dir / "result.json"
     
     try:
         # Build CLI command
@@ -184,10 +183,10 @@ def run_question_through_cli(
         )
     
     finally:
-        # Cleanup temp files
+        # Cleanup temp directory
         try:
-            plan_path.unlink(missing_ok=True)
-            result_path.unlink(missing_ok=True)
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
         except:
             pass
 
@@ -216,17 +215,21 @@ def extract_sql_from_output(stdout: str, result_data: Optional[Dict] = None) -> 
 
 def extract_error_from_output(stdout: str) -> Optional[str]:
     """Extract error message from stdout"""
-    # Look for error patterns
+    # Look for error patterns (multi-line to capture full ambiguity messages)
     error_patterns = [
-        r"❌\s+Error:?\s*(.+?)(?:\n|$)",
-        r"Error:\s*(.+?)(?:\n|$)",
+        r"❌\s+Error[^\n]*:\s*(.+?)(?:\n={40,}|$)",  # Error followed by separator or EOF
+        r"Error during execution:\s*(.+?)(?:\n={40,}|$)",
         r"Failed:\s*(.+?)(?:\n|$)",
     ]
     
     for pattern in error_patterns:
-        match = re.search(pattern, stdout, re.IGNORECASE)
+        match = re.search(pattern, stdout, re.IGNORECASE | re.DOTALL)
         if match:
-            return match.group(1).strip()
+            error_text = match.group(1).strip()
+            # Truncate very long errors
+            if len(error_text) > 200:
+                error_text = error_text[:200] + "..."
+            return error_text
     
     return None
 

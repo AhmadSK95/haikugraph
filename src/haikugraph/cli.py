@@ -1143,6 +1143,114 @@ def doctor(data_dir: str, db_path: str):
     click.echo("\n✅ Environment check complete")
 
 
+@main.group()
+def rules():
+    """Manage data rules configuration."""
+    pass
+
+
+@rules.command("show")
+@click.option(
+    "--data-dir",
+    default="./data",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True),
+    help="Data directory containing rules.yaml (default: ./data)",
+)
+def rules_show(data_dir: str):
+    """Display current data rules configuration."""
+    from haikugraph.rules.loader import load_rules, get_rules_summary
+    
+    try:
+        config = load_rules(data_dir=Path(data_dir))
+        summary = get_rules_summary(config)
+        click.echo(summary)
+    except Exception as e:
+        click.echo(f"❌ Error loading rules: {e}", err=True)
+        raise click.Abort()
+
+
+@rules.command("validate")
+@click.option(
+    "--rules-path",
+    default="./data/rules.yaml",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False),
+    help="Path to rules file (default: ./data/rules.yaml)",
+)
+def rules_validate(rules_path: str):
+    """Validate a rules configuration file."""
+    from haikugraph.rules.loader import validate_rules_file
+    
+    is_valid, message = validate_rules_file(Path(rules_path))
+    
+    if is_valid:
+        click.echo(f"✅ {message}")
+    else:
+        click.echo(f"❌ {message}", err=True)
+        raise click.Abort()
+
+
+@rules.command("init")
+@click.option(
+    "--data-dir",
+    default="./data",
+    type=click.Path(file_okay=False, dir_okay=True),
+    help="Data directory for rules.yaml (default: ./data)",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite existing rules.yaml",
+)
+def rules_init(data_dir: str, force: bool):
+    """Create a starter rules.yaml file with examples."""
+    rules_path = Path(data_dir) / "rules.yaml"
+    
+    if rules_path.exists() and not force:
+        click.echo(f"❌ Rules file already exists: {rules_path}", err=True)
+        click.echo("   Use --force to overwrite.", err=True)
+        raise click.Abort()
+    
+    # Create data directory if needed
+    rules_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Write starter template
+    starter_content = '''# HaikuGraph Data Rules Configuration
+# ====================================
+# Define business rules that are automatically applied when querying data.
+# See GETTING_STARTED.md for detailed documentation.
+
+version: "1.0"
+
+# Entity Rules - organize rules by business entity
+entity_rules:
+  # Example: transaction entity
+  # transaction:
+  #   description: "Financial transactions"
+  #   tables:
+  #     - transactions_table
+  #   validity:
+  #     - column: status_column
+  #       condition: IS NOT NULL
+  #       reason: "Only complete transactions are valid"
+  #   default_filters:
+  #     - column: is_test
+  #       condition: "= false"
+  #       override_keywords: ["test", "all data"]
+
+# Column Rules - rules for specific columns
+column_rules: {}
+
+# Global Rules - apply to all queries
+global_rules: {}
+'''
+    
+    rules_path.write_text(starter_content)
+    click.echo(f"✅ Created rules file: {rules_path}")
+    click.echo("\n📝 Edit the file to add your business rules.")
+    click.echo("   Run 'haikugraph rules show' to view current configuration.")
+
+
 @main.command("ask-demo")
 @click.argument("question")
 @click.option(
