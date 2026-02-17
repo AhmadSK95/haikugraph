@@ -1221,6 +1221,253 @@ def get_ui_html() -> str:
       margin-bottom: 5px;
     }
 
+    /* Retro dark theme override */
+    :root {
+      --canvas: #0b1018;
+      --panel: #111827;
+      --ink: #e9f0ff;
+      --subtle: #8aa0c2;
+      --line: #24344c;
+      --brand: #24d6a2;
+      --brand-dark: #84d0ff;
+      --ok-bg: #153327;
+      --ok-ink: #9df5c9;
+      --warn-bg: #3a2c19;
+      --warn-ink: #ffcf8c;
+      --chip: #1a2536;
+      --soft-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    }
+
+    body {
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 14% 4%, rgba(39, 84, 167, 0.35) 0%, transparent 33%),
+        radial-gradient(circle at 88% 0%, rgba(16, 163, 126, 0.28) 0%, transparent 35%),
+        linear-gradient(160deg, #090d14 0%, #111b29 46%, #0e1520 100%);
+    }
+
+    .hero,
+    .panel,
+    .chat-shell,
+    .turn,
+    .status-card,
+    .arch-agent,
+    .arch-step {
+      background: linear-gradient(180deg, rgba(18, 28, 44, 0.96), rgba(14, 22, 34, 0.96));
+      border-color: var(--line);
+      box-shadow: var(--soft-shadow);
+    }
+
+    .subtitle,
+    .hint,
+    .status-card label,
+    .turn-head {
+      color: var(--subtle);
+    }
+
+    textarea,
+    select {
+      background: #0f1928;
+      color: var(--ink);
+      border-color: var(--line);
+    }
+
+    .btn,
+    .pill,
+    .model-pill {
+      background: #152235;
+      color: #b6d3f0;
+      border-color: #2a3a56;
+    }
+
+    .btn.ghost {
+      color: #99d7ff;
+      background: #132033;
+    }
+
+    .btn.warn {
+      color: var(--warn-ink);
+      border-color: #6f5a34;
+      background: #241c12;
+    }
+
+    .session-chip {
+      background: #14312a;
+      color: #9df5c9;
+      border-color: #2a644f;
+    }
+
+    .toggle-row,
+    .empty-state,
+    .kpi,
+    .kpi.label,
+    details,
+    .mono,
+    .trace-step {
+      background: #101a29;
+      border-color: #2a3b58;
+      color: #dceaff;
+    }
+
+    .kpi.label {
+      background: linear-gradient(135deg, #173123, #11283a);
+      border-color: #2f6f58;
+    }
+
+    .kpi .v {
+      color: #9ff2ca;
+    }
+
+    .bubble.user {
+      background: #182942;
+      border-color: #2e4f7a;
+      color: #cfe5ff;
+    }
+
+    .bubble.assistant {
+      background: #122739;
+      border-color: #1f4d63;
+      color: #d6f7ff;
+    }
+
+    th {
+      background: #152438;
+      color: #a8d8ff;
+    }
+
+    td {
+      color: #d3e1f4;
+      border-bottom-color: #253750;
+    }
+
+    .table-wrap {
+      border-color: #2a3b58;
+      background: #101a29;
+    }
+
+    summary {
+      color: #98d3ff;
+    }
+
+    .trace-bar {
+      margin: 6px 0 4px;
+      height: 6px;
+      border-radius: 999px;
+      background: #1a2a3f;
+      overflow: hidden;
+    }
+
+    .trace-bar i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #20d39f, #79c9ff);
+    }
+
+    .diag-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    .diag-card {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 8px;
+      background: #122034;
+    }
+
+    .diag-card .k {
+      font-size: 0.72rem;
+      color: var(--subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .diag-card .v {
+      margin-top: 3px;
+      font-size: 0.86rem;
+      color: #def0ff;
+      word-break: break-word;
+    }
+
+    .trace-wrap {
+      max-height: 320px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .md-block p {
+      margin: 0 0 8px;
+    }
+
+    .md-block h4,
+    .md-block h5 {
+      margin: 0 0 8px;
+      color: #9bd5ff;
+      letter-spacing: 0.01em;
+    }
+
+    .md-block ul,
+    .md-block ol {
+      margin: 0 0 8px 18px;
+      padding: 0;
+    }
+
+    .md-block li {
+      margin-bottom: 4px;
+    }
+
+    .md-block code,
+    .diag-card code {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: #aee2ff;
+      background: #0f1a2a;
+      border: 1px solid #27374f;
+      border-radius: 6px;
+      padding: 1px 4px;
+    }
+
+    .diag-outcome {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 8px;
+      margin: 8px 0;
+      font-size: 0.84rem;
+      line-height: 1.42;
+    }
+
+    .diag-outcome.ok {
+      background: #12281f;
+      border-color: #295743;
+      color: #b8f7d5;
+    }
+
+    .diag-outcome.warn {
+      background: #2a2116;
+      border-color: #5f4a2d;
+      color: #ffd8a3;
+    }
+
+    .trace-step.ok {
+      border-color: #325f4e;
+    }
+
+    .trace-step.warn {
+      border-color: #6d5532;
+    }
+
+    .trace-step .meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.74rem;
+      color: var(--subtle);
+      margin-top: 5px;
+    }
+
     @media (max-width: 1020px) {
       .layout {
         grid-template-columns: 1fr;
@@ -1355,12 +1602,69 @@ def get_ui_html() -> str:
         .replace(/>/g, '&gt;');
     }
 
+    function mdInline(text) {
+      return esc(text)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    }
+
     function md(text) {
       if (!text) return '';
-      const html = esc(text)
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\\n/g, '<br/>');
-      return html;
+      const lines = String(text).replace(/\r\n/g, '\n').split('\n');
+      const html = [];
+      let listMode = null; // "ul" | "ol" | null
+
+      const closeList = () => {
+        if (listMode) {
+          html.push(`</${listMode}>`);
+          listMode = null;
+        }
+      };
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) {
+          closeList();
+          continue;
+        }
+
+        if (line.startsWith('### ')) {
+          closeList();
+          html.push(`<h5>${mdInline(line.slice(4))}</h5>`);
+          continue;
+        }
+        if (line.startsWith('## ')) {
+          closeList();
+          html.push(`<h4>${mdInline(line.slice(3))}</h4>`);
+          continue;
+        }
+        if (line.startsWith('- ') || line.startsWith('* ')) {
+          if (listMode !== 'ul') {
+            closeList();
+            html.push('<ul>');
+            listMode = 'ul';
+          }
+          html.push(`<li>${mdInline(line.slice(2))}</li>`);
+          continue;
+        }
+
+        const ordered = line.match(/^\d+\.\s+(.*)$/);
+        if (ordered) {
+          if (listMode !== 'ol') {
+            closeList();
+            html.push('<ol>');
+            listMode = 'ol';
+          }
+          html.push(`<li>${mdInline(ordered[1])}</li>`);
+          continue;
+        }
+
+        closeList();
+        html.push(`<p>${mdInline(line)}</p>`);
+      }
+
+      closeList();
+      return html.join('');
     }
 
     function fmt(v) {
@@ -1371,6 +1675,27 @@ def get_ui_html() -> str:
       }
       if (v === null || v === undefined) return '';
       return String(v);
+    }
+
+    function fmtTimeFilter(timeFilter) {
+      if (!timeFilter || typeof timeFilter !== 'object') return 'none';
+      if (timeFilter.kind === 'month_year') {
+        const month = Number(timeFilter.month || 0);
+        const year = Number(timeFilter.year || 0);
+        if (month >= 1 && month <= 12 && year > 0) {
+          return `${year}-${String(month).padStart(2, '0')}`;
+        }
+      }
+      if (timeFilter.kind === 'year_only' && timeFilter.year) return String(timeFilter.year);
+      if (timeFilter.kind === 'relative' && timeFilter.value) return String(timeFilter.value).replace(/_/g, ' ');
+      return esc(JSON.stringify(timeFilter));
+    }
+
+    function fmtFilters(valueFilters) {
+      if (!Array.isArray(valueFilters) || !valueFilters.length) return 'none';
+      return valueFilters
+        .map((vf) => `${vf.column || '?'}=${vf.value || '?'}`)
+        .join(', ');
     }
 
     function setStatus(msg) {
@@ -1522,13 +1847,28 @@ def get_ui_html() -> str:
 
     function renderTrace(trace) {
       if (!Array.isArray(trace) || trace.length === 0) return '<div class="hint">No trace.</div>';
-      return `<div class="trace">${trace.map((step) => `
-        <div class="trace-step">
-          <div class="head"><span>${esc(step.agent || 'agent')}</span><span>${esc(step.status || '')} • ${esc(step.duration_ms || 0)} ms</span></div>
-          <div class="hint">${esc(step.role || '')}</div>
-          <div>${esc(step.summary || '')}</div>
-        </div>
-      `).join('')}</div>`;
+      const maxDuration = Math.max(
+        1,
+        ...trace.map((step) => {
+          const ms = Number(step && step.duration_ms);
+          return Number.isFinite(ms) ? ms : 0;
+        })
+      );
+
+      return `<div class="trace trace-wrap">${trace.map((step) => {
+        const status = String(step.status || 'unknown').toLowerCase();
+        const duration = Number(step.duration_ms || 0);
+        const pct = Math.max(4, Math.round((Math.max(0, duration) / maxDuration) * 100));
+        const cls = status === 'success' ? 'ok' : 'warn';
+        return `
+          <div class="trace-step ${cls}">
+            <div class="head"><span>${esc(step.agent || 'agent')}</span><span>${esc(status)} • ${esc(fmt(duration))} ms</span></div>
+            <div class="trace-bar"><i style="width:${pct}%"></i></div>
+            <div>${esc(step.summary || '')}</div>
+            <div class="meta"><span>${esc(step.role || '')}</span><span>${esc(step.time || '')}</span></div>
+          </div>
+        `;
+      }).join('')}</div>`;
     }
 
     function checksHtml(checks) {
@@ -1559,29 +1899,64 @@ def get_ui_html() -> str:
       const grounding = quality.grounding || {};
       const confidencePct = Math.round((data.confidence_score || 0) * 100);
       const headline = pickHeadlineValue(data);
+      const checks = Array.isArray(data.sanity_checks) ? data.sanity_checks : [];
 
       const suggestions = (data.suggested_questions || []).slice(0, 4);
       const suggestionHtml = suggestions.length
         ? `<div class="suggestions">${suggestions.map((q) => `<button class="pill suggest" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
         : '';
+
       const termMisses = Array.isArray(grounding.goal_term_misses) ? grounding.goal_term_misses : [];
-      const groundingTagClass = termMisses.length ? 'warn' : 'ok';
+      const dims = Array.isArray(grounding.dimensions) ? grounding.dimensions : [];
+      const dimsLabel = dims.length
+        ? dims.map((d) => (d === '__month__' ? 'month' : d)).join(', ')
+        : 'none';
+      const filtersLabel = fmtFilters(grounding.value_filters || []);
+      const conceptTagClass = termMisses.length ? 'warn' : 'ok';
       const replayText = grounding.replay_match === null || grounding.replay_match === undefined
         ? 'n/a'
         : (grounding.replay_match ? 'pass' : 'fail');
-      const groundingHtml = `
-        <div style="margin:8px 0; border:1px solid #dce9ee; border-radius:9px; padding:8px; background:#fbfeff;">
-          <div class="hint"><strong>Grounding:</strong> table=<code>${esc(grounding.table || 'unknown')}</code> metric=<code>${esc(grounding.metric || 'unknown')}</code></div>
-          <div style="margin-top:4px;">
-            <span class="tag ${groundingTagClass}">Concept alignment ${termMisses.length ? 'warn' : 'pass'}</span>
-            <span class="tag ${grounding.replay_match ? 'ok' : 'warn'}">Replay ${esc(replayText)}</span>
+      const failedChecks = checks.filter((c) => !c.passed).map((c) => c.check_name || 'check');
+      const outcomeMessages = [];
+      if (termMisses.length) outcomeMessages.push(`Missing goal concepts: ${termMisses.join(', ')}`);
+      if (grounding.replay_match === false) outcomeMessages.push('Replay check failed: deterministic replay did not match.');
+      if (failedChecks.length) outcomeMessages.push(`Checks flagged: ${failedChecks.join(', ')}`);
+
+      const diagOutcome = outcomeMessages.length
+        ? `<div class="diag-outcome warn"><strong>Debug focus:</strong> ${esc(outcomeMessages.join(' | '))}</div>`
+        : `<div class="diag-outcome ok"><strong>Validation:</strong> concept, replay, and sanity checks are aligned.</div>`;
+
+      const diagHtml = `
+        <div class="diag-grid">
+          <div class="diag-card">
+            <div class="k">Interpretation</div>
+            <div class="v">intent=<code>${esc(grounding.intent || 'n/a')}</code> metric=<code>${esc(grounding.metric || 'n/a')}</code></div>
           </div>
-          ${termMisses.length ? `<div class="hint" style="margin-top:4px;">Missing goal concepts: ${esc(termMisses.join(', '))}</div>` : ''}
+          <div class="diag-card">
+            <div class="k">Data Scope</div>
+            <div class="v">table=<code>${esc(grounding.table || 'unknown')}</code> group_by=<code>${esc(dimsLabel)}</code></div>
+          </div>
+          <div class="diag-card">
+            <div class="k">Time Window</div>
+            <div class="v">${esc(fmtTimeFilter(grounding.time_filter))}</div>
+          </div>
+          <div class="diag-card">
+            <div class="k">Applied Filters</div>
+            <div class="v">${esc(filtersLabel)}</div>
+          </div>
+          <div class="diag-card">
+            <div class="k">Validation</div>
+            <div class="v">concept=<strong>${termMisses.length ? 'warn' : 'pass'}</strong>, replay=<strong>${esc(replayText)}</strong></div>
+          </div>
+          <div class="diag-card">
+            <div class="k">Execution Path</div>
+            <div class="v">mode=<code>${esc(runtime.mode || 'unknown')}</code> local_model=<code>${esc(runtime.local_model || 'auto')}</code></div>
+          </div>
         </div>
       `;
 
       return `
-        <div class="bubble assistant">${md(data.answer_markdown || '')}</div>
+        <div class="bubble assistant md-block">${md(data.answer_markdown || '')}</div>
         <div class="kpi-grid">
           <div class="kpi label">
             <div class="k">Key result</div>
@@ -1601,8 +1976,13 @@ def get_ui_html() -> str:
           <span class="tag ${data.success ? 'ok' : 'warn'}">${esc(runtime.mode || 'unknown')}</span>
           <span class="hint">rows: ${esc(fmt(data.row_count || 0))}</span>
         </div>
-        ${groundingHtml}
-        ${checksHtml(data.sanity_checks || [])}
+        <div style="margin-bottom:6px;">
+          <span class="tag ${conceptTagClass}">Concept ${termMisses.length ? 'warn' : 'pass'}</span>
+          <span class="tag ${grounding.replay_match === false ? 'warn' : 'ok'}">Replay ${esc(replayText)}</span>
+        </div>
+        ${diagHtml}
+        ${diagOutcome}
+        ${checksHtml(checks)}
         ${suggestionHtml}
         ${renderTable(data.columns || [], data.sample_rows || [])}
         <details>
@@ -1667,7 +2047,7 @@ def get_ui_html() -> str:
         els.archContent.innerHTML = `
           <div class="arch-flow">${flow.map((f) => `<div class="arch-step">${esc(f)}</div>`).join('')}</div>
           <div class="hint" style="margin-bottom:6px;"><strong>Guardrails:</strong></div>
-          <ul style="margin: 0 0 8px 18px; color: #355969; font-size: 0.82rem;">${guardrails}</ul>
+          <ul style="margin: 0 0 8px 18px; color: #9eb7d6; font-size: 0.82rem;">${guardrails}</ul>
           <div class="arch-agents">${agents}</div>
         `;
         state.architectureLoaded = true;

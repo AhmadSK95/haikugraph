@@ -885,6 +885,17 @@ class AgenticAnalyticsTeam:
 
             evidence_packets = [
                 {
+                    "agent": "PlanningAgent",
+                    "goal": plan.get("goal"),
+                    "intent": plan.get("intent"),
+                    "table": plan.get("table"),
+                    "metric": plan.get("metric"),
+                    "metric_expr": plan.get("metric_expr"),
+                    "dimensions": plan.get("dimensions", []),
+                    "time_filter": plan.get("time_filter"),
+                    "value_filters": plan.get("value_filters", []),
+                },
+                {
                     "agent": "QueryEngineerAgent",
                     "table": plan["table"],
                     "metric": plan["metric"],
@@ -1051,6 +1062,7 @@ class AgenticAnalyticsTeam:
 
         lower = goal.lower().strip()
         tokens = re.findall(r"[a-z0-9_]+", lower)
+        token_set = set(tokens)
         explicit_subject_terms = [
             "transaction",
             "quote",
@@ -1066,9 +1078,12 @@ class AgenticAnalyticsTeam:
             "count",
         ]
         has_explicit_subject = any(term in lower for term in explicit_subject_terms)
+        has_reference_pronoun = any(term in token_set for term in {"same", "those", "it", "them", "previous"})
+        has_reference_phrase = any(phrase in lower for phrase in ["that result", "that one", "same as above"])
         followup = (
             lower.startswith(("and ", "also ", "what about", "now ", "for that"))
-            or any(token in lower for token in ["same", "that result", "those", "it", "them", "previous"])
+            or has_reference_pronoun
+            or has_reference_phrase
             or (len(tokens) <= 6 and not has_explicit_subject)
         )
         if not followup:
@@ -1163,6 +1178,7 @@ class AgenticAnalyticsTeam:
     ) -> dict[str, Any]:
         parsed = self._intake_deterministic(goal, catalog)
         parsed["_llm_intake_used"] = False
+        deterministic = dict(parsed)
         explicit_top = bool(re.search(r"\btop\s+\d+\b", goal.lower()))
         if runtime.use_llm and runtime.provider:
             llm_parsed = self._intake_with_llm(goal, runtime, parsed)
@@ -1171,8 +1187,14 @@ class AgenticAnalyticsTeam:
                 if not explicit_top:
                     cleaned.pop("top_n", None)
                 if cleaned:
-                    parsed.update({k: v for k, v in cleaned.items() if v not in (None, "")})
+                    merged = {
+                        **parsed,
+                        **{k: v for k, v in cleaned.items() if v not in (None, "")},
+                    }
+                    merged = self._enforce_intake_consistency(goal, deterministic, merged)
+                    parsed.update(merged)
                     parsed["_llm_intake_used"] = True
+        parsed = self._enforce_intake_consistency(goal, deterministic, parsed)
         return parsed
 
     def _intake_with_llm(
@@ -1210,6 +1232,26 @@ class AgenticAnalyticsTeam:
         except Exception:
             return None
         return _extract_json_payload(raw)
+
+    def _goal_has_count_intent(self, lower: str) -> bool:
+        return any(k in lower for k in ["count", "how many", "number of", "volume", "qty", "quantity"])
+
+    def _goal_has_amount_intent(self, lower: str) -> bool:
+        return any(
+            k in lower
+            for k in [
+                "amount",
+                "revenue",
+                "value",
+                "sum",
+                "markup",
+                "charge",
+                "charges",
+                "fee",
+                "fees",
+                "booked",
+            ]
+        )
 
     def _intake_deterministic(self, goal: str, catalog: dict[str, Any]) -> dict[str, Any]:
         g = goal.strip()
@@ -1271,14 +1313,26 @@ class AgenticAnalyticsTeam:
             domain = "customers"
 
         metric = "transaction_count"
+        has_count_words = self._goal_has_count_intent(lower)
+        has_amount_words = self._goal_has_amount_intent(lower)
+        has_mt103 = "mt103" in lower
+        has_refund = "refund" in lower
         if domain == "transactions":
             if "refund rate" in lower:
                 metric = "refund_rate"
-            elif "refund" in lower:
+            elif has_refund and has_count_words:
+                metric = "refund_count"
+            elif has_refund and has_amount_words:
+                metric = "total_amount"
+            elif has_refund:
                 metric = "refund_count"
             elif "mt103" in lower and any(k in lower for k in ["rate", "coverage", "%"]):
                 metric = "mt103_rate"
-            elif "mt103" in lower:
+            elif has_mt103 and has_count_words:
+                metric = "mt103_count"
+            elif has_mt103 and has_amount_words:
+                metric = "total_amount"
+            elif has_mt103:
                 metric = "mt103_count"
             elif any(k in lower for k in ["unique customer", "distinct customer"]):
                 metric = "unique_customers"
@@ -1286,27 +1340,33 @@ class AgenticAnalyticsTeam:
                 k in lower for k in ["amount", "revenue", "payment"]
             ):
                 metric = "avg_amount"
-            elif any(k in lower for k in ["total", "sum", "revenue", "amount", "value"]):
+            elif has_count_words:
+                metric = "transaction_count"
+            elif has_amount_words:
                 metric = "total_amount"
             else:
                 metric = "transaction_count"
         elif domain == "quotes":
             if "markup" in lower and any(k in lower for k in ["average", "avg", "mean"]):
                 metric = "avg_forex_markup"
-            elif "markup" in lower and any(k in lower for k in ["revenue", "amount", "total", "sum", "value"]):
+            elif "markup" in lower and any(k in lower for k in ["revenue", "amount", "sum", "value"]):
                 metric = "forex_markup_revenue"
             elif any(k in lower for k in ["charge", "charges", "fee", "fees"]):
                 metric = "total_charges"
             elif any(k in lower for k in ["average", "avg"]):
                 metric = "avg_quote_value"
-            elif any(k in lower for k in ["amount", "value", "total", "sum"]):
+            elif has_count_words:
+                metric = "quote_count"
+            elif any(k in lower for k in ["amount", "value", "sum"]):
                 metric = "total_quote_value"
             else:
                 metric = "quote_count"
         elif domain == "bookings":
             if any(k in lower for k in ["rate", "fx rate", "exchange rate"]):
                 metric = "avg_rate"
-            elif any(k in lower for k in ["amount", "total", "sum", "booked"]):
+            elif has_count_words:
+                metric = "booking_count"
+            elif any(k in lower for k in ["amount", "sum", "booked"]):
                 metric = "total_booked_amount"
             else:
                 metric = "booking_count"
@@ -1421,6 +1481,29 @@ class AgenticAnalyticsTeam:
                     value_filters.append({"column": col, "value": value})
                     break
 
+        def add_value_filter(column: str, value: str) -> None:
+            for vf in value_filters:
+                if vf.get("column") == column:
+                    return
+            value_filters.append({"column": column, "value": value})
+
+        if domain == "transactions":
+            if "without mt103" in lower or "excluding mt103" in lower:
+                add_value_filter("has_mt103", "false")
+            elif has_mt103 and (
+                "with mt103" in lower
+                or "mt103 transactions" in lower
+                or "mt103 only" in lower
+                or "only mt103" in lower
+                or has_amount_words
+            ):
+                add_value_filter("has_mt103", "true")
+
+            if "without refund" in lower or "excluding refund" in lower:
+                add_value_filter("has_refund", "false")
+            elif has_refund and ("with refund" in lower or "refund only" in lower or has_amount_words):
+                add_value_filter("has_refund", "true")
+
         return {
             "goal": g,
             "intent": intent,
@@ -1432,6 +1515,57 @@ class AgenticAnalyticsTeam:
             "time_filter": time_filter,
             "value_filters": value_filters,
         }
+
+    def _enforce_intake_consistency(
+        self,
+        goal: str,
+        deterministic: dict[str, Any],
+        parsed: dict[str, Any],
+    ) -> dict[str, Any]:
+        out = dict(parsed)
+        lower = goal.lower()
+
+        compare_terms = [" vs ", " versus ", "compare", "compared"]
+        if out.get("intent") == "comparison" and not any(t in lower for t in compare_terms):
+            out["intent"] = deterministic.get("intent", out.get("intent"))
+
+        amount_terms = ["amount", "revenue", "value", "sum", "booked", "markup"]
+        has_count_words = self._goal_has_count_intent(lower)
+        if any(t in lower for t in amount_terms):
+            if str(out.get("metric", "")).endswith("_count") and str(
+                deterministic.get("metric", "")
+            ) in {"total_amount", "total_quote_value", "total_booked_amount", "forex_markup_revenue"}:
+                out["metric"] = deterministic.get("metric")
+
+        if "how many quotes" in lower or ("quote" in lower and "how many" in lower):
+            out["domain"] = "quotes"
+            out["metric"] = "quote_count"
+
+        value_filters = list(out.get("value_filters") or [])
+
+        def has_filter(col: str, val: str) -> bool:
+            sval = val.lower()
+            for vf in value_filters:
+                if str(vf.get("column", "")).lower() == col.lower() and str(vf.get("value", "")).lower() == sval:
+                    return True
+            return False
+
+        def add_filter(col: str, val: str) -> None:
+            if not has_filter(col, val):
+                value_filters.append({"column": col, "value": val})
+
+        if out.get("domain") == "transactions":
+            if "with mt103" in lower or ("mt103" in lower and any(t in lower for t in amount_terms)):
+                add_filter("has_mt103", "true")
+                if any(t in lower for t in amount_terms) and not has_count_words:
+                    out["metric"] = "total_amount"
+            if "with refund" in lower or ("refund" in lower and any(t in lower for t in amount_terms)):
+                add_filter("has_refund", "true")
+                if any(t in lower for t in amount_terms) and not has_count_words:
+                    out["metric"] = "total_amount"
+
+        out["value_filters"] = value_filters
+        return out
 
     def _semantic_retrieval_agent(
         self,
@@ -1482,6 +1616,34 @@ class AgenticAnalyticsTeam:
             dimensions = dimensions[:2]
         dimension = dimensions[0] if dimensions else None
 
+        value_filters = list(intake.get("value_filters", []))
+        valid_cols = set(retrieval.get("columns", []))
+        value_filters = [
+            vf
+            for vf in value_filters
+            if isinstance(vf, dict)
+            and isinstance(vf.get("column"), str)
+            and vf.get("column") in valid_cols
+            and isinstance(vf.get("value"), str)
+        ]
+
+        if intake["domain"] == "transactions":
+            goal_lower = str(intake.get("goal", "")).lower()
+            has_amount_words = self._goal_has_amount_intent(goal_lower)
+            has_count_words = self._goal_has_count_intent(goal_lower)
+            if "mt103" in goal_lower and has_amount_words and not has_count_words:
+                if not any(vf["column"] == "has_mt103" for vf in value_filters):
+                    value_filters.append({"column": "has_mt103", "value": "true"})
+                if intake.get("metric") in {"transaction_count", "mt103_count"}:
+                    intake["metric"] = "total_amount"
+                    metric_expr = retrieval["metrics"].get("total_amount", metric_expr)
+            if "refund" in goal_lower and has_amount_words and not has_count_words:
+                if not any(vf["column"] == "has_refund" for vf in value_filters):
+                    value_filters.append({"column": "has_refund", "value": "true"})
+                if intake.get("metric") in {"transaction_count", "refund_count"}:
+                    intake["metric"] = "total_amount"
+                    metric_expr = retrieval["metrics"].get("total_amount", metric_expr)
+
         return {
             "goal": intake.get("goal", ""),
             "intent": intake["intent"],
@@ -1496,7 +1658,7 @@ class AgenticAnalyticsTeam:
                 retrieval.get("preferred_time_column"),
             ),
             "time_filter": intake.get("time_filter"),
-            "value_filters": intake.get("value_filters", []),
+            "value_filters": value_filters,
             "top_n": max(1, min(100, int(intake.get("top_n", 20)))),
             "definition_used": (
                 f"{intake['metric']} on {retrieval['table']}"
@@ -1812,6 +1974,8 @@ class AgenticAnalyticsTeam:
             score -= 0.20
         score -= 0.10 * failed_checks
         score -= 0.10 * len(warnings)
+        if not concept_check_passed:
+            score = min(score, 0.45)
         score = max(0.0, min(1.0, score))
 
         query_columns_used = [c for c in available_columns if c in sql_lower]
@@ -1827,6 +1991,10 @@ class AgenticAnalyticsTeam:
                 "goal_term_misses": concept_misses,
                 "query_columns_used": query_columns_used[:12],
                 "replay_match": replay_match,
+                "intent": plan.get("intent"),
+                "dimensions": plan.get("dimensions", []),
+                "time_filter": plan.get("time_filter"),
+                "value_filters": plan.get("value_filters", []),
             },
         }
 
@@ -1870,6 +2038,7 @@ class AgenticAnalyticsTeam:
                     "Write clear, friendly answers. Avoid jargon. "
                     "If style is storyteller, explain insights as a short story with context and next action. "
                     "Ground every statement in provided SQL result rows only; do not claim missing data unless row_count is 0. "
+                    "Keep it succinct: max 90 words and no more than 3 bullets. "
                     "Return JSON only with keys: answer_markdown and suggested_questions."
                 ),
             },
@@ -1894,6 +2063,7 @@ class AgenticAnalyticsTeam:
                     fallback["suggested_questions"] = self._suggested_questions(plan)
                     fallback["llm_narrative_used"] = False
                     return fallback
+                cleaned = self._compact_answer_markdown(cleaned)
                 return {
                     "answer_markdown": cleaned,
                     "headline_value": fallback.get("headline_value"),
@@ -1915,6 +2085,7 @@ class AgenticAnalyticsTeam:
                     fallback["suggested_questions"] = self._suggested_questions(plan)
                     fallback["llm_narrative_used"] = False
                     return fallback
+                cleaned = self._compact_answer_markdown(cleaned)
                 return {
                     "answer_markdown": cleaned,
                     "headline_value": fallback.get("headline_value"),
@@ -2177,6 +2348,21 @@ class AgenticAnalyticsTeam:
             "data is not available",
         ]
         return any(p in lower for p in contradiction_patterns)
+
+    def _compact_answer_markdown(
+        self,
+        text: str,
+        *,
+        max_lines: int = 8,
+        max_chars: int = 720,
+    ) -> str:
+        lines = [line.rstrip() for line in text.strip().splitlines() if line.strip()]
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+        out = "\n".join(lines).strip()
+        if len(out) > max_chars:
+            out = out[:max_chars].rsplit(" ", 1)[0].rstrip() + "..."
+        return out or text.strip()
 
     def _to_confidence(self, score: float) -> ConfidenceLevel:
         if score >= 0.8:
