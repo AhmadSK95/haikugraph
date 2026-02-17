@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from haikugraph.api.server import create_app
 
 
-MODES = ["deterministic", "local", "openai", "auto"]
+DEFAULT_MODES = ["deterministic", "local", "openai", "auto"]
 
 
 @dataclass(frozen=True)
@@ -131,14 +131,14 @@ CASES: list[AccuracyCase] = [
     AccuracyCase(
         "quote_count_total",
         "How many quotes are there?",
-        "SELECT COUNT(DISTINCT quote_key) AS metric_value FROM datada_mart_quotes WHERE 1=1",
+        "SELECT COUNT(*) AS metric_value FROM datada_mart_quotes WHERE 1=1",
         "Quote count baseline.",
     ),
     AccuracyCase(
         "quote_count_by_from_currency",
         "Quote volume by from currency",
         (
-            "SELECT from_currency AS dimension, COUNT(DISTINCT quote_key) AS metric_value "
+            "SELECT from_currency AS dimension, COUNT(*) AS metric_value "
             "FROM datada_mart_quotes "
             "WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC LIMIT 20"
         ),
@@ -159,6 +159,17 @@ CASES: list[AccuracyCase] = [
             "WHERE 1=1 GROUP BY 1 ORDER BY 2 DESC NULLS LAST, 1 ASC LIMIT 20"
         ),
         "Average quote value grouped by source currency.",
+    ),
+    AccuracyCase(
+        "quote_forex_markup_dec_2025",
+        "What is the forex markup revenue for December 2025?",
+        (
+            "SELECT SUM(forex_markup) AS metric_value "
+            "FROM datada_mart_quotes "
+            "WHERE 1=1 AND created_ts IS NOT NULL "
+            "AND EXTRACT(YEAR FROM created_ts) = 2025 AND EXTRACT(MONTH FROM created_ts) = 12"
+        ),
+        "Forex markup revenue from quote mart.",
     ),
     AccuracyCase(
         "customer_count_total",
@@ -269,7 +280,12 @@ def _execute_sql(conn: duckdb.DuckDBPyConnection, sql: str) -> tuple[list[str], 
     return columns, rows
 
 
-def run_audit(db_path: Path, out_dir: Path, local_model: str) -> tuple[Path, dict[str, Any]]:
+def run_audit(
+    db_path: Path,
+    out_dir: Path,
+    local_model: str,
+    modes: list[str],
+) -> tuple[Path, dict[str, Any]]:
     app = create_app(db_path=db_path)
     client = TestClient(app)
 
@@ -288,7 +304,7 @@ def run_audit(db_path: Path, out_dir: Path, local_model: str) -> tuple[Path, dic
         }
 
     runs: list[dict[str, Any]] = []
-    for mode in MODES:
+    for mode in modes:
         for case in CASES:
             started = time.perf_counter()
             response = client.post(
@@ -297,6 +313,7 @@ def run_audit(db_path: Path, out_dir: Path, local_model: str) -> tuple[Path, dic
                     "goal": case.question,
                     "llm_mode": mode,
                     "local_model": local_model,
+                    "session_id": f"accuracy-{mode}-{case.case_id}",
                 },
             )
             latency_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -354,7 +371,7 @@ def run_audit(db_path: Path, out_dir: Path, local_model: str) -> tuple[Path, dic
     conn.close()
 
     summary: dict[str, dict[str, Any]] = {}
-    for mode in MODES:
+    for mode in modes:
         rows = [r for r in runs if r["requested_mode"] == mode]
         matches = [r for r in rows if r["exact_match"]]
         successes = [r for r in rows if r["success"]]
@@ -382,6 +399,7 @@ def run_audit(db_path: Path, out_dir: Path, local_model: str) -> tuple[Path, dic
         "providers": providers,
         "health": health,
         "local_model": local_model,
+        "modes": modes,
         "cases": [c.__dict__ for c in CASES],
         "summary": summary,
         "runs": runs,
@@ -515,9 +533,11 @@ def main() -> None:
     parser.add_argument("--db-path", default="data/haikugraph.db")
     parser.add_argument("--out-dir", default="reports")
     parser.add_argument("--local-model", default="qwen2.5:7b-instruct")
+    parser.add_argument("--modes", default=",".join(DEFAULT_MODES))
     args = parser.parse_args()
 
-    html_path, data = run_audit(Path(args.db_path), Path(args.out_dir), args.local_model)
+    modes = [m.strip() for m in args.modes.split(",") if m.strip()]
+    html_path, data = run_audit(Path(args.db_path), Path(args.out_dir), args.local_model, modes)
     print(f"Accuracy audit complete. Report: {html_path}")
     for mode, vals in data["summary"].items():
         print(

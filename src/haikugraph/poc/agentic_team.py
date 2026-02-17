@@ -248,6 +248,7 @@ class SemanticLayerManager:
                     NULL::VARCHAR AS deal_details_status,
                     NULL::VARCHAR AS quote_status,
                     NULL::TIMESTAMP AS event_ts,
+                    NULL::TIMESTAMP AS mt103_created_ts,
                     NULL::TIMESTAMP AS payment_created_ts,
                     NULL::TIMESTAMP AS created_ts,
                     NULL::TIMESTAMP AS updated_ts,
@@ -279,6 +280,7 @@ class SemanticLayerManager:
                 {self._txt(cols, 'quote_status')},
                 {self._txt(cols, 'mt103_created_at', 'mt103_created_at_raw')},
                 {self._txt(cols, 'refund_refund_id', 'refund_id_raw')},
+                {self._ts(cols, 'mt103_created_at', 'mt103_created_ts')},
                 {self._ts(cols, 'payment_created_at', 'payment_created_ts')},
                 {self._ts(cols, 'created_at', 'created_ts')},
                 {self._ts(cols, 'updated_at', 'updated_ts')},
@@ -300,6 +302,7 @@ class SemanticLayerManager:
             deal_details_status,
             quote_status,
             COALESCE(payment_created_ts, created_ts, updated_ts) AS event_ts,
+            mt103_created_ts,
             payment_created_ts,
             created_ts,
             updated_ts,
@@ -307,7 +310,7 @@ class SemanticLayerManager:
             COALESCE(deal_amount_num, 0.0) AS deal_amount,
             COALESCE(amount_collected_num, 0.0) AS amount_collected,
             COALESCE(payment_amount_num, deal_amount_num, amount_collected_num, 0.0) AS amount,
-            CASE WHEN mt103_created_at_raw IS NULL THEN FALSE ELSE TRUE END AS has_mt103,
+            CASE WHEN mt103_created_ts IS NULL THEN FALSE ELSE TRUE END AS has_mt103,
             CASE WHEN refund_id_raw IS NULL THEN FALSE ELSE TRUE END AS has_refund
         FROM base
         """
@@ -333,7 +336,11 @@ class SemanticLayerManager:
                     0.0::DOUBLE AS amount_at_destination,
                     0.0::DOUBLE AS total_amount_to_be_paid,
                     0.0::DOUBLE AS exchange_rate,
-                    0.0::DOUBLE AS total_additional_charges
+                    0.0::DOUBLE AS total_additional_charges,
+                    0.0::DOUBLE AS forex_markup,
+                    0.0::DOUBLE AS amount_without_markup,
+                    0.0::DOUBLE AS swift_charges,
+                    0.0::DOUBLE AS platform_charges
                 WHERE FALSE
                 """
             )
@@ -357,7 +364,11 @@ class SemanticLayerManager:
                 {self._num(cols, 'amount_at_destination', 'amount_at_destination_num')},
                 {self._num(cols, 'total_amount_to_be_paid', 'total_amount_to_be_paid_num')},
                 {self._num(cols, 'exchange_rate', 'exchange_rate_num')},
-                {self._num(cols, 'total_additional_charges', 'total_additional_charges_num')}
+                {self._num(cols, 'total_additional_charges', 'total_additional_charges_num')},
+                {self._num(cols, 'forex_markup', 'forex_markup_num')},
+                {self._num(cols, 'amount_without_markup', 'amount_without_markup_num')},
+                {self._num(cols, 'swift_charges', 'swift_charges_num')},
+                {self._num(cols, 'platform_charges', 'platform_charges_num')}
             FROM {_q(table)}
         )
         SELECT
@@ -375,7 +386,11 @@ class SemanticLayerManager:
             COALESCE(amount_at_destination_num, 0.0) AS amount_at_destination,
             COALESCE(total_amount_to_be_paid_num, 0.0) AS total_amount_to_be_paid,
             COALESCE(exchange_rate_num, 0.0) AS exchange_rate,
-            COALESCE(total_additional_charges_num, 0.0) AS total_additional_charges
+            COALESCE(total_additional_charges_num, 0.0) AS total_additional_charges,
+            COALESCE(forex_markup_num, 0.0) AS forex_markup,
+            COALESCE(amount_without_markup_num, 0.0) AS amount_without_markup,
+            COALESCE(swift_charges_num, 0.0) AS swift_charges,
+            COALESCE(platform_charges_num, 0.0) AS platform_charges
         FROM base
         """
         conn.execute(sql)
@@ -525,9 +540,12 @@ class SemanticLayerManager:
                     "mt103_rate": "AVG(CASE WHEN has_mt103 THEN 1.0 ELSE 0.0 END)",
                 },
                 "datada_mart_quotes": {
-                    "quote_count": "COUNT(DISTINCT quote_key)",
+                    "quote_count": "COUNT(*)",
                     "total_quote_value": "SUM(total_amount_to_be_paid)",
                     "avg_quote_value": "AVG(total_amount_to_be_paid)",
+                    "forex_markup_revenue": "SUM(forex_markup)",
+                    "avg_forex_markup": "AVG(forex_markup)",
+                    "total_charges": "SUM(total_additional_charges)",
                 },
                 "datada_dim_customers": {
                     "customer_count": "COUNT(DISTINCT customer_key)",
@@ -545,6 +563,12 @@ class SemanticLayerManager:
                 "datada_mart_quotes": "created_ts",
                 "datada_dim_customers": "created_ts",
                 "datada_mart_bookings": "booked_ts",
+            },
+            "preferred_time_column_by_metric": {
+                "datada_mart_transactions": {
+                    "mt103_count": "mt103_created_ts",
+                    "mt103_rate": "mt103_created_ts",
+                }
             },
             "quality": {},
         }
@@ -886,7 +910,13 @@ class AgenticAnalyticsTeam:
                     value=str(narration.get("headline_value", execution.get("row_count", 0))),
                     source="query execution",
                     sql_reference=query_plan["sql"],
-                )
+                ),
+                EvidenceItem(
+                    description="Metric mapping",
+                    value=f"{plan.get('metric')} on {plan.get('table')}",
+                    source="planning",
+                    sql_reference=query_plan["sql"],
+                ),
             ]
 
             total_ms = (time.perf_counter() - started) * 1000
@@ -926,6 +956,7 @@ class AgenticAnalyticsTeam:
                     **catalog.get("quality", {}),
                     "audit_score": confidence_score,
                     "audit_warnings": audit.get("warnings", []),
+                    "grounding": audit.get("grounding", {}),
                 },
                 suggested_questions=narration.get("suggested_questions", []),
             )
@@ -1019,10 +1050,26 @@ class AgenticAnalyticsTeam:
             return goal
 
         lower = goal.lower().strip()
+        tokens = re.findall(r"[a-z0-9_]+", lower)
+        explicit_subject_terms = [
+            "transaction",
+            "quote",
+            "booking",
+            "customer",
+            "refund",
+            "mt103",
+            "markup",
+            "forex",
+            "revenue",
+            "amount",
+            "rate",
+            "count",
+        ]
+        has_explicit_subject = any(term in lower for term in explicit_subject_terms)
         followup = (
-            len(lower) < 48
-            or lower.startswith(("and ", "also ", "what about", "now ", "for that"))
-            or any(token in lower for token in ["same", "that", "those", "it", "them"])
+            lower.startswith(("and ", "also ", "what about", "now ", "for that"))
+            or any(token in lower for token in ["same", "that result", "those", "it", "them", "previous"])
+            or (len(tokens) <= 6 and not has_explicit_subject)
         )
         if not followup:
             return goal
@@ -1203,7 +1250,18 @@ class AgenticAnalyticsTeam:
             intent = "lookup"
 
         domain = "transactions"
-        if any(k in lower for k in ["quote", "forex", "exchange rate", "amount to be paid"]):
+        if any(
+            k in lower
+            for k in [
+                "quote",
+                "forex",
+                "exchange rate",
+                "amount to be paid",
+                "markup",
+                "charge",
+                "spread",
+            ]
+        ):
             domain = "quotes"
         elif any(k in lower for k in ["booking", "booked", "deal type", "value date"]):
             domain = "bookings"
@@ -1233,7 +1291,13 @@ class AgenticAnalyticsTeam:
             else:
                 metric = "transaction_count"
         elif domain == "quotes":
-            if any(k in lower for k in ["average", "avg"]):
+            if "markup" in lower and any(k in lower for k in ["average", "avg", "mean"]):
+                metric = "avg_forex_markup"
+            elif "markup" in lower and any(k in lower for k in ["revenue", "amount", "total", "sum", "value"]):
+                metric = "forex_markup_revenue"
+            elif any(k in lower for k in ["charge", "charges", "fee", "fees"]):
+                metric = "total_charges"
+            elif any(k in lower for k in ["average", "avg"]):
                 metric = "avg_quote_value"
             elif any(k in lower for k in ["amount", "value", "total", "sum"]):
                 metric = "total_quote_value"
@@ -1309,6 +1373,8 @@ class AgenticAnalyticsTeam:
 
         if len(dimensions) > 2:
             dimensions = dimensions[:2]
+        if metric == "university_count":
+            dimensions = [d for d in dimensions if d != "is_university"]
         dimension = dimensions[0] if dimensions else None
 
         top_n = 20
@@ -1386,6 +1452,7 @@ class AgenticAnalyticsTeam:
             "row_count": table_meta["row_count"],
             "metrics": catalog["metrics_by_table"][table],
             "preferred_time_column": catalog["preferred_time_column"].get(table),
+            "preferred_time_by_metric": catalog.get("preferred_time_column_by_metric", {}).get(table, {}),
         }
 
     def _planning_agent(
@@ -1416,13 +1483,18 @@ class AgenticAnalyticsTeam:
         dimension = dimensions[0] if dimensions else None
 
         return {
+            "goal": intake.get("goal", ""),
             "intent": intake["intent"],
             "table": retrieval["table"],
             "metric": intake["metric"],
             "metric_expr": metric_expr,
             "dimension": dimension,
             "dimensions": dimensions,
-            "time_column": retrieval.get("preferred_time_column"),
+            "available_columns": retrieval.get("columns", []),
+            "time_column": retrieval.get("preferred_time_by_metric", {}).get(
+                intake["metric"],
+                retrieval.get("preferred_time_column"),
+            ),
             "time_filter": intake.get("time_filter"),
             "value_filters": intake.get("value_filters", []),
             "top_n": max(1, min(100, int(intake.get("top_n", 20)))),
@@ -1615,6 +1687,9 @@ class AgenticAnalyticsTeam:
     ) -> dict[str, Any]:
         checks: list[dict[str, Any]] = []
         warnings: list[str] = []
+        goal_text = str(plan.get("goal", "")).lower()
+        sql_lower = str(query_plan.get("sql", "")).lower()
+        available_columns = [str(c).lower() for c in plan.get("available_columns", [])]
 
         checks.append(
             {
@@ -1654,21 +1729,105 @@ class AgenticAnalyticsTeam:
             if not has_time_logic:
                 warnings.append("Expected time filter was not applied in SQL.")
 
+        concept_expectations = {
+            "markup": ["forex_markup"],
+            "forex": ["forex_markup", "exchange_rate"],
+            "charge": ["total_additional_charges", "swift_charges", "platform_charges"],
+            "mt103": ["has_mt103"],
+            "refund": ["has_refund"],
+        }
+        concept_misses: list[str] = []
+        concept_hits: list[str] = []
+        for concept, expected_hints in concept_expectations.items():
+            if concept not in goal_text:
+                continue
+            hints = [h.lower() for h in expected_hints]
+            supported = any(h in available_columns for h in hints)
+            aligned = supported and (
+                concept in str(plan.get("metric", "")).lower()
+                or any(h in sql_lower for h in hints)
+            )
+            if aligned:
+                concept_hits.append(concept)
+            else:
+                concept_misses.append(concept)
+
+        if "forex" in goal_text and plan.get("table") != "datada_mart_quotes":
+            concept_misses.append("forex_domain")
+            warnings.append(
+                f"Forex intent mapped to {plan.get('table')} instead of datada_mart_quotes."
+            )
+
+        concept_check_passed = len(concept_misses) == 0
+        checks.append(
+            {
+                "name": "concept_alignment",
+                "passed": concept_check_passed,
+                "message": (
+                    "Goal concepts aligned with selected metric/schema."
+                    if concept_check_passed
+                    else f"Concepts not fully aligned: {', '.join(concept_misses)}"
+                ),
+            }
+        )
+
+        replay_match: bool | None = None
+        if execution["success"] and query_plan.get("sql"):
+            replay = self.executor.execute(query_plan["sql"])
+            if replay.success:
+                replay_match = replay.row_count == execution["row_count"]
+                if replay_match and replay.rows and execution.get("sample_rows"):
+                    replay_match = replay.rows[0] == execution["sample_rows"][0]
+                checks.append(
+                    {
+                        "name": "replay_consistency",
+                        "passed": replay_match,
+                        "message": (
+                            "Re-execution produced matching top result."
+                            if replay_match
+                            else "Re-execution differed from first run."
+                        ),
+                    }
+                )
+                if replay_match is False:
+                    warnings.append("Replay verification mismatch.")
+            else:
+                checks.append(
+                    {
+                        "name": "replay_consistency",
+                        "passed": False,
+                        "message": f"Replay failed: {replay.error}",
+                    }
+                )
+                warnings.append("Replay verification failed.")
+
         if execution["execution_time_ms"] and execution["execution_time_ms"] > 4000:
             warnings.append("Execution latency above 4s.")
 
-        score = 0.82
+        failed_checks = sum(1 for c in checks if not c["passed"])
+        score = 0.9
         if not execution["success"]:
             score = 0.18
-        if execution["row_count"] == 0:
+        elif execution["row_count"] == 0:
             score -= 0.20
+        score -= 0.10 * failed_checks
         score -= 0.10 * len(warnings)
         score = max(0.0, min(1.0, score))
 
+        query_columns_used = [c for c in available_columns if c in sql_lower]
         return {
             "checks": checks,
             "warnings": warnings,
             "score": score,
+            "grounding": {
+                "table": plan.get("table"),
+                "metric": plan.get("metric"),
+                "metric_expr": plan.get("metric_expr"),
+                "goal_terms_detected": concept_hits + concept_misses,
+                "goal_term_misses": concept_misses,
+                "query_columns_used": query_columns_used[:12],
+                "replay_match": replay_match,
+            },
         }
 
     def _narrative_agent(
@@ -1710,6 +1869,7 @@ class AgenticAnalyticsTeam:
                     "You are NarrativeAgent in a data analytics team. "
                     "Write clear, friendly answers. Avoid jargon. "
                     "If style is storyteller, explain insights as a short story with context and next action. "
+                    "Ground every statement in provided SQL result rows only; do not claim missing data unless row_count is 0. "
                     "Return JSON only with keys: answer_markdown and suggested_questions."
                 ),
             },
@@ -1729,8 +1889,13 @@ class AgenticAnalyticsTeam:
             )
             parsed = _extract_json_payload(raw)
             if parsed and isinstance(parsed.get("answer_markdown"), str):
+                cleaned = self._clean_llm_answer_markdown(parsed["answer_markdown"])
+                if self._llm_narrative_contradicts_execution(cleaned, execution):
+                    fallback["suggested_questions"] = self._suggested_questions(plan)
+                    fallback["llm_narrative_used"] = False
+                    return fallback
                 return {
-                    "answer_markdown": self._clean_llm_answer_markdown(parsed["answer_markdown"]),
+                    "answer_markdown": cleaned,
                     "headline_value": fallback.get("headline_value"),
                     "suggested_questions": self._normalize_suggested_questions(
                         parsed.get("suggested_questions"),
@@ -1745,8 +1910,13 @@ class AgenticAnalyticsTeam:
                     fallback["suggested_questions"] = self._suggested_questions(plan)
                     fallback["llm_narrative_used"] = False
                     return fallback
+                cleaned = self._clean_llm_answer_markdown(raw_text)
+                if self._llm_narrative_contradicts_execution(cleaned, execution):
+                    fallback["suggested_questions"] = self._suggested_questions(plan)
+                    fallback["llm_narrative_used"] = False
+                    return fallback
                 return {
-                    "answer_markdown": self._clean_llm_answer_markdown(raw_text),
+                    "answer_markdown": cleaned,
                     "headline_value": fallback.get("headline_value"),
                     "suggested_questions": self._suggested_questions(plan),
                     "llm_narrative_used": True,
@@ -1897,6 +2067,8 @@ class AgenticAnalyticsTeam:
         if table == "datada_mart_quotes":
             return [
                 "Break down quote value by from_currency",
+                "Show total forex markup revenue by month",
+                "Show total charges by currency",
                 "Show quote volume by status",
                 "Compare this year vs last year quotes",
             ]
@@ -1987,6 +2159,24 @@ class AgenticAnalyticsTeam:
             cleaned = fenced.group(1).strip()
         cleaned = cleaned.replace("\r\n", "\n").strip()
         return cleaned or text.strip()
+
+    def _llm_narrative_contradicts_execution(
+        self,
+        text: str,
+        execution: dict[str, Any],
+    ) -> bool:
+        if execution.get("row_count", 0) <= 0:
+            return False
+        lower = text.lower()
+        contradiction_patterns = [
+            "don't have any information",
+            "do not have any information",
+            "no information about",
+            "dataset only includes",
+            "need to gather financial data",
+            "data is not available",
+        ]
+        return any(p in lower for p in contradiction_patterns)
 
     def _to_confidence(self, score: float) -> ConfidenceLevel:
         if score >= 0.8:

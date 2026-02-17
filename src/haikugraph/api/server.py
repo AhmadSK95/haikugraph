@@ -1384,7 +1384,7 @@ def get_ui_html() -> str:
 
     function saveState() {
       localStorage.setItem(STORAGE_SESSION_KEY, state.sessionId);
-      localStorage.setItem(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(-30)));
+      localStorage.setItem(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(0, 30)));
     }
 
     function loadState() {
@@ -1555,6 +1555,8 @@ def get_ui_html() -> str:
       const data = turn.response;
       if (!data) return `<div class="bubble assistant">Thinking...</div>`;
       const runtime = data.runtime || {};
+      const quality = data.data_quality || {};
+      const grounding = quality.grounding || {};
       const confidencePct = Math.round((data.confidence_score || 0) * 100);
       const headline = pickHeadlineValue(data);
 
@@ -1562,6 +1564,21 @@ def get_ui_html() -> str:
       const suggestionHtml = suggestions.length
         ? `<div class="suggestions">${suggestions.map((q) => `<button class="pill suggest" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
         : '';
+      const termMisses = Array.isArray(grounding.goal_term_misses) ? grounding.goal_term_misses : [];
+      const groundingTagClass = termMisses.length ? 'warn' : 'ok';
+      const replayText = grounding.replay_match === null || grounding.replay_match === undefined
+        ? 'n/a'
+        : (grounding.replay_match ? 'pass' : 'fail');
+      const groundingHtml = `
+        <div style="margin:8px 0; border:1px solid #dce9ee; border-radius:9px; padding:8px; background:#fbfeff;">
+          <div class="hint"><strong>Grounding:</strong> table=<code>${esc(grounding.table || 'unknown')}</code> metric=<code>${esc(grounding.metric || 'unknown')}</code></div>
+          <div style="margin-top:4px;">
+            <span class="tag ${groundingTagClass}">Concept alignment ${termMisses.length ? 'warn' : 'pass'}</span>
+            <span class="tag ${grounding.replay_match ? 'ok' : 'warn'}">Replay ${esc(replayText)}</span>
+          </div>
+          ${termMisses.length ? `<div class="hint" style="margin-top:4px;">Missing goal concepts: ${esc(termMisses.join(', '))}</div>` : ''}
+        </div>
+      `;
 
       return `
         <div class="bubble assistant">${md(data.answer_markdown || '')}</div>
@@ -1584,6 +1601,7 @@ def get_ui_html() -> str:
           <span class="tag ${data.success ? 'ok' : 'warn'}">${esc(runtime.mode || 'unknown')}</span>
           <span class="hint">rows: ${esc(fmt(data.row_count || 0))}</span>
         </div>
+        ${groundingHtml}
         ${checksHtml(data.sanity_checks || [])}
         ${suggestionHtml}
         ${renderTable(data.columns || [], data.sample_rows || [])}
@@ -1612,7 +1630,7 @@ def get_ui_html() -> str:
       els.thread.innerHTML = state.turns.map((turn, idx) => `
         <article class="turn">
           <div class="turn-head">
-            <span>Turn ${idx + 1}</span>
+            <span>Turn ${state.turns.length - idx}</span>
             <span>${turn.response && turn.response.trace_id ? esc(turn.response.trace_id.slice(0, 12)) : 'pending'}</span>
           </div>
           <div class="turn-body">
@@ -1683,7 +1701,7 @@ def get_ui_html() -> str:
       }
 
       const turn = { goal, response: null };
-      state.turns.push(turn);
+      state.turns.unshift(turn);
       saveState();
       renderThread();
 
