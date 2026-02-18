@@ -156,6 +156,23 @@ curl -s -X POST http://localhost:8000/api/assistant/feedback \
 - primary analytics DB: `HG_DB_PATH` or default `./data/haikugraph.db`
 - autonomous memory DB: default `<primary_db_stem>_agent_memory.duckdb`
   - override with `HG_MEMORY_DB_PATH`
+- connection registry DB map: `HG_CONNECTION_REGISTRY_PATH` or default `./data/connections.json`
+
+## Connection Routing (New)
+
+`db_connection_id` is now fully active in runtime.
+
+- queries are routed to a registered connection
+- per-connection team runtime is cached and reused
+- sessions are scoped by `connection_id:session_id` to prevent cross-source context bleed
+- UI now includes a connection selector + refresh action
+
+Connection APIs:
+
+- `GET /api/assistant/connections`
+- `POST /api/assistant/connections/upsert`
+- `POST /api/assistant/connections/default`
+- `POST /api/assistant/connections/test`
 
 ## Current Limitations
 
@@ -166,18 +183,18 @@ curl -s -X POST http://localhost:8000/api/assistant/feedback \
 
 ## Progress Tracker
 
-Overall program completion toward target vision: **41%**
+Overall program completion toward target vision: **47%**
 
 ### Epic-level tracker
 
 | Epic | Status | Completion | Notes |
 |---|---|---:|---|
-| 1. Unified ingestion + direct DB attach | active | 85% | core done; connector factory pending |
+| 1. Unified ingestion + direct DB attach | active | 92% | core done; multi-connection routing added |
 | 2. Semantic intelligence reliability | active | 60% | marts + mappings done; ontology/versioning pending |
-| 3. Agent autonomy core | active | 55% | memory + correction loop done; richer planner negotiation pending |
-| 4. Truth and verification engine | active | 58% | audit/replay/concept checks done; cross-source reconciliation pending |
-| 5. Conversational UX and transparency | active | 50% | trace/details/story mode done; advanced visual diagnostics pending |
-| 6. Enterprise platform readiness | backlog | 25% | policy patterns started; RBAC/multi-tenant/SLOs pending |
+| 3. Agent autonomy core | active | 58% | memory + correction loop done; richer planner negotiation pending |
+| 4. Truth and verification engine | active | 63% | audit/replay/concept checks + new regression pass done |
+| 5. Conversational UX and transparency | active | 57% | trace/details/story mode + connection selector done |
+| 6. Enterprise platform readiness | active | 33% | connection registry/router added; RBAC/multi-tenant/SLOs pending |
 | 7. Scale to billion-row enterprise workloads | backlog | 22% | DuckDB baseline works; warehouse pushdown/distributed path pending |
 
 ### Detailed task list
@@ -196,6 +213,9 @@ Overall program completion toward target vision: **41%**
 
 - [x] Unified Excel ingestion path
 - [x] Existing DuckDB attach workflow
+- [x] Connection registry (`connections.json`) and runtime routing via `db_connection_id`
+- [x] Connection health/test/upsert/default APIs
+- [x] UI connection selector and refresh control
 - [ ] Postgres connector
 - [ ] Snowflake connector
 - [ ] BigQuery connector
@@ -210,6 +230,7 @@ Overall program completion toward target vision: **41%**
 - [x] Concept-alignment checks
 - [x] Replay consistency checks
 - [x] Confidence scoring tied to audit quality
+- [x] Full regression suite rerun after autonomy + connection-routing changes
 - [ ] Multi-plan contradiction resolution with confidence decomposition per hypothesis
 - [ ] Cross-source truth checks (source-of-truth SQL/warehouse parity)
 
@@ -225,6 +246,7 @@ Overall program completion toward target vision: **41%**
 
 #### E. Enterprise readiness
 
+- [x] Logical multi-connection routing with deterministic default selection
 - [ ] RBAC + SSO + tenant isolation
 - [ ] Durable distributed session/memory backends
 - [ ] Async job orchestration and queueing

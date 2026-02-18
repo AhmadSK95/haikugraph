@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from haikugraph.api.connection_registry import ConnectionRegistry
 from haikugraph.agents.contracts import AssistantQueryResponse
 from haikugraph.llm.router import DEFAULT_MODELS
 from haikugraph.poc import AgenticAnalyticsTeam, AutonomyConfig, RuntimeSelection, load_dotenv_file
@@ -62,6 +63,7 @@ class QueryRequest(BaseModel):
 
 
 class FeedbackRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
     trace_id: str | None = None
     session_id: str | None = None
     goal: str | None = None
@@ -79,6 +81,48 @@ class FeedbackResponse(BaseModel):
     message: str
     feedback_id: str | None = None
     correction_id: str | None = None
+
+
+class ConnectionInfo(BaseModel):
+    id: str
+    kind: str
+    path: str
+    description: str = ""
+    enabled: bool = True
+    is_default: bool = False
+    exists: bool = False
+    db_size_bytes: int = 0
+
+
+class ConnectionsResponse(BaseModel):
+    default_connection_id: str
+    connections: list[ConnectionInfo] = Field(default_factory=list)
+
+
+class ConnectionUpsertRequest(BaseModel):
+    connection_id: str = Field(..., min_length=1, max_length=64)
+    kind: str = Field(default="duckdb", min_length=1, max_length=32)
+    path: str = Field(..., min_length=1, max_length=4096)
+    description: str = Field(default="", max_length=280)
+    enabled: bool = True
+    set_default: bool = False
+    validate_connection: bool = True
+
+
+class ConnectionSetDefaultRequest(BaseModel):
+    connection_id: str = Field(..., min_length=1, max_length=64)
+
+
+class ConnectionTestRequest(BaseModel):
+    connection_id: str | None = None
+    kind: str = Field(default="duckdb", min_length=1, max_length=32)
+    path: str | None = None
+
+
+class ConnectionActionResponse(BaseModel):
+    success: bool
+    message: str
+    connection: ConnectionInfo | None = None
 
 
 class LegacyAskRequest(BaseModel):
@@ -103,6 +147,9 @@ class HealthResponse(BaseModel):
     db_path: str
     db_size_bytes: int = 0
     semantic_ready: bool = False
+    default_connection_id: str = "default"
+    available_connections: int = 1
+    active_connection_kind: str = "duckdb"
     version: str = "2.0.0-poc"
 
 
@@ -120,15 +167,16 @@ class ArchitectureResponse(BaseModel):
     description: str = "Hierarchical multi-agent analytics and data-engineering team"
     pipeline_flow: list[str] = [
         "1. Chief Analyst Agent - Supervises team and decomposes mission",
-        "2. Memory Agent - Recalls similar runs + learned correction rules",
-        "3. Intake Agent - Clarifies intent, metrics, filters, time scope",
-        "4. Semantic Retrieval Agent - Maps query to semantic marts",
-        "5. Planning Agent - Produces task graph and metric definitions",
-        "6. Specialist Agents - Transactions, Customers, Revenue, Risk",
-        "7. Query Engineer + Execution Agents - Compile and run SQL",
-        "8. Audit Agent - Validates consistency, grounding, replay checks",
-        "9. Autonomy Agent - Evaluates candidate plans and self-corrects",
-        "10. Narrative + Visualization Agents - Final insight and chart spec",
+        "2. Connection Router - Resolves db_connection_id to a governed data source",
+        "3. Memory Agent - Recalls similar runs + learned correction rules",
+        "4. Intake Agent - Clarifies intent, metrics, filters, time scope",
+        "5. Semantic Retrieval Agent - Maps query to semantic marts",
+        "6. Planning Agent - Produces task graph and metric definitions",
+        "7. Specialist Agents - Transactions, Customers, Revenue, Risk",
+        "8. Query Engineer + Execution Agents - Compile and run SQL",
+        "9. Audit Agent - Validates consistency, grounding, replay checks",
+        "10. Autonomy Agent - Evaluates candidate plans and self-corrects",
+        "11. Narrative + Visualization Agents - Final insight and chart spec",
     ]
     guardrails: list[str] = [
         "Read-only SQL only",
@@ -336,6 +384,97 @@ def _get_db_path() -> Path:
     return DEFAULT_DB_CANDIDATES[-1]
 
 
+def _get_connection_registry_path() -> Path:
+    env_path = os.environ.get("HG_CONNECTION_REGISTRY_PATH")
+    if env_path:
+        return Path(env_path).expanduser()
+    return Path("./data/connections.json")
+
+
+def _connection_info_from_entry(entry: dict[str, Any], *, is_default: bool | None = None) -> ConnectionInfo:
+    path = Path(str(entry.get("path") or ""))
+    exists = path.exists()
+    size = path.stat().st_size if exists and path.is_file() else 0
+    return ConnectionInfo(
+        id=str(entry.get("id") or ""),
+        kind=str(entry.get("kind") or "duckdb"),
+        path=str(path),
+        description=str(entry.get("description") or ""),
+        enabled=bool(entry.get("enabled", True)),
+        is_default=bool(entry.get("is_default")) if is_default is None else bool(is_default),
+        exists=exists,
+        db_size_bytes=int(size),
+    )
+
+
+def _resolve_team_for_connection(
+    app: FastAPI,
+    connection_id: str | None,
+) -> tuple[AgenticAnalyticsTeam, Path, dict[str, Any]]:
+    requested = (connection_id or "default").strip() or "default"
+    entry = app.state.connection_registry.resolve(requested)
+    if entry is None:
+        raise HTTPException(status_code=404, detail=f"Unknown db_connection_id '{requested}'.")
+
+    if not bool(entry.get("enabled", True)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Connection '{entry.get('id')}' is disabled.",
+        )
+
+    kind = str(entry.get("kind") or "duckdb").lower()
+    if kind != "duckdb":
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                f"Connection kind '{kind}' is not supported yet by runtime. "
+                "Roadmap kinds are allowed in registry but query routing currently supports duckdb only."
+            ),
+        )
+
+    db_path = Path(str(entry.get("path") or "")).expanduser()
+    if not db_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database not found for connection '{entry.get('id')}' at {db_path}",
+        )
+
+    cid = str(entry["id"])
+    with app.state.teams_lock:
+        cached = app.state.teams.get(cid)
+        if cached is not None:
+            cached_path = Path(str(cached["db_path"]))
+            if cached_path == db_path:
+                team = cached["team"]
+            else:
+                try:
+                    cached["team"].close()
+                except Exception:
+                    pass
+                team = AgenticAnalyticsTeam(db_path)
+                app.state.teams[cid] = {"db_path": db_path, "team": team}
+        else:
+            team = AgenticAnalyticsTeam(db_path)
+            app.state.teams[cid] = {"db_path": db_path, "team": team}
+
+    default_id = app.state.connection_registry.default_connection_id()
+    if cid == default_id:
+        app.state.db_path = db_path
+        app.state.team = team
+
+    return team, db_path, entry
+
+
+def _close_all_teams(app: FastAPI) -> None:
+    with app.state.teams_lock:
+        for item in app.state.teams.values():
+            try:
+                item["team"].close()
+            except Exception:
+                pass
+        app.state.teams = {}
+
+
 def _ollama_check() -> ProviderCheck:
     base_url = os.environ.get("HG_OLLAMA_BASE_URL", "http://localhost:11434")
     try:
@@ -496,14 +635,47 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    app.state.db_path = db_path or _get_db_path()
+    initial_db_path = db_path or _get_db_path()
+    registry_path = _get_connection_registry_path()
+    app.state.connection_registry = ConnectionRegistry(registry_path, initial_db_path)
+    if db_path is not None:
+        # Explicit db_path should deterministically become the default connection
+        # for this app instance (important for tests and one-off runs).
+        default_entry = app.state.connection_registry.upsert(
+            connection_id="default",
+            kind="duckdb",
+            path=str(initial_db_path),
+            description="Primary local DuckDB connection",
+            enabled=True,
+            set_default=True,
+        )
+    else:
+        default_entry = app.state.connection_registry.resolve("default")
+        if default_entry is None:
+            default_entry = app.state.connection_registry.upsert(
+                connection_id="default",
+                kind="duckdb",
+                path=str(initial_db_path),
+                description="Primary local DuckDB connection",
+                enabled=True,
+                set_default=True,
+            )
+
+    app.state.db_path = Path(str(default_entry.get("path") or initial_db_path))
     app.state.team = AgenticAnalyticsTeam(app.state.db_path)
+    app.state.teams: dict[str, dict[str, Any]] = {
+        str(default_entry.get("id", "default")): {
+            "db_path": app.state.db_path,
+            "team": app.state.team,
+        }
+    }
+    app.state.teams_lock = threading.RLock()
     app.state.sessions: dict[str, list[dict[str, Any]]] = {}
     app.state.sessions_lock = threading.RLock()
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
-        app.state.team.close()
+        _close_all_teams(app)
 
     _register_routes(app)
     return app
@@ -516,22 +688,167 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/api/assistant/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
-        db_path: Path = app.state.db_path
+        default_entry = app.state.connection_registry.resolve("default")
+        if default_entry is None:
+            db_path = app.state.db_path
+            exists = db_path.exists()
+            semantic_ready = False
+            return HealthResponse(
+                status="no_database",
+                db_exists=exists,
+                db_path=str(db_path),
+                db_size_bytes=db_path.stat().st_size if exists else 0,
+                semantic_ready=semantic_ready,
+                default_connection_id="default",
+                available_connections=0,
+                active_connection_kind="duckdb",
+            )
+
+        db_path = Path(str(default_entry.get("path") or app.state.db_path))
         exists = db_path.exists()
         semantic_ready = False
         if exists:
             try:
-                app.state.team.semantic.prepare()
+                team, _, _ = _resolve_team_for_connection(
+                    app, str(default_entry.get("id") or "default")
+                )
+                team.semantic.prepare()
                 semantic_ready = True
             except Exception:
                 semantic_ready = False
 
+        listed = app.state.connection_registry.list_connections()
         return HealthResponse(
             status="ok" if exists else "no_database",
             db_exists=exists,
             db_path=str(db_path),
             db_size_bytes=db_path.stat().st_size if exists else 0,
             semantic_ready=semantic_ready,
+            default_connection_id=str(listed.get("default_connection_id") or "default"),
+            available_connections=len(listed.get("connections", [])),
+            active_connection_kind=str(default_entry.get("kind") or "duckdb"),
+        )
+
+    @app.get("/api/assistant/connections", response_model=ConnectionsResponse)
+    async def connections() -> ConnectionsResponse:
+        listed = app.state.connection_registry.list_connections()
+        rows = [
+            _connection_info_from_entry(item, is_default=bool(item.get("is_default")))
+            for item in listed.get("connections", [])
+        ]
+        return ConnectionsResponse(
+            default_connection_id=str(listed.get("default_connection_id") or "default"),
+            connections=rows,
+        )
+
+    @app.post("/api/assistant/connections/upsert", response_model=ConnectionActionResponse)
+    async def upsert_connection(request: ConnectionUpsertRequest) -> ConnectionActionResponse:
+        if request.validate_connection:
+            ok, reason = app.state.connection_registry.test(kind=request.kind, path=request.path)
+            if not ok:
+                raise HTTPException(status_code=400, detail=reason)
+
+        try:
+            entry = app.state.connection_registry.upsert(
+                connection_id=request.connection_id,
+                kind=request.kind,
+                path=request.path,
+                description=request.description,
+                enabled=request.enabled,
+                set_default=request.set_default,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        cid = str(entry.get("id") or request.connection_id)
+        with app.state.teams_lock:
+            cached = app.state.teams.get(cid)
+            if cached:
+                cached_path = Path(str(cached.get("db_path")))
+                new_path = Path(str(entry.get("path")))
+                if cached_path != new_path:
+                    try:
+                        cached["team"].close()
+                    except Exception:
+                        pass
+                    del app.state.teams[cid]
+
+        if request.set_default:
+            _resolve_team_for_connection(app, cid)
+
+        info = _connection_info_from_entry(
+            entry,
+            is_default=cid == app.state.connection_registry.default_connection_id(),
+        )
+        return ConnectionActionResponse(
+            success=True,
+            message=f"Connection '{cid}' saved.",
+            connection=info,
+        )
+
+    @app.post("/api/assistant/connections/default", response_model=ConnectionActionResponse)
+    async def set_default_connection(request: ConnectionSetDefaultRequest) -> ConnectionActionResponse:
+        try:
+            entry = app.state.connection_registry.set_default(request.connection_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        # Prime and bind default runtime eagerly so health/UI reflect immediately.
+        _resolve_team_for_connection(app, request.connection_id)
+
+        info = _connection_info_from_entry(entry, is_default=True)
+        return ConnectionActionResponse(
+            success=True,
+            message=f"Default connection set to '{request.connection_id}'.",
+            connection=info,
+        )
+
+    @app.post("/api/assistant/connections/test", response_model=ConnectionActionResponse)
+    async def test_connection(request: ConnectionTestRequest) -> ConnectionActionResponse:
+        if request.connection_id:
+            entry = app.state.connection_registry.resolve(request.connection_id)
+            if entry is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown connection_id '{request.connection_id}'.",
+                )
+            ok, reason = app.state.connection_registry.test(
+                kind=str(entry.get("kind") or "duckdb"),
+                path=str(entry.get("path") or ""),
+            )
+            if not ok:
+                raise HTTPException(status_code=400, detail=reason)
+            return ConnectionActionResponse(
+                success=True,
+                message=reason,
+                connection=_connection_info_from_entry(
+                    entry,
+                    is_default=str(entry.get("id")) == app.state.connection_registry.default_connection_id(),
+                ),
+            )
+
+        if not request.path:
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either connection_id or path for test.",
+            )
+
+        ok, reason = app.state.connection_registry.test(kind=request.kind, path=request.path)
+        if not ok:
+            raise HTTPException(status_code=400, detail=reason)
+        temp = {
+            "id": "_adhoc",
+            "kind": request.kind.lower(),
+            "path": str(Path(request.path).expanduser()),
+            "description": "Ad-hoc test target",
+            "enabled": True,
+        }
+        return ConnectionActionResponse(
+            success=True,
+            message=reason,
+            connection=_connection_info_from_entry(temp, is_default=False),
         )
 
     @app.get("/api/assistant/providers", response_model=ProvidersResponse)
@@ -611,6 +928,13 @@ def _register_routes(app: FastAPI) -> None:
                 outputs=["semantic marts", "catalog"],
             ),
             AgentInfo(
+                name="ConnectionRouter",
+                role="Connection resolver",
+                description="Resolves db_connection_id to active source and team runtime",
+                inputs=["db_connection_id", "connection registry"],
+                outputs=["resolved data source", "bound team instance"],
+            ),
+            AgentInfo(
                 name="MemoryAgent",
                 role="Episodic + procedural memory",
                 description="Recalls prior runs and correction rules; persists outcomes for future improvements",
@@ -685,12 +1009,10 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/api/assistant/query", response_model=AssistantQueryResponse)
     async def query(request: QueryRequest) -> AssistantQueryResponse:
-        db_path: Path = app.state.db_path
-        if not db_path.exists():
-            raise HTTPException(
-                status_code=503,
-                detail=f"Database not found at {db_path}. Run ingestion first.",
-            )
+        team, db_path, connection_entry = _resolve_team_for_connection(
+            app,
+            request.db_connection_id,
+        )
 
         if request.local_model:
             state = _get_local_models_state()
@@ -712,11 +1034,13 @@ def _register_routes(app: FastAPI) -> None:
             max_candidate_plans=int(request.max_candidate_plans),
         )
         session_id = (request.session_id or "default").strip()[:128] or "default"
+        connection_id = str(connection_entry.get("id") or "default")
+        session_scope = f"{connection_id}:{session_id}"
 
         with app.state.sessions_lock:
-            history = list(app.state.sessions.get(session_id, []))
+            history = list(app.state.sessions.get(session_scope, []))
 
-        response = app.state.team.run(
+        response = team.run(
             request.goal,
             runtime,
             conversation_context=history,
@@ -733,7 +1057,7 @@ def _register_routes(app: FastAPI) -> None:
             "confidence_score": response.confidence_score,
         }
         with app.state.sessions_lock:
-            turns = app.state.sessions.setdefault(session_id, [])
+            turns = app.state.sessions.setdefault(session_scope, [])
             turns.append(turn)
             if len(turns) > 20:
                 del turns[:-20]
@@ -742,13 +1066,21 @@ def _register_routes(app: FastAPI) -> None:
         response.runtime = {
             **(response.runtime or {}),
             "session_id": session_id,
+            "session_scope": session_scope,
+            "db_connection_id": connection_id,
+            "db_path": str(db_path),
+            "db_kind": str(connection_entry.get("kind") or "duckdb"),
             "conversation_turns": conversation_turns,
         }
         return response
 
     @app.post("/api/assistant/feedback", response_model=FeedbackResponse)
     async def feedback(request: FeedbackRequest) -> FeedbackResponse:
-        saved = app.state.team.record_feedback(
+        team, _, connection_entry = _resolve_team_for_connection(
+            app,
+            request.db_connection_id,
+        )
+        saved = team.record_feedback(
             trace_id=request.trace_id,
             session_id=request.session_id,
             goal=request.goal,
@@ -764,9 +1096,12 @@ def _register_routes(app: FastAPI) -> None:
         return FeedbackResponse(
             success=True,
             message=(
-                "Feedback saved and correction rule registered."
+                (
+                    f"Feedback saved and correction rule registered on connection "
+                    f"'{connection_entry.get('id', 'default')}'."
+                )
                 if has_rule
-                else "Feedback saved."
+                else f"Feedback saved on connection '{connection_entry.get('id', 'default')}'."
             ),
             feedback_id=saved.get("feedback_id"),
             correction_id=saved.get("correction_id") or None,
@@ -1599,6 +1934,18 @@ def get_ui_html() -> str:
               </select>
             </label>
           </div>
+          <div class="row">
+            <label>
+              <div class="hint">Data Connection</div>
+              <select id="connectionSelect">
+                <option value="default">default</option>
+              </select>
+            </label>
+            <label>
+              <div class="hint">Connections</div>
+              <button class="btn ghost" id="refreshConnectionsBtn" type="button" style="margin-top:3px;">Refresh Connections</button>
+            </label>
+          </div>
 
           <div class="toggle-row">
             <label for="storyMode"><strong>Storyteller mode</strong> (friendlier narration)</label>
@@ -1639,6 +1986,7 @@ def get_ui_html() -> str:
 
     const STORAGE_SESSION_KEY = 'datada_session_id';
     const STORAGE_THREAD_KEY = 'datada_thread';
+    const STORAGE_CONN_KEY = 'datada_connection_id';
 
     const els = {
       queryInput: document.getElementById('queryInput'),
@@ -1647,6 +1995,8 @@ def get_ui_html() -> str:
       clearThreadBtn: document.getElementById('clearThreadBtn'),
       modeSelect: document.getElementById('llmMode'),
       localModelSelect: document.getElementById('localModel'),
+      connectionSelect: document.getElementById('connectionSelect'),
+      refreshConnectionsBtn: document.getElementById('refreshConnectionsBtn'),
       refreshModelsBtn: document.getElementById('refreshModelsBtn'),
       modelCatalog: document.getElementById('modelCatalog'),
       examples: document.getElementById('examples'),
@@ -1666,7 +2016,8 @@ def get_ui_html() -> str:
     const state = {
       sessionId: null,
       turns: [],
-      architectureLoaded: false
+      architectureLoaded: false,
+      connectionId: 'default'
     };
 
     function esc(value) {
@@ -1784,6 +2135,7 @@ def get_ui_html() -> str:
     function saveState() {
       localStorage.setItem(STORAGE_SESSION_KEY, state.sessionId);
       localStorage.setItem(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(0, 30)));
+      localStorage.setItem(STORAGE_CONN_KEY, state.connectionId || 'default');
     }
 
     function loadState() {
@@ -1796,6 +2148,8 @@ def get_ui_html() -> str:
       } catch (err) {
         state.turns = [];
       }
+      const savedConn = localStorage.getItem(STORAGE_CONN_KEY);
+      state.connectionId = savedConn || 'default';
       updateSessionChip();
     }
 
@@ -1867,6 +2221,33 @@ def get_ui_html() -> str:
         renderModelCatalog(stateResp);
       } catch (err) {
         els.modelCatalog.innerHTML = `<span class="hint">Local model service unavailable: ${esc(err.message)}</span>`;
+      }
+    }
+
+    async function loadConnections() {
+      try {
+        const data = await fetch('/api/assistant/connections').then((r) => r.json());
+        const list = Array.isArray(data.connections) ? data.connections : [];
+        if (!list.length) {
+          els.connectionSelect.innerHTML = '<option value="default">default</option>';
+          state.connectionId = 'default';
+          saveState();
+          return;
+        }
+
+        const defaultId = data.default_connection_id || 'default';
+        els.connectionSelect.innerHTML = list.map((c) => {
+          const label = `${c.id}${c.is_default ? ' (default)' : ''} • ${c.kind}${c.exists ? '' : ' • missing'}`;
+          return `<option value="${esc(c.id)}">${esc(label)}</option>`;
+        }).join('');
+
+        const preferred = state.connectionId || defaultId;
+        const hasPreferred = list.some((c) => c.id === preferred);
+        state.connectionId = hasPreferred ? preferred : defaultId;
+        els.connectionSelect.value = state.connectionId;
+        saveState();
+      } catch (err) {
+        setStatus(`Connections unavailable: ${err.message}`);
       }
     }
 
@@ -2024,7 +2405,7 @@ def get_ui_html() -> str:
           </div>
           <div class="diag-card">
             <div class="k">Execution Path</div>
-            <div class="v">mode=<code>${esc(runtime.mode || 'unknown')}</code> local_model=<code>${esc(runtime.local_model || 'auto')}</code></div>
+            <div class="v">mode=<code>${esc(runtime.mode || 'unknown')}</code> connection=<code>${esc(runtime.db_connection_id || 'default')}</code></div>
           </div>
         </div>
       `;
@@ -2136,7 +2517,8 @@ def get_ui_html() -> str:
           fetch('/api/assistant/health').then((r) => r.json()),
           fetch('/api/assistant/providers').then((r) => r.json())
         ]);
-        els.dbPath.textContent = health.db_path;
+        const defaultConn = health.default_connection_id || 'default';
+        els.dbPath.textContent = `${health.db_path} (${defaultConn})`;
         els.healthState.textContent = health.status;
         els.semanticState.textContent = health.semantic_ready ? 'ready' : 'not ready';
         els.recommendedMode.textContent = providers.recommended_mode;
@@ -2168,6 +2550,7 @@ def get_ui_html() -> str:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             goal,
+            db_connection_id: state.connectionId || 'default',
             llm_mode: els.modeSelect.value,
             local_model: els.localModelSelect.value || null,
             session_id: state.sessionId,
@@ -2210,6 +2593,12 @@ def get_ui_html() -> str:
     function wireEvents() {
       els.runBtn.addEventListener('click', runQuery);
       els.refreshModelsBtn.addEventListener('click', loadLocalModels);
+      els.refreshConnectionsBtn.addEventListener('click', loadConnections);
+      els.connectionSelect.addEventListener('change', () => {
+        state.connectionId = els.connectionSelect.value || 'default';
+        saveState();
+        setStatus(`Using connection: ${state.connectionId}`);
+      });
       els.localModelSelect.addEventListener('change', async () => {
         const model = els.localModelSelect.value;
         if (!model) return;
@@ -2243,7 +2632,7 @@ def get_ui_html() -> str:
       renderExamples();
       renderThread();
       wireEvents();
-      await Promise.all([initSystemStatus(), loadLocalModels()]);
+      await Promise.all([initSystemStatus(), loadLocalModels(), loadConnections()]);
       setStatus('Ready.');
     }
 
