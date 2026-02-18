@@ -26,6 +26,7 @@ from haikugraph.agents.contracts import (
     SanityCheck,
 )
 from haikugraph.llm.router import call_llm
+from haikugraph.poc.autonomy import AutonomyConfig, AgentMemoryStore
 from haikugraph.sql.safe_executor import SafeSQLExecutor
 
 
@@ -643,6 +644,9 @@ class AgenticAnalyticsTeam:
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
         self.semantic = SemanticLayerManager(self.db_path)
+        default_memory_db = self.db_path.with_name(f"{self.db_path.stem}_agent_memory.duckdb")
+        self.memory_db_path = Path(os.environ.get("HG_MEMORY_DB_PATH", str(default_memory_db))).expanduser()
+        self.memory = AgentMemoryStore(self.memory_db_path)
         # Use a writable-mode connection for compatibility with semantic layer refresh.
         # SQL safety is still enforced by SafeSQLExecutor guardrails.
         self.executor = SafeSQLExecutor(self.db_path, read_only=False)
@@ -656,6 +660,54 @@ class AgenticAnalyticsTeam:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
+    def record_feedback(
+        self,
+        *,
+        trace_id: str | None,
+        session_id: str | None,
+        goal: str | None,
+        issue: str,
+        suggested_fix: str | None = None,
+        severity: str = "medium",
+        keyword: str | None = None,
+        target_table: str | None = None,
+        target_metric: str | None = None,
+        target_dimensions: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Persist explicit user feedback and optional correction rules."""
+
+        feedback_id = self.memory.store_feedback(
+            trace_id=trace_id,
+            session_id=session_id,
+            goal=goal,
+            issue=issue,
+            suggested_fix=suggested_fix,
+            severity=severity,
+            metadata={
+                "keyword": keyword,
+                "target_table": target_table,
+                "target_metric": target_metric,
+                "target_dimensions": target_dimensions or [],
+            },
+        )
+
+        correction_id = ""
+        if keyword and target_table and target_metric:
+            correction_id = self.memory.upsert_correction(
+                keyword=keyword,
+                target_table=target_table,
+                target_metric=target_metric,
+                target_dimensions=target_dimensions or [],
+                notes=f"User feedback: {issue}",
+                source="user_feedback",
+                weight=1.8,
+            )
+
+        return {
+            "feedback_id": feedback_id,
+            "correction_id": correction_id,
+        }
+
     def run(
         self,
         goal: str,
@@ -663,11 +715,13 @@ class AgenticAnalyticsTeam:
         *,
         conversation_context: list[dict[str, Any]] | None = None,
         storyteller_mode: bool = False,
+        autonomy: AutonomyConfig | None = None,
     ) -> AssistantQueryResponse:
         trace_id = str(uuid.uuid4())
         trace: list[dict[str, Any]] = []
         started = time.perf_counter()
         history = conversation_context or []
+        autonomy_cfg = autonomy or AutonomyConfig()
 
         try:
             effective_goal = self._run_agent(
@@ -689,6 +743,20 @@ class AgenticAnalyticsTeam:
                 runtime,
                 catalog,
             )
+            memory_hints = self._run_agent(
+                trace,
+                "MemoryAgent",
+                "episodic_recall",
+                self.memory.recall,
+                effective_goal,
+            )
+            learned_corrections = self._run_agent(
+                trace,
+                "MemoryAgent",
+                "correction_rule_recall",
+                self.memory.get_matching_corrections,
+                effective_goal,
+            )
             intake = self._run_agent(
                 trace,
                 "IntakeAgent",
@@ -698,6 +766,7 @@ class AgenticAnalyticsTeam:
                 runtime,
                 mission,
                 catalog,
+                memory_hints,
             )
 
             pre_gov = self._run_agent(
@@ -726,6 +795,7 @@ class AgenticAnalyticsTeam:
                     runtime=self._runtime_payload(
                         runtime,
                         llm_intake_used=bool(intake.get("_llm_intake_used", False)),
+                        autonomy=autonomy_cfg,
                     ),
                     agent_trace=trace,
                     suggested_questions=["Ask an aggregated business metric instead."],
@@ -774,7 +844,7 @@ class AgenticAnalyticsTeam:
                         )
                     ],
                     trace_id=trace_id,
-                    runtime=self._runtime_payload(runtime),
+                    runtime=self._runtime_payload(runtime, autonomy=autonomy_cfg),
                     agent_trace=trace,
                     chart_spec={
                         "type": "table",
@@ -858,6 +928,26 @@ class AgenticAnalyticsTeam:
                 query_plan,
                 execution,
             )
+            autonomy_result = self._run_agent(
+                trace,
+                "AutonomyAgent",
+                "bounded_reconciliation",
+                self._autonomous_refinement_agent,
+                effective_goal,
+                plan,
+                query_plan,
+                execution,
+                audit,
+                catalog,
+                memory_hints,
+                learned_corrections,
+                autonomy_cfg,
+            )
+            plan = autonomy_result.get("plan", plan)
+            query_plan = autonomy_result.get("query_plan", query_plan)
+            execution = autonomy_result.get("execution", execution)
+            audit = autonomy_result.get("audit", audit)
+
             narration = self._run_agent(
                 trace,
                 "NarrativeAgent",
@@ -908,6 +998,16 @@ class AgenticAnalyticsTeam:
                     "score": confidence_score,
                     "warnings": audit.get("warnings", []),
                 },
+                {
+                    "agent": "AutonomyAgent",
+                    "mode": autonomy_cfg.mode,
+                    "auto_correction": autonomy_cfg.auto_correction,
+                    "strict_truth": autonomy_cfg.strict_truth,
+                    "applied": autonomy_result.get("correction_applied", False),
+                    "reason": autonomy_result.get("correction_reason", ""),
+                    "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                    "probe_findings": autonomy_result.get("probe_findings", []),
+                },
             ]
 
             sanity_checks = [
@@ -940,6 +1040,36 @@ class AgenticAnalyticsTeam:
                     "summary": "response assembled",
                 }
             )
+            self._memory_write_turn(
+                trace=trace,
+                trace_id=trace_id,
+                goal=goal,
+                resolved_goal=effective_goal,
+                runtime=runtime,
+                success=execution["success"],
+                confidence_score=confidence_score,
+                row_count=execution.get("row_count"),
+                plan=plan,
+                sql=query_plan.get("sql"),
+                audit_warnings=audit.get("warnings", []),
+                correction_applied=bool(autonomy_result.get("correction_applied", False)),
+                correction_reason=autonomy_result.get("correction_reason"),
+                metadata={
+                    "autonomy_mode": autonomy_cfg.mode,
+                    "strict_truth": autonomy_cfg.strict_truth,
+                    "llm_intake_used": bool(intake.get("_llm_intake_used", False)),
+                    "llm_narrative_used": bool(narration.get("llm_narrative_used", False)),
+                    "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                },
+            )
+
+            if autonomy_result.get("correction_applied") and confidence_score >= 0.78:
+                self._memory_learn_from_success(
+                    trace,
+                    goal=effective_goal,
+                    plan=plan,
+                    score=confidence_score,
+                )
 
             return AssistantQueryResponse(
                 success=execution["success"],
@@ -959,6 +1089,8 @@ class AgenticAnalyticsTeam:
                     runtime,
                     llm_intake_used=bool(intake.get("_llm_intake_used", False)),
                     llm_narrative_used=bool(narration.get("llm_narrative_used", False)),
+                    autonomy=autonomy_cfg,
+                    correction_applied=bool(autonomy_result.get("correction_applied", False)),
                 ),
                 agent_trace=trace,
                 chart_spec=chart_spec,
@@ -968,6 +1100,11 @@ class AgenticAnalyticsTeam:
                     "audit_score": confidence_score,
                     "audit_warnings": audit.get("warnings", []),
                     "grounding": audit.get("grounding", {}),
+                    "autonomy": {
+                        "correction_applied": bool(autonomy_result.get("correction_applied", False)),
+                        "correction_reason": autonomy_result.get("correction_reason"),
+                        "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                    },
                 },
                 suggested_questions=narration.get("suggested_questions", []),
             )
@@ -993,7 +1130,7 @@ class AgenticAnalyticsTeam:
                     SanityCheck(check_name="pipeline", passed=False, message=str(exc))
                 ],
                 trace_id=trace_id,
-                runtime=self._runtime_payload(runtime),
+                runtime=self._runtime_payload(runtime, autonomy=autonomy_cfg),
                 error=str(exc),
                 agent_trace=trace,
                 suggested_questions=["Try a simpler business question."],
@@ -1175,6 +1312,7 @@ class AgenticAnalyticsTeam:
         runtime: RuntimeSelection,
         mission: dict[str, Any],
         catalog: dict[str, Any],
+        memory_hints: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         parsed = self._intake_deterministic(goal, catalog)
         parsed["_llm_intake_used"] = False
@@ -1195,6 +1333,8 @@ class AgenticAnalyticsTeam:
                     parsed.update(merged)
                     parsed["_llm_intake_used"] = True
         parsed = self._enforce_intake_consistency(goal, deterministic, parsed)
+        if memory_hints:
+            parsed = self._apply_memory_hints(goal, parsed, memory_hints)
         return parsed
 
     def _intake_with_llm(
@@ -1567,6 +1707,51 @@ class AgenticAnalyticsTeam:
         out["value_filters"] = value_filters
         return out
 
+    def _apply_memory_hints(
+        self,
+        goal: str,
+        parsed: dict[str, Any],
+        memory_hints: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Use similar historical runs to stabilize vague follow-up prompts."""
+
+        if not memory_hints:
+            return parsed
+
+        lower = goal.lower()
+        explicit_subject_terms = [
+            "transaction",
+            "quote",
+            "customer",
+            "booking",
+            "mt103",
+            "refund",
+            "forex",
+            "markup",
+            "charge",
+            "revenue",
+        ]
+        has_explicit_subject = any(term in lower for term in explicit_subject_terms)
+        best = memory_hints[0]
+        if float(best.get("similarity", 0.0)) < 0.55:
+            return parsed
+        if has_explicit_subject:
+            return parsed
+
+        merged = dict(parsed)
+        past_metric = str(best.get("metric") or "").strip()
+        past_dims = list(best.get("dimensions") or [])
+        if past_metric and merged.get("metric") == "transaction_count":
+            merged["metric"] = past_metric
+        if past_dims and not merged.get("dimensions"):
+            merged["dimensions"] = past_dims[:2]
+            merged["dimension"] = merged["dimensions"][0]
+        if not merged.get("time_filter") and isinstance(best.get("time_filter"), dict):
+            merged["time_filter"] = best["time_filter"]
+        if not merged.get("value_filters") and isinstance(best.get("value_filters"), list):
+            merged["value_filters"] = best["value_filters"][:4]
+        return merged
+
     def _semantic_retrieval_agent(
         self,
         intake: dict[str, Any],
@@ -1666,6 +1851,427 @@ class AgenticAnalyticsTeam:
             ),
             "row_count_hint": retrieval["row_count"],
         }
+
+    def _autonomous_refinement_agent(
+        self,
+        goal: str,
+        base_plan: dict[str, Any],
+        base_query_plan: dict[str, Any],
+        base_execution: dict[str, Any],
+        base_audit: dict[str, Any],
+        catalog: dict[str, Any],
+        memory_hints: list[dict[str, Any]] | None,
+        learned_corrections: list[dict[str, Any]] | None,
+        autonomy: AutonomyConfig,
+    ) -> dict[str, Any]:
+        """Evaluate candidate plans and autonomously switch when evidence improves."""
+
+        base_score = self._candidate_score(goal, base_plan, base_execution, base_audit)
+        selected = {
+            "plan": base_plan,
+            "query_plan": base_query_plan,
+            "execution": base_execution,
+            "audit": base_audit,
+            "score": base_score,
+            "reason": "base_plan",
+        }
+        candidate_evals: list[dict[str, Any]] = [
+            {
+                "candidate": "base_plan",
+                "table": base_plan.get("table"),
+                "metric": base_plan.get("metric"),
+                "score": round(base_score, 4),
+                "row_count": int(base_execution.get("row_count") or 0),
+                "goal_term_misses": list(base_audit.get("grounding", {}).get("goal_term_misses", [])),
+            }
+        ]
+        correction_applied = False
+        correction_reason = ""
+
+        if not autonomy.auto_correction:
+            return {
+                **selected,
+                "evaluated_candidates": candidate_evals,
+                "correction_applied": False,
+                "correction_reason": "",
+                "probe_findings": [],
+            }
+
+        candidates = self._generate_candidate_plans(
+            goal=goal,
+            base_plan=base_plan,
+            base_execution=base_execution,
+            catalog=catalog,
+            memory_hints=memory_hints or [],
+            learned_corrections=learned_corrections or [],
+            autonomy=autonomy,
+        )
+
+        seen = {self._plan_signature(base_plan)}
+        for candidate in candidates[: max(0, autonomy.max_candidate_plans - 1)]:
+            signature = self._plan_signature(candidate)
+            if signature in seen:
+                continue
+            seen.add(signature)
+            query_plan = self._query_engine_agent(candidate, [])
+            execution = self._execution_agent(query_plan)
+            audit = self._audit_agent(candidate, query_plan, execution)
+            score = self._candidate_score(goal, candidate, execution, audit)
+            candidate_evals.append(
+                {
+                    "candidate": candidate.get("_variant_reason", "variant"),
+                    "table": candidate.get("table"),
+                    "metric": candidate.get("metric"),
+                    "score": round(score, 4),
+                    "row_count": int(execution.get("row_count") or 0),
+                    "goal_term_misses": list(audit.get("grounding", {}).get("goal_term_misses", [])),
+                }
+            )
+            if score > selected["score"]:
+                selected = {
+                    "plan": candidate,
+                    "query_plan": query_plan,
+                    "execution": execution,
+                    "audit": audit,
+                    "score": score,
+                    "reason": candidate.get("_variant_reason", "higher_score"),
+                }
+
+        base_misses = len(base_audit.get("grounding", {}).get("goal_term_misses", []))
+        selected_misses = len(selected["audit"].get("grounding", {}).get("goal_term_misses", []))
+        score_delta = selected["score"] - base_score
+        if (
+            selected is not None
+            and (
+                score_delta >= autonomy.min_score_delta_for_switch
+                or (autonomy.strict_truth and selected_misses < base_misses)
+            )
+            and selected["reason"] != "base_plan"
+        ):
+            correction_applied = True
+            correction_reason = (
+                f"Switched to {selected['reason']} "
+                f"(score {selected['score']:.2f} vs {base_score:.2f}, misses {base_misses}->{selected_misses})."
+            )
+        else:
+            selected = {
+                "plan": base_plan,
+                "query_plan": base_query_plan,
+                "execution": base_execution,
+                "audit": base_audit,
+                "score": base_score,
+                "reason": "base_plan",
+            }
+
+        probe_findings = self._toolsmith_probe_findings(
+            goal=goal,
+            plan=selected["plan"],
+            audit=selected["audit"],
+            max_probes=max(0, autonomy.max_probe_queries),
+        )
+        return {
+            "plan": selected["plan"],
+            "query_plan": selected["query_plan"],
+            "execution": selected["execution"],
+            "audit": selected["audit"],
+            "score": selected["score"],
+            "evaluated_candidates": candidate_evals,
+            "correction_applied": correction_applied,
+            "correction_reason": correction_reason,
+            "probe_findings": probe_findings,
+        }
+
+    def _generate_candidate_plans(
+        self,
+        *,
+        goal: str,
+        base_plan: dict[str, Any],
+        base_execution: dict[str, Any],
+        catalog: dict[str, Any],
+        memory_hints: list[dict[str, Any]],
+        learned_corrections: list[dict[str, Any]],
+        autonomy: AutonomyConfig,
+    ) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        lower = goal.lower()
+
+        for rule in learned_corrections[:3]:
+            target_table = str(rule.get("target_table") or "").strip()
+            target_metric = str(rule.get("target_metric") or "").strip()
+            target_dims = list(rule.get("target_dimensions") or [])
+            if not target_table or not target_metric:
+                continue
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                table=target_table,
+                metric=target_metric,
+                dimensions=target_dims or None,
+                reason=f"learned_rule:{rule.get('keyword', '')}",
+            )
+            if variant:
+                candidates.append(variant)
+
+        for hint in memory_hints[:3]:
+            if float(hint.get("similarity", 0.0)) < 0.5:
+                continue
+            table = str(hint.get("table") or "")
+            metric = str(hint.get("metric") or "")
+            dims = list(hint.get("dimensions") or [])
+            time_filter = hint.get("time_filter")
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                table=table,
+                metric=metric,
+                dimensions=dims or None,
+                time_filter=time_filter if isinstance(time_filter, dict) else None,
+                reason=f"memory_replay:{hint.get('similarity')}",
+            )
+            if variant:
+                candidates.append(variant)
+
+        if any(k in lower for k in ["forex", "markup", "charges", "quote"]):
+            metric = "forex_markup_revenue"
+            if any(k in lower for k in ["avg", "average", "mean"]):
+                metric = "avg_forex_markup"
+            if "charge" in lower:
+                metric = "total_charges"
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                table="datada_mart_quotes",
+                metric=metric,
+                reason="keyword_quotes_domain",
+            )
+            if variant:
+                candidates.append(variant)
+
+        if any(k in lower for k in ["customer", "payee", "university", "beneficiary"]):
+            metric = "customer_count"
+            if "payee" in lower:
+                metric = "payee_count"
+            elif "university" in lower:
+                metric = "university_count"
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                table="datada_dim_customers",
+                metric=metric,
+                reason="keyword_customers_domain",
+            )
+            if variant:
+                candidates.append(variant)
+
+        if any(k in lower for k in ["booked", "booking", "deal", "value date"]):
+            metric = "total_booked_amount" if self._goal_has_amount_intent(lower) else "booking_count"
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                table="datada_mart_bookings",
+                metric=metric,
+                reason="keyword_bookings_domain",
+            )
+            if variant:
+                candidates.append(variant)
+
+        if "mt103" in lower:
+            metric = "mt103_count" if self._goal_has_count_intent(lower) else "total_amount"
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                table="datada_mart_transactions",
+                metric=metric,
+                reason="keyword_mt103_metric",
+            )
+            if variant:
+                candidates.append(variant)
+        if "refund" in lower:
+            metric = "refund_count" if self._goal_has_count_intent(lower) else "total_amount"
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                table="datada_mart_transactions",
+                metric=metric,
+                reason="keyword_refund_metric",
+            )
+            if variant:
+                candidates.append(variant)
+
+        enrich_dims: list[str] = []
+        existing_dims = list(base_plan.get("dimensions") or [])
+        if re.search(r"\b(by month|month wise|monthly|trend)\b", lower) and "__month__" not in existing_dims:
+            enrich_dims.append("__month__")
+        if "platform" in lower and "platform_name" not in existing_dims:
+            enrich_dims.append("platform_name")
+        if "state" in lower and "state" not in existing_dims:
+            enrich_dims.append("state")
+        if enrich_dims:
+            merged_dims = (existing_dims + enrich_dims)[:2]
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                dimensions=merged_dims,
+                reason="dimension_enrichment",
+            )
+            if variant:
+                candidates.append(variant)
+
+        if int(base_execution.get("row_count") or 0) == 0 and base_plan.get("time_filter"):
+            variant = self._build_plan_variant(
+                base_plan,
+                catalog,
+                time_filter=None,
+                reason="relax_time_filter",
+            )
+            if variant:
+                candidates.append(variant)
+
+        pool_cap = max(1, autonomy.max_candidate_plans * max(1, autonomy.max_refinement_rounds))
+        return candidates[:pool_cap]
+
+    def _build_plan_variant(
+        self,
+        base_plan: dict[str, Any],
+        catalog: dict[str, Any],
+        *,
+        table: str | None = None,
+        metric: str | None = None,
+        dimensions: list[str] | None = None,
+        time_filter: dict[str, Any] | None = ...,
+        reason: str,
+    ) -> dict[str, Any] | None:
+        plan = dict(base_plan)
+        target_table = table or str(plan.get("table") or "")
+        marts = catalog.get("marts", {})
+        metrics_by_table = catalog.get("metrics_by_table", {})
+        if target_table not in marts or target_table not in metrics_by_table:
+            return None
+
+        plan["table"] = target_table
+        plan["available_columns"] = list(marts[target_table].get("columns", []))
+        plan["row_count_hint"] = int(marts[target_table].get("row_count", 0))
+        plan["time_column"] = catalog.get("preferred_time_column", {}).get(target_table)
+
+        available_metrics = metrics_by_table[target_table]
+        target_metric = metric or str(plan.get("metric") or "")
+        if target_metric not in available_metrics:
+            target_metric = next(iter(available_metrics))
+        plan["metric"] = target_metric
+        plan["metric_expr"] = available_metrics[target_metric]
+
+        if dimensions is not None:
+            valid_dims: list[str] = []
+            for dim in dimensions:
+                if dim == "__month__" or dim in plan["available_columns"]:
+                    valid_dims.append(dim)
+            plan["dimensions"] = valid_dims[:2]
+            plan["dimension"] = plan["dimensions"][0] if plan["dimensions"] else None
+
+        if time_filter is not ...:
+            plan["time_filter"] = time_filter
+
+        dim_text = ", ".join(plan.get("dimensions") or [])
+        plan["definition_used"] = (
+            f"{plan['metric']} on {plan['table']}"
+            + (f" grouped by {dim_text}" if dim_text else "")
+        )
+        plan["_variant_reason"] = reason
+        return plan
+
+    def _plan_signature(self, plan: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            plan.get("table"),
+            plan.get("metric"),
+            tuple(plan.get("dimensions") or []),
+            json.dumps(plan.get("time_filter"), sort_keys=True, default=str),
+            json.dumps(plan.get("value_filters") or [], sort_keys=True, default=str),
+        )
+
+    def _candidate_score(
+        self,
+        goal: str,
+        plan: dict[str, Any],
+        execution: dict[str, Any],
+        audit: dict[str, Any],
+    ) -> float:
+        score = float(audit.get("score", 0.0))
+        if execution.get("success"):
+            score += 0.04
+        if int(execution.get("row_count") or 0) > 0:
+            score += 0.04
+
+        grounding = audit.get("grounding", {})
+        misses = list(grounding.get("goal_term_misses", []))
+        score -= 0.08 * len(misses)
+
+        lower = goal.lower()
+        dims = list(plan.get("dimensions") or [])
+        if re.search(r"\b(by month|month wise|monthly|trend)\b", lower) and "__month__" in dims:
+            score += 0.03
+        if "platform" in lower and "platform_name" in dims:
+            score += 0.03
+        if "state" in lower and "state" in dims:
+            score += 0.02
+        if execution.get("execution_time_ms") and float(execution["execution_time_ms"]) > 6000:
+            score -= 0.03
+
+        return max(0.0, min(1.0, score))
+
+    def _toolsmith_probe_findings(
+        self,
+        *,
+        goal: str,
+        plan: dict[str, Any],
+        audit: dict[str, Any],
+        max_probes: int,
+    ) -> list[dict[str, Any]]:
+        """Run bounded probe queries to explain potential mismatches."""
+
+        if max_probes <= 0:
+            return []
+
+        misses = set(str(x) for x in audit.get("grounding", {}).get("goal_term_misses", []))
+        lower_goal = goal.lower()
+        probes: list[tuple[str, str]] = []
+        if ("forex" in lower_goal or "markup" in lower_goal or "forex_domain" in misses) and plan.get(
+            "table"
+        ) != "datada_mart_quotes":
+            probes.append(
+                (
+                    "quotes_markup_presence",
+                    "SELECT COUNT(*) AS rows_with_markup FROM datada_mart_quotes WHERE forex_markup IS NOT NULL AND forex_markup <> 0",
+                )
+            )
+        if "mt103" in lower_goal and "mt103" in misses:
+            probes.append(
+                (
+                    "transactions_mt103_presence",
+                    "SELECT SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS mt103_rows FROM datada_mart_transactions",
+                )
+            )
+        if "refund" in lower_goal and "refund" in misses:
+            probes.append(
+                (
+                    "transactions_refund_presence",
+                    "SELECT SUM(CASE WHEN has_refund THEN 1 ELSE 0 END) AS refund_rows FROM datada_mart_transactions",
+                )
+            )
+
+        findings: list[dict[str, Any]] = []
+        for label, sql in probes[:max_probes]:
+            result = self.executor.execute(sql)
+            findings.append(
+                {
+                    "probe": label,
+                    "success": result.success,
+                    "sql": sql,
+                    "row_count": result.row_count,
+                    "sample_rows": result.rows[:3],
+                    "error": result.error,
+                }
+            )
+        return findings
 
     def _transactions_specialist(self, plan: dict[str, Any]) -> dict[str, Any]:
         if plan["table"] != "datada_mart_transactions":
@@ -2373,13 +2979,107 @@ class AgenticAnalyticsTeam:
             return ConfidenceLevel.LOW
         return ConfidenceLevel.UNCERTAIN
 
+    def _memory_write_turn(
+        self,
+        *,
+        trace: list[dict[str, Any]],
+        trace_id: str,
+        goal: str,
+        resolved_goal: str,
+        runtime: RuntimeSelection,
+        success: bool,
+        confidence_score: float,
+        row_count: int | None,
+        plan: dict[str, Any],
+        sql: str | None,
+        audit_warnings: list[str],
+        correction_applied: bool,
+        correction_reason: str | None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        start = time.perf_counter()
+        try:
+            self.memory.store_turn(
+                trace_id=trace_id,
+                goal=goal,
+                resolved_goal=resolved_goal,
+                runtime_mode=runtime.mode,
+                provider=runtime.provider,
+                success=success,
+                confidence_score=confidence_score,
+                row_count=row_count,
+                plan=plan,
+                sql=sql,
+                audit_warnings=audit_warnings,
+                correction_applied=correction_applied,
+                correction_reason=correction_reason,
+                metadata=metadata,
+            )
+            trace.append(
+                {
+                    "agent": "MemoryAgent",
+                    "role": "episodic_write",
+                    "status": "success",
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                    "summary": "turn persisted",
+                }
+            )
+        except Exception as exc:
+            trace.append(
+                {
+                    "agent": "MemoryAgent",
+                    "role": "episodic_write",
+                    "status": "failed",
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                    "summary": f"memory write skipped: {exc}",
+                }
+            )
+
+    def _memory_learn_from_success(
+        self,
+        trace: list[dict[str, Any]],
+        *,
+        goal: str,
+        plan: dict[str, Any],
+        score: float,
+    ) -> None:
+        start = time.perf_counter()
+        try:
+            correction_id = self.memory.learn_from_success(
+                goal=goal,
+                plan=plan,
+                score=score,
+            )
+            trace.append(
+                {
+                    "agent": "MemoryAgent",
+                    "role": "autonomous_learning",
+                    "status": "success",
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                    "summary": correction_id or "no-new-rule",
+                }
+            )
+        except Exception as exc:
+            trace.append(
+                {
+                    "agent": "MemoryAgent",
+                    "role": "autonomous_learning",
+                    "status": "failed",
+                    "duration_ms": round((time.perf_counter() - start) * 1000, 2),
+                    "summary": str(exc),
+                }
+            )
+
     def _runtime_payload(
         self,
         runtime: RuntimeSelection,
         *,
         llm_intake_used: bool = False,
         llm_narrative_used: bool = False,
+        autonomy: AutonomyConfig | None = None,
+        correction_applied: bool = False,
     ) -> dict[str, Any]:
+        autonomy_cfg = autonomy or AutonomyConfig()
         return {
             "requested_mode": runtime.requested_mode,
             "mode": runtime.mode,
@@ -2391,6 +3091,13 @@ class AgenticAnalyticsTeam:
             "llm_intake_used": llm_intake_used,
             "llm_narrative_used": llm_narrative_used,
             "llm_effective": llm_intake_used or llm_narrative_used,
+            "autonomy_mode": autonomy_cfg.mode,
+            "auto_correction": autonomy_cfg.auto_correction,
+            "strict_truth": autonomy_cfg.strict_truth,
+            "max_refinement_rounds": autonomy_cfg.max_refinement_rounds,
+            "max_candidate_plans": autonomy_cfg.max_candidate_plans,
+            "correction_applied": correction_applied,
+            "memory_db_path": str(self.memory_db_path),
         }
 
 

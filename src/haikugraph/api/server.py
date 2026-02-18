@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from haikugraph.agents.contracts import AssistantQueryResponse
 from haikugraph.llm.router import DEFAULT_MODELS
-from haikugraph.poc import AgenticAnalyticsTeam, RuntimeSelection, load_dotenv_file
+from haikugraph.poc import AgenticAnalyticsTeam, AutonomyConfig, RuntimeSelection, load_dotenv_file
 
 
 DEFAULT_DB_CANDIDATES = (
@@ -54,6 +54,31 @@ class QueryRequest(BaseModel):
     local_model: str | None = Field(default=None)
     session_id: str | None = Field(default=None, max_length=128)
     storyteller_mode: bool = Field(default=False)
+    autonomy_mode: str = Field(default="bounded", max_length=32)
+    auto_correction: bool = Field(default=True)
+    strict_truth: bool = Field(default=True)
+    max_refinement_rounds: int = Field(default=2, ge=0, le=6)
+    max_candidate_plans: int = Field(default=5, ge=1, le=12)
+
+
+class FeedbackRequest(BaseModel):
+    trace_id: str | None = None
+    session_id: str | None = None
+    goal: str | None = None
+    issue: str = Field(..., min_length=5, max_length=2000)
+    suggested_fix: str | None = None
+    severity: str = Field(default="medium", max_length=16)
+    keyword: str | None = None
+    target_table: str | None = None
+    target_metric: str | None = None
+    target_dimensions: list[str] = Field(default_factory=list)
+
+
+class FeedbackResponse(BaseModel):
+    success: bool
+    message: str
+    feedback_id: str | None = None
+    correction_id: str | None = None
 
 
 class LegacyAskRequest(BaseModel):
@@ -95,20 +120,21 @@ class ArchitectureResponse(BaseModel):
     description: str = "Hierarchical multi-agent analytics and data-engineering team"
     pipeline_flow: list[str] = [
         "1. Chief Analyst Agent - Supervises team and decomposes mission",
-        "2. Intake Agent - Clarifies intent, metrics, filters, time scope",
-        "3. Semantic Retrieval Agent - Maps query to semantic marts",
-        "4. Planning Agent - Produces task graph and metric definitions",
-        "5. Specialist Agents - Transactions, Customers, Revenue, Risk",
-        "6. Query Engineer Agent - Compiles SQL plan",
-        "7. Execution Agent - Runs SQL via safe executor",
-        "8. Audit Agent - Validates consistency and confidence",
-        "9. Governance Agent - Policy checks",
+        "2. Memory Agent - Recalls similar runs + learned correction rules",
+        "3. Intake Agent - Clarifies intent, metrics, filters, time scope",
+        "4. Semantic Retrieval Agent - Maps query to semantic marts",
+        "5. Planning Agent - Produces task graph and metric definitions",
+        "6. Specialist Agents - Transactions, Customers, Revenue, Risk",
+        "7. Query Engineer + Execution Agents - Compile and run SQL",
+        "8. Audit Agent - Validates consistency, grounding, replay checks",
+        "9. Autonomy Agent - Evaluates candidate plans and self-corrects",
         "10. Narrative + Visualization Agents - Final insight and chart spec",
     ]
     guardrails: list[str] = [
         "Read-only SQL only",
         "Blocked destructive keywords",
         "Bounded result sizes",
+        "Bounded autonomy controls (candidate/iteration caps)",
         "Structured evidence packets",
         "Per-agent trace for every answer",
         "Runtime mode transparency (auto/local/openai/deterministic)",
@@ -585,6 +611,13 @@ def _register_routes(app: FastAPI) -> None:
                 outputs=["semantic marts", "catalog"],
             ),
             AgentInfo(
+                name="MemoryAgent",
+                role="Episodic + procedural memory",
+                description="Recalls prior runs and correction rules; persists outcomes for future improvements",
+                inputs=["goal", "trace", "feedback"],
+                outputs=["memory hints", "learned correction rules"],
+            ),
+            AgentInfo(
                 name="IntakeAgent",
                 role="Intent parser",
                 description="Extracts intent, metric, dimensions, filters, time scope",
@@ -627,6 +660,13 @@ def _register_routes(app: FastAPI) -> None:
                 outputs=["checks + confidence score"],
             ),
             AgentInfo(
+                name="AutonomyAgent",
+                role="Candidate reconciler",
+                description="Generates plan variants, validates alternatives, and self-corrects when evidence improves",
+                inputs=["base plan + audit", "memory hints", "correction rules"],
+                outputs=["selected plan", "correction rationale", "probe findings"],
+            ),
+            AgentInfo(
                 name="NarrativeAgent",
                 role="Answer writer",
                 description="Writes final business answer",
@@ -664,6 +704,13 @@ def _register_routes(app: FastAPI) -> None:
                 )
 
         runtime = _resolve_runtime(request.llm_mode)
+        autonomy = AutonomyConfig(
+            mode=request.autonomy_mode.strip().lower() or "bounded",
+            auto_correction=bool(request.auto_correction),
+            strict_truth=bool(request.strict_truth),
+            max_refinement_rounds=int(request.max_refinement_rounds),
+            max_candidate_plans=int(request.max_candidate_plans),
+        )
         session_id = (request.session_id or "default").strip()[:128] or "default"
 
         with app.state.sessions_lock:
@@ -674,6 +721,7 @@ def _register_routes(app: FastAPI) -> None:
             runtime,
             conversation_context=history,
             storyteller_mode=request.storyteller_mode,
+            autonomy=autonomy,
         )
 
         turn = {
@@ -697,6 +745,32 @@ def _register_routes(app: FastAPI) -> None:
             "conversation_turns": conversation_turns,
         }
         return response
+
+    @app.post("/api/assistant/feedback", response_model=FeedbackResponse)
+    async def feedback(request: FeedbackRequest) -> FeedbackResponse:
+        saved = app.state.team.record_feedback(
+            trace_id=request.trace_id,
+            session_id=request.session_id,
+            goal=request.goal,
+            issue=request.issue,
+            suggested_fix=request.suggested_fix,
+            severity=request.severity,
+            keyword=request.keyword,
+            target_table=request.target_table,
+            target_metric=request.target_metric,
+            target_dimensions=request.target_dimensions,
+        )
+        has_rule = bool(saved.get("correction_id"))
+        return FeedbackResponse(
+            success=True,
+            message=(
+                "Feedback saved and correction rule registered."
+                if has_rule
+                else "Feedback saved."
+            ),
+            feedback_id=saved.get("feedback_id"),
+            correction_id=saved.get("correction_id") or None,
+        )
 
     @app.post("/ask", response_model=LegacyAskResponse)
     async def ask(request: LegacyAskRequest) -> LegacyAskResponse:
