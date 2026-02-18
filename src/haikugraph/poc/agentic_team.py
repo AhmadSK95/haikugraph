@@ -211,7 +211,7 @@ class SemanticLayerManager:
             return (
                 f"NULLIF(TRIM(CAST({_q(source_col)} AS VARCHAR)), '') AS {_q(out_alias)}"
             )
-        return f"NULL AS {_q(out_alias)}"
+        return f"NULL::VARCHAR AS {_q(out_alias)}"
 
     def _num(self, cols: set[str], source_col: str, alias: str) -> str:
         if source_col in cols:

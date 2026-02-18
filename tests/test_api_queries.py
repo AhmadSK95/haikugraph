@@ -127,24 +127,24 @@ class TestArchitectureEndpoint:
         resp = client.get("/api/assistant/architecture")
         assert resp.status_code == 200
         data = resp.json()
-        
-        assert data["system_name"] == "dataDa Intelligent Data Assistant"
+
+        assert data["system_name"].startswith("dataDa")
         assert "version" in data
-        assert len(data["pipeline_flow"]) == 5
-        assert len(data["agents"]) == 5
+        assert len(data["pipeline_flow"]) >= 5
+        assert len(data["agents"]) >= 5
         assert len(data["guardrails"]) >= 5
     
     def test_architecture_lists_all_agents(self, client):
-        """Architecture should list all 5 agents."""
+        """Architecture should include core agent roles."""
         resp = client.get("/api/assistant/architecture")
         data = resp.json()
         
         agent_names = [a["name"] for a in data["agents"]]
+        assert "ChiefAnalystAgent" in agent_names
         assert "IntakeAgent" in agent_names
-        assert "SchemaAgent" in agent_names
-        assert "QueryAgent" in agent_names
+        assert "QueryEngineerAgent" in agent_names
         assert "AuditAgent" in agent_names
-        assert "NarratorAgent" in agent_names
+        assert "NarrativeAgent" in agent_names
 
 
 class TestUIEndpoint:

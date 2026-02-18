@@ -82,6 +82,9 @@ Current bounded controls exposed in API:
 - persistent autonomous memory store (sidecar DB)
 - feedback endpoint that can register correction rules
 - autonomous candidate-plan reconciliation and auto-switch to better-grounded plan
+- deterministic failure narration with explicit subquestion-level error reporting
+- robust comparison execution when one side returns NULL aggregates
+- full automated test suite passing (`230 passed`, `15 skipped`)
 
 ## Quick Start
 
@@ -183,18 +186,18 @@ Connection APIs:
 
 ## Progress Tracker
 
-Overall program completion toward target vision: **47%**
+Overall program completion toward target vision: **54%**
 
 ### Epic-level tracker
 
 | Epic | Status | Completion | Notes |
 |---|---|---:|---|
 | 1. Unified ingestion + direct DB attach | active | 92% | core done; multi-connection routing added |
-| 2. Semantic intelligence reliability | active | 60% | marts + mappings done; ontology/versioning pending |
-| 3. Agent autonomy core | active | 58% | memory + correction loop done; richer planner negotiation pending |
-| 4. Truth and verification engine | active | 63% | audit/replay/concept checks + new regression pass done |
-| 5. Conversational UX and transparency | active | 57% | trace/details/story mode + connection selector done |
-| 6. Enterprise platform readiness | active | 33% | connection registry/router added; RBAC/multi-tenant/SLOs pending |
+| 2. Semantic intelligence reliability | active | 66% | marts + mappings + generic schema typing hardening done; ontology/versioning pending |
+| 3. Agent autonomy core | active | 61% | memory + correction loop done; richer planner negotiation pending |
+| 4. Truth and verification engine | active | 70% | audit/replay/concept checks + full green suite pass |
+| 5. Conversational UX and transparency | active | 60% | trace/details/story mode + connection selector + deterministic failure messaging |
+| 6. Enterprise platform readiness | active | 36% | connection registry/router + validation hardening; RBAC/multi-tenant/SLOs pending |
 | 7. Scale to billion-row enterprise workloads | backlog | 22% | DuckDB baseline works; warehouse pushdown/distributed path pending |
 
 ### Detailed task list

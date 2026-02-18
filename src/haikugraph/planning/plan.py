@@ -61,6 +61,26 @@ def build_plan(question: str, graph: dict, cards: dict) -> dict:
         question_lower, entities, metrics, constraints, graph, cards, intent
     )
 
+    # Comparison plans require scoped time markers per subquestion for schema validation.
+    if intent.get("type") == "comparison" and subquestions:
+        has_scoped_time = any(
+            c.get("type") == "time" and c.get("applies_to")
+            for c in constraints
+        )
+        if not has_scoped_time:
+            for sq in subquestions:
+                sq_id = sq.get("id")
+                tf = sq.get("time_filter")
+                if sq_id and tf and tf.get("period"):
+                    constraints.append(
+                        {
+                            "type": "time",
+                            "expression": str(tf["period"]),
+                            "applies_to": sq_id,
+                            "confidence": 0.9,
+                        }
+                    )
+
     # Find required join paths (BFS multi-hop)
     join_paths = find_join_paths(subquestions, graph)
 
@@ -228,13 +248,23 @@ def detect_metrics(question: str, cards: dict, original_question: str, entities:
 
                 # Skip if not money-like
                 money_keywords = ["amount", "price", "cost", "value", "total", "charge"]
+                is_timestamp_like = (
+                    "timestamp" in semantic_hints
+                    or col_name.endswith("_at")
+                    or "date" in col_name
+                    or "time" in col_name
+                )
                 is_money = any(kw in col_name for kw in money_keywords) or (
-                    "money_or_numeric" in semantic_hints
+                    "money_or_numeric" in semantic_hints and not is_timestamp_like
                 )
                 if not is_money:
                     continue
 
                 score = 0
+                if "payment amount" in question and "payment_amount" in col_name:
+                    score += 10
+                if "amount" in question and "amount" in col_name:
+                    score += 4
                 # +3 if domain keyword in column name
                 for domain, keywords in question_keywords.items():
                     if any(kw in original_question.lower() for kw in keywords):
@@ -273,6 +303,47 @@ def detect_metrics(question: str, cards: dict, original_question: str, entities:
                 )
                 break  # Only one metric per agg type
 
+    # Fallback for implicit amount-style metrics (common in comparison prompts).
+    if not metrics and any(token in question for token in ["amount", "revenue", "volume", "sales"]):
+        candidates = []
+        for col_card in cards.get("column_cards", []):
+            col_name = col_card.get("column", "").lower()
+            semantic_hints = col_card.get("semantic_hints", [])
+            is_timestamp_like = (
+                "timestamp" in semantic_hints
+                or col_name.endswith("_at")
+                or "date" in col_name
+                or "time" in col_name
+            )
+            if "money_or_numeric" not in semantic_hints and not any(
+                kw in col_name for kw in ["amount", "price", "cost", "value", "charge"]
+            ):
+                continue
+            if is_timestamp_like:
+                continue
+            score = 0
+            if "payment amount" in question and "payment_amount" in col_name:
+                score += 10
+            if "amount" in col_name:
+                score += 2
+            if "payment" in question and "payment" in col_name:
+                score += 3
+            if "money_or_numeric" in semantic_hints:
+                score += 1
+            qualified = f"{col_card.get('table', '')}.{col_card.get('column', '')}"
+            candidates.append((score, qualified))
+        if candidates:
+            candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+            _, best = candidates[0]
+            metrics.append(
+                {
+                    "name": f"sum_{best.split('.')[-1]}",
+                    "mapped_columns": [best],
+                    "aggregation": "sum",
+                    "confidence": 0.7,
+                }
+            )
+
     return metrics
 
 
@@ -282,13 +353,41 @@ def extract_time_periods(question: str) -> tuple[str, str] | None:
     Returns:
         Tuple of (period1, period2) or None if not a time comparison
     """
-    # Month patterns: "September 2025 vs October 2025"
-    month_pattern = r"(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})"
+    # Month patterns: "September 2025 vs October 2025" / "Sep 2025 vs Oct 2025"
+    month_alias = {
+        "jan": "january",
+        "january": "january",
+        "feb": "february",
+        "february": "february",
+        "mar": "march",
+        "march": "march",
+        "apr": "april",
+        "april": "april",
+        "may": "may",
+        "jun": "june",
+        "june": "june",
+        "jul": "july",
+        "july": "july",
+        "aug": "august",
+        "august": "august",
+        "sep": "september",
+        "sept": "september",
+        "september": "september",
+        "oct": "october",
+        "october": "october",
+        "nov": "november",
+        "november": "november",
+        "dec": "december",
+        "december": "december",
+    }
+    month_pattern = r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{4})"
     months = re.findall(month_pattern, question.lower())
     
     if len(months) >= 2:
-        month1, year1 = months[0]
-        month2, year2 = months[1]
+        month1_raw, year1 = months[0]
+        month2_raw, year2 = months[1]
+        month1 = month_alias.get(month1_raw, month1_raw)
+        month2 = month_alias.get(month2_raw, month2_raw)
         return (f"{month1}_{year1}", f"{month2}_{year2}")
     
     # Year patterns: "2024 vs 2025"
@@ -373,11 +472,37 @@ def detect_constraints(
                 break
 
     # Time constraints - specific months
-    month_pattern = r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b"
+    month_pattern = r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b"
     month_match = re.search(month_pattern, question)
     
     if month_match:
-        month_name = month_match.group(1)
+        month_token = month_match.group(1)
+        month_name = {
+            "jan": "january",
+            "january": "january",
+            "feb": "february",
+            "february": "february",
+            "mar": "march",
+            "march": "march",
+            "apr": "april",
+            "april": "april",
+            "may": "may",
+            "jun": "june",
+            "june": "june",
+            "jul": "july",
+            "july": "july",
+            "aug": "august",
+            "august": "august",
+            "sep": "september",
+            "sept": "september",
+            "september": "september",
+            "oct": "october",
+            "october": "october",
+            "nov": "november",
+            "november": "november",
+            "dec": "december",
+            "december": "december",
+        }[month_token]
         month_num = {
             "january": 1, "february": 2, "march": 3, "april": 4,
             "may": 5, "june": 6, "july": 7, "august": 8,
@@ -529,6 +654,40 @@ def detect_constraints(
                     })
                     break
 
+    # Normalize explicit domain tokens even without "with/has" wording.
+    # Example: "How many MT103 transactions in December?"
+    if "mt103" in question and not any("mt103" in str(c.get("expression", "")).lower() for c in constraints):
+        mt_candidates: list[tuple[int, str, str]] = []
+        for col_card in cards.get("column_cards", []):
+            col_name = col_card.get("column", "").lower()
+            if "mt103" not in col_name:
+                continue
+            table = col_card.get("table", "")
+            if context_tables and table not in context_tables:
+                continue
+            score = 0
+            if "document_id" in col_name:
+                score += 3
+            if "created_at" in col_name:
+                score += 2
+            if primary_table and table == primary_table:
+                score += 5
+            mt_candidates.append((score, table, col_card["column"]))
+
+        if mt_candidates:
+            mt_candidates.sort(reverse=True)
+            _, table, column = mt_candidates[0]
+            constraints.append(
+                {
+                    "type": "value_filter",
+                    "expression": f"{table}.{column} IS NOT NULL",
+                    "operator": "is_not_null",
+                    "column": column,
+                    "table": table,
+                    "confidence": 0.85,
+                }
+            )
+
     return constraints
 
 
@@ -559,11 +718,24 @@ def build_subquestions(
             
             # Find timestamp column in this table
             timestamp_col = None
+            ts_candidates: list[tuple[int, str]] = []
             for col_card in cards.get("column_cards", []):
                 if (col_card.get("table") == table_name and 
                     "timestamp" in col_card.get("semantic_hints", [])):
-                    timestamp_col = col_card.get("column")
-                    break
+                    ts_col_name = col_card.get("column", "")
+                    score = 0
+                    if ts_col_name == "created_at":
+                        score += 5
+                    elif ts_col_name == "updated_at":
+                        score += 3
+                    elif "created" in ts_col_name:
+                        score += 2
+                    else:
+                        score += 1
+                    ts_candidates.append((score, ts_col_name))
+            if ts_candidates:
+                ts_candidates.sort(reverse=True)
+                timestamp_col = ts_candidates[0][1]
             
             # Create SQ1_current (first period)
             subquestions.append({

@@ -102,7 +102,8 @@ def _call_openai(
 ) -> str:
     """Call OpenAI API (GPT models)."""
     try:
-        import openai
+        import importlib
+        openai_module = importlib.import_module("openai")
     except ImportError:
         raise ImportError(
             "openai package not installed. "
@@ -116,7 +117,7 @@ def _call_openai(
             "Set HG_OPENAI_API_KEY or OPENAI_API_KEY environment variable."
         )
     
-    client = openai.OpenAI(api_key=api_key, timeout=timeout)
+    client = openai_module.OpenAI(api_key=api_key, timeout=timeout)
     
     # Call API
     response = client.chat.completions.create(

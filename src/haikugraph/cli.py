@@ -1,6 +1,7 @@
 """CLI entrypoint for haikugraph."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -639,9 +640,15 @@ def ask(question: str, graph_path: str, cards_dir: str, out: str, execute: bool,
         graph = load_graph(Path(graph_path))
         cards = load_cards_data(Path(cards_dir))
 
-        # Auto-detect followup questions if not explicitly specified
+        # Auto-detect follow-up questions only when explicitly enabled.
+        auto_followup_enabled = os.environ.get("HG_AUTO_FOLLOWUP", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         prev_plan_path = Path(out)
-        if not followup and prev_plan_path.exists():
+        if auto_followup_enabled and not followup and prev_plan_path.exists():
             from haikugraph.planning.followups import classify_followup
             
             try:

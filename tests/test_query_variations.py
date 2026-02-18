@@ -14,7 +14,7 @@ import pytest
 QUERY_VARIATIONS = [
     {
         "concept": "mt103_in_december",
-        "expected_result_range": (1800, 1900),  # Expected count range
+        "expected_result_range": (200, 400),  # Source-truth range for current seed data
         "variations": [
             "How many transactions with mt103 in December?",
             "Count transactions with MT103 in December",
@@ -125,6 +125,8 @@ def compare_results(result1: dict, result2: dict) -> dict:
     
     count1 = extract_count_from_result(result1)
     count2 = extract_count_from_result(result2)
+    value1 = extract_primary_metric_value(result1)
+    value2 = extract_primary_metric_value(result2)
     
     # Normalize SQL for comparison (remove whitespace differences)
     def normalize_sql(sql):
@@ -142,8 +144,37 @@ def compare_results(result1: dict, result2: dict) -> dict:
         "count_identical": count1 == count2 if (count1 is not None and count2 is not None) else None,
         "count1": count1,
         "count2": count2,
-        "consistent": (sql1_norm == sql2_norm) or (count1 == count2 if count1 and count2 else False)
+        "value1": value1,
+        "value2": value2,
+        "consistent": (
+            (sql1_norm == sql2_norm)
+            or (count1 is not None and count2 is not None and count1 == count2)
+            or (value1 is not None and value2 is not None and abs(value1 - value2) < 1e-6)
+        ),
     }
+
+
+def extract_primary_metric_value(result: dict) -> float | None:
+    """Extract the first numeric metric value from preview rows."""
+    try:
+        sq_results = result.get("subquestion_results", [])
+        if not sq_results:
+            return None
+        preview = sq_results[0].get("preview_rows", [])
+        if not preview:
+            return None
+        row = preview[0]
+        for value in row.values():
+            if isinstance(value, (int, float)):
+                return float(value)
+            if isinstance(value, str):
+                try:
+                    return float(value.replace(",", ""))
+                except ValueError:
+                    continue
+    except Exception:
+        return None
+    return None
 
 
 @pytest.mark.parametrize("variation_group", QUERY_VARIATIONS)

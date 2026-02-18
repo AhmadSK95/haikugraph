@@ -298,16 +298,6 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
                 agg_func = "COUNT"
                 is_distinct = True
             
-            # Safety net: auto-apply DISTINCT for COUNT on _id columns
-            # These columns typically have duplicates in merged/denormalized tables,
-            # and counting without DISTINCT inflates the result.
-            if (
-                agg_func == "COUNT"
-                and not is_distinct
-                and agg_col.lower().endswith("_id")
-            ):
-                is_distinct = True
-            
             # Build alias
             if is_distinct:
                 alias = f"{agg_spec['agg']}_distinct_{agg_col}"
@@ -540,7 +530,7 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
         if constraint_type == "value_filter":
             constraint_table = constraint.get("table") or primary_table
             col = constraint.get("column")
-            operator = constraint.get("operator", "eq")
+            operator = constraint.get("operator")
             value = constraint.get("value")
             
             if constraint_table in tables and col:
@@ -568,6 +558,10 @@ def build_sql(sq: dict, plan: dict, conn=None) -> tuple[str, dict]:
                 elif expr:
                     # Fallback: use expression as-is
                     sql_expr = expr
+                elif value is not None:
+                    # Backward-compatible default for value filters with explicit value.
+                    safe_value = str(value).replace("'", "''")
+                    sql_expr = f"{col_ref} = '{safe_value}'"
                 else:
                     continue
                 

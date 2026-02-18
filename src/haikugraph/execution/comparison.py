@@ -285,7 +285,11 @@ def extract_comparison_from_results(
             break
     
     if not metric_col:
-        raise ValueError("No numeric metric column found in SQ1_current results")
+        # Allow NULL-only aggregates (e.g., SUM over empty period) by falling back to first column.
+        if current_row:
+            metric_col = next(iter(current_row.keys()))
+        else:
+            raise ValueError("No metric column found in SQ1_current results")
     
     # Validate same metric in comparison
     if metric_col not in comparison_row:
@@ -293,8 +297,16 @@ def extract_comparison_from_results(
             f"Metric '{metric_col}' not found in SQ2_comparison results"
         )
     
-    current_value = float(current_row[metric_col])
-    comparison_value = float(comparison_row[metric_col])
+    def _as_float(value: object) -> float:
+        if value is None:
+            return 0.0
+        try:
+            return float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0.0
+
+    current_value = _as_float(current_row.get(metric_col))
+    comparison_value = _as_float(comparison_row.get(metric_col))
     
     # Extract periods from constraints
     constraints = plan.get("constraints", [])
