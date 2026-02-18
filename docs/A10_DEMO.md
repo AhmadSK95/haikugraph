@@ -66,7 +66,7 @@ haikugraph ask-demo "Show recent appointments" --no-intent
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--db-path` | Path to DuckDB database | `./data/haikugraph.duckdb` |
+| `--db-path` | Path to DuckDB database | `./data/haikugraph.db` |
 | `--debug` | Print intent + plan + SQL | `False` |
 | `--no-intent` | Skip A8 intent classification | `False` |
 | `--raw` | Print raw execution results only | `False` |

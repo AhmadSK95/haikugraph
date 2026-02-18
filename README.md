@@ -30,13 +30,20 @@ Reference canonical SQL definitions:
 ## Table of Contents
 
 - [Overview](#overview)
+- [Product Vision](#product-vision)
 - [Architecture](#architecture)
+- [Data Connectors](#data-connectors)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Ground-Truth Accuracy Audit](#ground-truth-accuracy-audit)
 - [System Structure](#system-structure)
 - [CLI Commands Reference](#cli-commands-reference)
 - [Development](#development)
+
+---
+
+For product positioning and connector roadmap, see:
+- `docs/VISION_AND_CONNECTORS.md`
 
 ---
 
@@ -57,6 +64,20 @@ HaikuGraph is a natural language data assistant that allows users to ask questio
 ✅ **Follow-up Conversations**: Maintains context across related questions  
 ✅ **CLI-First**: Pure command-line interface, no web dependencies  
 ✅ **Local-First AI**: Uses Ollama for privacy-preserving LLM operations
+
+---
+
+## Product Vision
+
+dataDa is not trying to replace ChatGPT. It solves a different problem:
+
+- **Grounded answers over your data**: every answer is tied to executable SQL and traceable evidence.
+- **Deterministic guardrails**: when LLM interpretation is weak, the system falls back to safe deterministic planning.
+- **Auditability for teams**: confidence checks, replay checks, and per-agent trace make failures debuggable.
+- **Deployability**: local runtime option (Ollama + DuckDB) for privacy-sensitive workflows.
+
+If the goal is "general advice", use ChatGPT.  
+If the goal is "trusted analytics over enterprise data with reproducible SQL", use dataDa.
 
 ---
 
@@ -146,6 +167,29 @@ Answer + Charts + SQL
 
 ---
 
+## Data Connectors
+
+### Current (implemented)
+
+- **Excel ingestion** via a single unified pipeline: `haikugraph ingest`
+  - Auto-detects related files
+  - Merges split datasets when keys overlap
+  - Loads into `data/haikugraph.db`
+- **Direct DuckDB onboarding**: `haikugraph use-db --db-path /path/to/existing.db`
+  - No Excel ingest required
+  - Updates `.env` with `HG_DB_PATH=...`
+
+### Next connector targets
+
+- **Relational DBs**: Postgres, MySQL, SQL Server, Snowflake, BigQuery
+- **Streams**: Kafka/Kinesis/PubSub into rolling marts
+- **Unstructured docs (PDF/DOCX/MD)**:
+  - Parse to a document table
+  - Chunk + embed for semantic retrieval
+  - Join doc evidence with metric answers in one response
+
+---
+
 ## Installation
 
 ### Prerequisites
@@ -196,6 +240,9 @@ source .venv/bin/activate
 # 3. Ingest data
 haikugraph ingest --data-dir ./data
 
+# OR point directly to an existing DuckDB
+haikugraph use-db --db-path ./data/haikugraph.db
+
 # 4. Profile and build graph
 haikugraph profile
 haikugraph cards build
@@ -220,8 +267,9 @@ haikugraph/
 ├── src/haikugraph/          # Core Python package
 │   ├── cli.py              # CLI entry point
 │   ├── io/                 # Data ingestion & profiling
-│   │   ├── ingestion.py   # Excel → DuckDB
-│   │   └── profiler.py    # Schema profiling
+│   │   ├── ingest.py      # Unified ingest entrypoint
+│   │   ├── smart_ingest.py # Smart merge ingest engine
+│   │   └── profile.py     # Schema profiling
 │   ├── planning/           # Query planning
 │   │   ├── plan.py        # Deterministic planner
 │   │   ├── llm_planner.py # LLM-based planner
@@ -233,15 +281,15 @@ haikugraph/
 │   ├── explain/            # Natural language output
 │   │   └── narrator.py    # LLM-based explanation
 │   ├── cards/              # Semantic annotations
-│   │   ├── builder.py     # Card generation
-│   │   └── loader.py      # Card loading
+│   │   ├── generate.py    # Card generation
+│   │   └── store.py       # Card loading/storage
 │   ├── graph/              # Relationship discovery
-│   │   └── builder.py     # Graph construction
+│   │   └── build.py       # Graph construction
 │   └── llm/                # LLM routing
 │       └── router.py      # Ollama integration
 ├── data/                    # Data directory (gitignored)
 │   ├── *.xlsx              # Excel input files
-│   ├── haikugraph.duckdb  # DuckDB database
+│   ├── haikugraph.db      # DuckDB database
 │   ├── profile.json        # Schema profile
 │   ├── graph.json          # Table relationships
 │   ├── cards/              # Semantic annotations
@@ -285,21 +333,21 @@ haikugraph ingest
 haikugraph ingest --data-dir ./my-data
 
 # Specify custom database path
-haikugraph ingest --db-path ./output/my-database.duckdb
+haikugraph ingest --db-path ./output/my-database.db
 
 # Read a specific sheet by name or index
 haikugraph ingest --sheet "Sheet2"
 haikugraph ingest --sheet 1
 
 # Combine options
-haikugraph ingest --data-dir ./data --db-path ./data/main.duckdb --sheet 0
+haikugraph ingest --data-dir ./data --db-path ./data/main.db --sheet 0
 ```
 
 **What it does:**
 - Finds all `.xlsx` and `.xls` files in data directory
-- Creates tables with sanitized names from filenames
+- Smart-merges related files that share key overlap
 - Auto-fallback to string mode if mixed types detected
-- Outputs: `./data/haikugraph.duckdb`
+- Outputs: `./data/haikugraph.db`
 
 **Table Naming:** `Sales Data 2024.xlsx` → `sales_data_2024`
 
@@ -316,7 +364,7 @@ Generate detailed JSON profile of database schema.
 haikugraph profile
 
 # Custom paths
-haikugraph profile --db-path ./data/main.duckdb --out ./reports/profile.json
+haikugraph profile --db-path ./data/main.db --out ./reports/profile.json
 
 # Control sampling
 haikugraph profile --sample-rows 50000 --top-k 20

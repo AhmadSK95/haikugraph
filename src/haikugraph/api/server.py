@@ -22,9 +22,9 @@ from haikugraph.poc import AgenticAnalyticsTeam, RuntimeSelection, load_dotenv_f
 
 
 DEFAULT_DB_CANDIDATES = (
+    Path("./data/haikugraph.db"),
     Path("./data/datada.duckdb"),
     Path("./data/haikugraph.duckdb"),
-    Path("./data/haikugraph.db"),
 )
 
 

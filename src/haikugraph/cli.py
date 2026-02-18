@@ -16,7 +16,6 @@ from haikugraph.graph.update_relations import (
     format_probe_summary,
     probe_and_update_relations,
 )
-from haikugraph.io.ingest import format_ingestion_summary, ingest_excel_to_duckdb
 from haikugraph.io.smart_ingest import (
     smart_ingest_excel_to_duckdb,
     format_smart_ingestion_summary,
@@ -94,6 +93,30 @@ def main():
     pass
 
 
+def _parse_sheet_arg(sheet: str | None) -> str | int | None:
+    """Convert numeric sheet index strings to int for pandas."""
+    if sheet is None:
+        return None
+    try:
+        return int(sheet)
+    except ValueError:
+        return sheet
+
+
+def _run_unified_ingest(data_dir: str, db_path: str, sheet: str | None, force: bool) -> None:
+    """Run the single supported ingest pipeline (smart ingest)."""
+    sheet_arg = _parse_sheet_arg(sheet)
+    results = smart_ingest_excel_to_duckdb(
+        data_dir=Path(data_dir),
+        db_path=Path(db_path),
+        sheet=sheet_arg,
+        force=force,
+    )
+    click.echo(format_smart_ingestion_summary(results))
+    if results["status"] == "failed":
+        raise click.Abort()
+
+
 @main.command()
 @click.option(
     "--data-dir",
@@ -103,9 +126,9 @@ def main():
 )
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(),
-    help="Path to DuckDB database file (default: ./data/haikugraph.duckdb)",
+    help="Path to DuckDB database file (default: ./data/haikugraph.db)",
 )
 @click.option(
     "--sheet",
@@ -119,31 +142,11 @@ def main():
     help="Overwrite existing tables (default: True)",
 )
 def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
-    """Ingest Excel files from data directory into DuckDB (legacy - use smart-ingest instead)."""
-    # Convert sheet to int if it's a numeric string
-    sheet_arg = None
-    if sheet is not None:
-        try:
-            sheet_arg = int(sheet)
-        except ValueError:
-            sheet_arg = sheet
-
-    results = ingest_excel_to_duckdb(
-        data_dir=Path(data_dir),
-        db_path=Path(db_path),
-        sheet=sheet_arg,
-        force=force,
-    )
-
-    summary = format_ingestion_summary(results)
-    click.echo(summary)
-
-    # Exit with non-zero if completely failed
-    if results["status"] == "failed":
-        raise click.Abort()
+    """Ingest Excel files into DuckDB using the unified smart-ingest pipeline."""
+    _run_unified_ingest(data_dir, db_path, sheet, force)
 
 
-@main.command("smart-ingest")
+@main.command("smart-ingest", hidden=True)
 @click.option(
     "--data-dir",
     default="./data",
@@ -152,9 +155,9 @@ def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
 )
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(),
-    help="Path to DuckDB database file (default: ./data/haikugraph.duckdb)",
+    help="Path to DuckDB database file (default: ./data/haikugraph.db)",
 )
 @click.option(
     "--sheet",
@@ -168,36 +171,67 @@ def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
     help="Overwrite existing tables (default: True)",
 )
 def smart_ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
-    """Intelligently ingest Excel files with automatic merging of related datasets."""
-    # Convert sheet to int if it's a numeric string
-    sheet_arg = None
-    if sheet is not None:
-        try:
-            sheet_arg = int(sheet)
-        except ValueError:
-            sheet_arg = sheet
+    """Backward-compatible alias for ingest (same pipeline)."""
+    _run_unified_ingest(data_dir, db_path, sheet, force)
 
-    results = smart_ingest_excel_to_duckdb(
-        data_dir=Path(data_dir),
-        db_path=Path(db_path),
-        sheet=sheet_arg,
-        force=force,
-    )
 
-    summary = format_smart_ingestion_summary(results)
-    click.echo(summary)
+@main.command("use-db")
+@click.option(
+    "--db-path",
+    required=True,
+    type=click.Path(exists=True, file_okay=True, dir_okay=False),
+    help="Path to an existing DuckDB database file.",
+)
+@click.option(
+    "--env-file",
+    default=".env",
+    type=click.Path(file_okay=True, dir_okay=False),
+    help="Env file to update with HG_DB_PATH (default: ./.env)",
+)
+def use_db(db_path: str, env_file: str):
+    """Use an existing DuckDB database directly (skip Excel ingestion)."""
+    source = Path(db_path).expanduser().resolve()
 
-    # Exit with non-zero if completely failed
-    if results["status"] == "failed":
+    # Validate DB readability early.
+    try:
+        conn = duckdb.connect(str(source), read_only=True)
+        conn.execute("SELECT 1").fetchone()
+        conn.close()
+    except Exception as exc:
+        click.echo(f"❌ Unable to read DuckDB file at {source}: {exc}", err=True)
         raise click.Abort()
+
+    env_path = Path(env_file)
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text().splitlines()
+
+    entry = f"HG_DB_PATH={source}"
+    updated = False
+    out_lines: list[str] = []
+    for line in lines:
+        if line.startswith("HG_DB_PATH="):
+            out_lines.append(entry)
+            updated = True
+        else:
+            out_lines.append(line)
+    if not updated:
+        out_lines.append(entry)
+
+    env_path.write_text("\n".join(out_lines).strip() + "\n")
+
+    click.echo("✅ dataDa is now configured to use an existing DuckDB source.")
+    click.echo(f"DB: {source}")
+    click.echo(f"Updated: {env_path}")
+    click.echo("Next: restart the API/UI (`./run.sh`) so the new DB path is picked up.")
 
 
 @main.command()
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
-    help="Path to DuckDB database (default: ./data/haikugraph.duckdb)",
+    help="Path to DuckDB database (default: ./data/haikugraph.db)",
 )
 @click.option(
     "--out",
@@ -492,9 +526,9 @@ def graph_build(cards_dir: str, out: str, min_confidence: float, weak_threshold:
 @graph.command("probe-joins")
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
-    help="Path to DuckDB database (default: ./data/haikugraph.duckdb)",
+    help="Path to DuckDB database (default: ./data/haikugraph.db)",
 )
 @click.option(
     "--cards-dir",
@@ -580,7 +614,7 @@ def graph_probe_joins(
 )
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
     help="Path to DuckDB database (required if --execute is used)",
 )
@@ -755,9 +789,9 @@ def ask(question: str, graph_path: str, cards_dir: str, out: str, execute: bool,
 )
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
-    help="Path to DuckDB database (default: ./data/haikugraph.duckdb)",
+    help="Path to DuckDB database (default: ./data/haikugraph.db)",
 )
 @click.option(
     "--out",
@@ -885,9 +919,9 @@ def ask_llm(
 )
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
-    help="Path to DuckDB database (default: ./data/haikugraph.duckdb)",
+    help="Path to DuckDB database (default: ./data/haikugraph.db)",
 )
 @click.option(
     "--out",
@@ -1018,9 +1052,9 @@ def ask_a6(question: str, db_path: str, out: str):
 )
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
-    help="Path to DuckDB database (default: ./data/haikugraph.duckdb)",
+    help="Path to DuckDB database (default: ./data/haikugraph.db)",
 )
 @click.option(
     "--out",
@@ -1101,8 +1135,8 @@ def run(plan: str, db_path: str, out: str):
 )
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
-    help="Database path to check (default: ./data/haikugraph.duckdb)",
+    default="./data/haikugraph.db",
+    help="Database path to check (default: ./data/haikugraph.db)",
 )
 def doctor(data_dir: str, db_path: str):
     """Check haikugraph environment and configuration."""
@@ -1158,12 +1192,15 @@ def rules():
 )
 def rules_show(data_dir: str):
     """Display current data rules configuration."""
-    from haikugraph.rules.loader import load_rules, get_rules_summary
+    from haikugraph.rules import load_rules
     
     try:
-        config = load_rules(data_dir=Path(data_dir))
-        summary = get_rules_summary(config)
-        click.echo(summary)
+        config = load_rules(Path(data_dir) / "rules.yaml")
+        if not config:
+            click.echo("No rules loaded (rules.yaml missing or empty).")
+            return
+        click.echo("✅ Rules loaded\n")
+        click.echo(json.dumps(config, indent=2))
     except Exception as e:
         click.echo(f"❌ Error loading rules: {e}", err=True)
         raise click.Abort()
@@ -1178,15 +1215,20 @@ def rules_show(data_dir: str):
 )
 def rules_validate(rules_path: str):
     """Validate a rules configuration file."""
-    from haikugraph.rules.loader import validate_rules_file
-    
-    is_valid, message = validate_rules_file(Path(rules_path))
-    
-    if is_valid:
-        click.echo(f"✅ {message}")
-    else:
-        click.echo(f"❌ {message}", err=True)
+    from haikugraph.rules import load_rules
+
+    config = load_rules(Path(rules_path))
+    if not isinstance(config, dict):
+        click.echo("❌ Invalid rules format: expected a mapping/object", err=True)
         raise click.Abort()
+
+    for key in ("entity_rules", "column_rules", "global_rules"):
+        value = config.get(key, {})
+        if value is not None and not isinstance(value, dict):
+            click.echo(f"❌ Invalid rules format: '{key}' must be an object", err=True)
+            raise click.Abort()
+
+    click.echo("✅ Rules file is valid.")
 
 
 @rules.command("init")
@@ -1255,7 +1297,7 @@ global_rules: {}
 @click.argument("question")
 @click.option(
     "--db-path",
-    default="./data/haikugraph.duckdb",
+    default="./data/haikugraph.db",
     type=click.Path(exists=True, file_okay=True, dir_okay=False),
     help="Path to DuckDB database",
 )
