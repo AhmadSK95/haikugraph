@@ -122,6 +122,36 @@ class AgentMemoryStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS datada_agent_correction_events (
+                        event_id VARCHAR,
+                        created_at TIMESTAMP,
+                        correction_id VARCHAR,
+                        action VARCHAR,
+                        enabled_before BOOLEAN,
+                        enabled_after BOOLEAN,
+                        note VARCHAR
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS datada_agent_toolsmith (
+                        tool_id VARCHAR,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        status VARCHAR,
+                        source VARCHAR,
+                        title VARCHAR,
+                        sql_text VARCHAR,
+                        test_sql_text VARCHAR,
+                        test_success BOOLEAN,
+                        test_message VARCHAR,
+                        metadata_json VARCHAR
+                    )
+                    """
+                )
             finally:
                 conn.close()
 
@@ -389,6 +419,409 @@ class AgentMemoryStore:
             )
         out.sort(key=lambda x: x["match_score"], reverse=True)
         return out[: max(1, min(10, int(limit)))]
+
+    def list_corrections(self, *, limit: int = 250, include_disabled: bool = True) -> list[dict[str, Any]]:
+        where_clause = "" if include_disabled else "WHERE enabled = TRUE"
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT correction_id, created_at, source, keyword, target_table, target_metric,
+                           target_dimensions_json, notes, weight, enabled
+                    FROM datada_agent_corrections
+                    {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    [max(1, min(1000, int(limit)))],
+                ).fetchall()
+            finally:
+                conn.close()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            dims = []
+            try:
+                dims = json.loads(row[6] or "[]")
+            except Exception:
+                dims = []
+            out.append(
+                {
+                    "correction_id": str(row[0] or ""),
+                    "created_at": str(row[1] or ""),
+                    "source": str(row[2] or ""),
+                    "keyword": str(row[3] or ""),
+                    "target_table": str(row[4] or ""),
+                    "target_metric": str(row[5] or ""),
+                    "target_dimensions": dims if isinstance(dims, list) else [],
+                    "notes": str(row[7] or ""),
+                    "weight": float(row[8] or 0.0),
+                    "enabled": bool(row[9]),
+                }
+            )
+        return out
+
+    def set_correction_enabled(self, correction_id: str, enabled: bool) -> bool:
+        cid = (correction_id or "").strip()
+        if not cid:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute(
+                    """
+                    SELECT correction_id, enabled FROM datada_agent_corrections
+                    WHERE correction_id = ?
+                    LIMIT 1
+                    """,
+                    [cid],
+                ).fetchone()
+                if not existing:
+                    return False
+                before = bool(existing[1])
+                after = bool(enabled)
+                if before == after:
+                    return True
+                conn.execute(
+                    """
+                    UPDATE datada_agent_corrections
+                    SET enabled = ?
+                    WHERE correction_id = ?
+                    """,
+                    [bool(enabled), cid],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        str(uuid.uuid4()),
+                        datetime.utcnow(),
+                        cid,
+                        "toggle",
+                        before,
+                        after,
+                        f"manual_toggle:{before}->{after}",
+                    ],
+                )
+                return True
+            finally:
+                conn.close()
+
+    def rollback_correction(self, correction_id: str) -> dict[str, Any]:
+        cid = (correction_id or "").strip()
+        if not cid:
+            return {"success": False, "message": "Missing correction_id."}
+        with self._lock:
+            conn = self._connect()
+            try:
+                current = conn.execute(
+                    """
+                    SELECT enabled FROM datada_agent_corrections
+                    WHERE correction_id = ?
+                    LIMIT 1
+                    """,
+                    [cid],
+                ).fetchone()
+                if not current:
+                    return {"success": False, "message": f"Unknown correction_id '{cid}'."}
+                last_change = conn.execute(
+                    """
+                    SELECT enabled_before, enabled_after
+                    FROM datada_agent_correction_events
+                    WHERE correction_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    [cid],
+                ).fetchone()
+                if not last_change:
+                    return {"success": False, "message": "No correction state changes to rollback."}
+                previous_state = bool(last_change[0])
+                current_state = bool(current[0])
+                if previous_state == current_state:
+                    return {
+                        "success": False,
+                        "message": "Correction already matches the last rollback target state.",
+                    }
+                conn.execute(
+                    """
+                    UPDATE datada_agent_corrections
+                    SET enabled = ?
+                    WHERE correction_id = ?
+                    """,
+                    [previous_state, cid],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        str(uuid.uuid4()),
+                        datetime.utcnow(),
+                        cid,
+                        "rollback",
+                        current_state,
+                        previous_state,
+                        "rollback_last_toggle",
+                    ],
+                )
+                return {
+                    "success": True,
+                    "message": f"Correction {cid} rolled back to {'enabled' if previous_state else 'disabled'}.",
+                    "enabled": previous_state,
+                }
+            finally:
+                conn.close()
+
+    def register_tool_candidate(
+        self,
+        *,
+        title: str,
+        sql_text: str,
+        source: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        clean_sql = (sql_text or "").strip()
+        clean_title = (title or "candidate_tool").strip()[:180]
+        if not clean_sql:
+            return ""
+        with self._lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute(
+                    """
+                    SELECT tool_id
+                    FROM datada_agent_toolsmith
+                    WHERE sql_text = ? AND status IN ('candidate', 'staged', 'promoted')
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    [clean_sql],
+                ).fetchone()
+                if existing and existing[0]:
+                    return str(existing[0])
+
+                tool_id = str(uuid.uuid4())
+                conn.execute(
+                    """
+                    INSERT INTO datada_agent_toolsmith VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        tool_id,
+                        datetime.utcnow(),
+                        datetime.utcnow(),
+                        "candidate",
+                        source,
+                        clean_title,
+                        clean_sql,
+                        "",
+                        False,
+                        "candidate created",
+                        json.dumps(metadata or {}, default=str),
+                    ],
+                )
+                return tool_id
+            finally:
+                conn.close()
+
+    def _is_safe_select_sql(self, sql_text: str) -> bool:
+        text = (sql_text or "").strip().lower()
+        if not text:
+            return False
+        blocked = ["drop ", "delete ", "truncate ", "update ", "insert ", "alter ", "create "]
+        if any(token in text for token in blocked):
+            return False
+        return text.startswith("select") or text.startswith("with") or text.startswith("explain")
+
+    def stage_tool_candidate(self, tool_id: str, *, db_path: Path | str) -> dict[str, Any]:
+        tid = (tool_id or "").strip()
+        if not tid:
+            return {"success": False, "message": "Missing tool_id."}
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT tool_id, sql_text, status
+                    FROM datada_agent_toolsmith
+                    WHERE tool_id = ?
+                    LIMIT 1
+                    """,
+                    [tid],
+                ).fetchone()
+                if not row:
+                    return {"success": False, "message": f"Unknown tool_id '{tid}'."}
+                sql_text = str(row[1] or "").strip()
+                if not self._is_safe_select_sql(sql_text):
+                    conn.execute(
+                        """
+                        UPDATE datada_agent_toolsmith
+                        SET updated_at = ?, test_success = ?, test_message = ?
+                        WHERE tool_id = ?
+                        """,
+                        [datetime.utcnow(), False, "Blocked: SQL is not read-only SELECT/WITH.", tid],
+                    )
+                    return {"success": False, "message": "Candidate SQL failed safety checks."}
+
+                probe_sql = sql_text.rstrip().rstrip(";")
+                if " limit " not in probe_sql.lower():
+                    probe_sql = f"{probe_sql} LIMIT 5"
+                try:
+                    probe = duckdb.connect(str(Path(db_path).expanduser()), read_only=True)
+                    probe.execute(probe_sql).fetchmany(1)
+                    probe.close()
+                except Exception as exc:
+                    conn.execute(
+                        """
+                        UPDATE datada_agent_toolsmith
+                        SET updated_at = ?, test_success = ?, test_message = ?, test_sql_text = ?
+                        WHERE tool_id = ?
+                        """,
+                        [
+                            datetime.utcnow(),
+                            False,
+                            f"Stage test failed: {exc}",
+                            probe_sql,
+                            tid,
+                        ],
+                    )
+                    return {"success": False, "message": f"Stage test failed: {exc}"}
+
+                conn.execute(
+                    """
+                    UPDATE datada_agent_toolsmith
+                    SET updated_at = ?, status = ?, test_success = ?, test_message = ?, test_sql_text = ?
+                    WHERE tool_id = ?
+                    """,
+                    [datetime.utcnow(), "staged", True, "Stage test passed.", probe_sql, tid],
+                )
+                return {"success": True, "message": f"Tool {tid} staged successfully."}
+            finally:
+                conn.close()
+
+    def promote_tool_candidate(self, tool_id: str) -> dict[str, Any]:
+        tid = (tool_id or "").strip()
+        if not tid:
+            return {"success": False, "message": "Missing tool_id."}
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT status, test_success
+                    FROM datada_agent_toolsmith
+                    WHERE tool_id = ?
+                    LIMIT 1
+                    """,
+                    [tid],
+                ).fetchone()
+                if not row:
+                    return {"success": False, "message": f"Unknown tool_id '{tid}'."}
+                status = str(row[0] or "")
+                tested = bool(row[1])
+                if status not in {"staged", "promoted"} or not tested:
+                    return {
+                        "success": False,
+                        "message": "Tool must be staged with passing tests before promotion.",
+                    }
+                conn.execute(
+                    """
+                    UPDATE datada_agent_toolsmith
+                    SET updated_at = ?, status = ?, test_message = ?
+                    WHERE tool_id = ?
+                    """,
+                    [datetime.utcnow(), "promoted", "Promoted for autonomous reuse.", tid],
+                )
+                return {"success": True, "message": f"Tool {tid} promoted."}
+            finally:
+                conn.close()
+
+    def rollback_tool_candidate(self, tool_id: str, *, reason: str = "") -> dict[str, Any]:
+        tid = (tool_id or "").strip()
+        if not tid:
+            return {"success": False, "message": "Missing tool_id."}
+        note = (reason or "manual rollback").strip()[:300]
+        with self._lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute(
+                    """
+                    SELECT tool_id FROM datada_agent_toolsmith
+                    WHERE tool_id = ?
+                    LIMIT 1
+                    """,
+                    [tid],
+                ).fetchone()
+                if not existing:
+                    return {"success": False, "message": f"Unknown tool_id '{tid}'."}
+                conn.execute(
+                    """
+                    UPDATE datada_agent_toolsmith
+                    SET updated_at = ?, status = ?, test_message = ?
+                    WHERE tool_id = ?
+                    """,
+                    [datetime.utcnow(), "rolled_back", note, tid],
+                )
+                return {"success": True, "message": f"Tool {tid} rolled back."}
+            finally:
+                conn.close()
+
+    def list_tool_candidates(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clean_status = (status or "").strip().lower()
+        where = ""
+        params: list[Any] = [max(1, min(500, int(limit)))]
+        if clean_status:
+            where = "WHERE LOWER(status) = ?"
+            params = [clean_status, params[0]]
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT tool_id, created_at, updated_at, status, source, title, sql_text,
+                           test_sql_text, test_success, test_message, metadata_json
+                    FROM datada_agent_toolsmith
+                    {where}
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+            finally:
+                conn.close()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            metadata = {}
+            try:
+                parsed = json.loads(row[10] or "{}")
+                if isinstance(parsed, dict):
+                    metadata = parsed
+            except Exception:
+                metadata = {}
+            out.append(
+                {
+                    "tool_id": str(row[0] or ""),
+                    "created_at": str(row[1] or ""),
+                    "updated_at": str(row[2] or ""),
+                    "status": str(row[3] or ""),
+                    "source": str(row[4] or ""),
+                    "title": str(row[5] or ""),
+                    "sql_text": str(row[6] or ""),
+                    "test_sql_text": str(row[7] or ""),
+                    "test_success": bool(row[8]),
+                    "test_message": str(row[9] or ""),
+                    "metadata": metadata,
+                }
+            )
+        return out
 
     def learn_from_success(
         self,

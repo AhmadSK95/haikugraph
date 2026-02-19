@@ -187,7 +187,18 @@ def classify_intent(question: str, *, max_retries: int = 1) -> Intent:
     # Retry loop
     for attempt in range(max_retries + 1):
         # Call intent classifier (uses same model as planner)
-        response = call_llm(messages, role="intent")
+        try:
+            response = call_llm(messages, role="intent")
+        except Exception as exc:
+            fallback_enabled = os.environ.get("HG_INTENT_FALLBACK_ON_LLM_ERROR", "true").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            if fallback_enabled:
+                return _fallback_intent_from_text(question, reason=str(exc))
+            raise
         
         # Try to parse JSON
         try:
@@ -234,6 +245,51 @@ def classify_intent(question: str, *, max_retries: int = 1) -> Intent:
     
     # Should not reach here
     raise ValueError("Unexpected error in intent classification")
+
+
+def _fallback_intent_from_text(question: str, reason: str = "") -> Intent:
+    """Deterministic fallback when LLM provider is unavailable."""
+    lower = question.lower()
+    has_compare = any(token in lower for token in [" vs ", " versus ", "compare", "compared to"])
+    has_group = any(token in lower for token in [" by ", " per ", "group", "breakdown"])
+    has_diag = any(token in lower for token in ["why", "issue", "problem", "anomaly", "missing"])
+    has_metric = any(token in lower for token in ["total", "sum", "count", "average", "how many", "how much"])
+    has_lookup = any(token in lower for token in ["show", "list", "display", "find", "get"])
+
+    intent_type = IntentType.UNKNOWN
+    confidence = 0.45
+    rationale = "Fallback classification due to unavailable LLM."
+
+    if has_compare:
+        intent_type = IntentType.COMPARISON
+        confidence = 0.78
+        rationale = "Comparison keywords detected in question."
+    elif has_diag:
+        intent_type = IntentType.DIAGNOSTIC
+        confidence = 0.72
+        rationale = "Diagnostic keywords detected in question."
+    elif has_group and has_metric:
+        intent_type = IntentType.GROUPED_METRIC
+        confidence = 0.76
+        rationale = "Aggregation plus grouping keywords detected."
+    elif has_metric:
+        intent_type = IntentType.METRIC
+        confidence = 0.74
+        rationale = "Aggregation keywords detected."
+    elif has_lookup:
+        intent_type = IntentType.LOOKUP
+        confidence = 0.7
+        rationale = "Lookup/listing keywords detected."
+
+    if reason:
+        rationale = f"{rationale} ({reason[:60]})"
+
+    return Intent(
+        type=intent_type,
+        confidence=min(0.99, max(0.0, confidence)),
+        rationale=rationale,
+        requires_comparison=(intent_type == IntentType.COMPARISON),
+    )
 
 
 def _parse_json_strict(response: str) -> dict[str, Any]:

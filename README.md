@@ -1,6 +1,6 @@
 # dataDa
 
-Status date: February 18, 2026
+Status date: February 19, 2026
 
 `dataDa` is an open-source, enterprise-focused analytics assistant that turns natural language questions into transparent, evidence-backed answers over your private data.
 
@@ -84,7 +84,19 @@ Current bounded controls exposed in API:
 - autonomous candidate-plan reconciliation and auto-switch to better-grounded plan
 - deterministic failure narration with explicit subquestion-level error reporting
 - robust comparison execution when one side returns NULL aggregates
-- full automated test suite passing (`230 passed`, `15 skipped`)
+- multi-agent blackboard with explicit producer/consumer artifact flow
+- confidence decomposition per evaluated hypothesis with contradiction resolution metadata
+- correction governance APIs + UI controls for one-click enable/disable rollback
+- correction rollback support with policy-gated mutation endpoints
+- toolsmith lifecycle APIs (candidate -> stage -> promote -> rollback)
+- durable session store (tenant-aware session isolation persisted in runtime DuckDB)
+- async query jobs + status polling endpoints for concurrency and long-running requests
+- per-tenant query budgets with runtime transparency in response metadata
+- trust dashboard API + UI panel for success/confidence/latency/drift visibility
+- source-truth parity endpoint for canonical SQL comparison over active connection
+- document ingestion command for text-heavy sources (`haikugraph ingest-docs`)
+- connector capability registry for DuckDB/Postgres/Snowflake/BigQuery/Stream/Documents
+- full automated test suite passing (`236 passed`, `15 skipped`)
 
 ## Quick Start
 
@@ -186,19 +198,19 @@ Connection APIs:
 
 ## Progress Tracker
 
-Overall program completion toward target vision: **54%**
+Overall program completion toward target vision: **79%**
 
 ### Epic-level tracker
 
 | Epic | Status | Completion | Notes |
 |---|---|---:|---|
 | 1. Unified ingestion + direct DB attach | active | 92% | core done; multi-connection routing added |
-| 2. Semantic intelligence reliability | active | 66% | marts + mappings + generic schema typing hardening done; ontology/versioning pending |
-| 3. Agent autonomy core | active | 61% | memory + correction loop done; richer planner negotiation pending |
-| 4. Truth and verification engine | active | 70% | audit/replay/concept checks + full green suite pass |
-| 5. Conversational UX and transparency | active | 60% | trace/details/story mode + connection selector + deterministic failure messaging |
-| 6. Enterprise platform readiness | active | 36% | connection registry/router + validation hardening; RBAC/multi-tenant/SLOs pending |
-| 7. Scale to billion-row enterprise workloads | backlog | 22% | DuckDB baseline works; warehouse pushdown/distributed path pending |
+| 2. Semantic intelligence reliability | active | 75% | marts + mappings + generic schema typing hardening + source-truth endpoint; ontology/versioning pending |
+| 3. Agent autonomy core | active | 84% | memory + correction loop + blackboard + contradiction handling + toolsmith lifecycle APIs |
+| 4. Truth and verification engine | active | 86% | audit/replay/concept checks + hypothesis decomposition + source-truth parity checks + full green suite pass |
+| 5. Conversational UX and transparency | active | 82% | trace/details/story mode + blackboard flow graph + correction controls + trust panel |
+| 6. Enterprise platform readiness | active | 66% | tenant-aware sessions + API key role gates + async jobs + budgets + trust telemetry |
+| 7. Scale to billion-row enterprise workloads | active | 40% | async queue + connector capability model + DuckDB mirror architecture; warehouse pushdown pending |
 
 ### Detailed task list
 
@@ -208,9 +220,9 @@ Overall program completion toward target vision: **54%**
 - [x] Correction rule registry and recall
 - [x] Autonomous candidate-plan evaluation and switching
 - [x] Feedback API to register correction rules
-- [ ] Multi-agent blackboard for explicit inter-agent negotiation
-- [ ] Autonomous toolsmith lifecycle (generate -> test -> stage -> promote)
-- [ ] Policy-gated self-updating procedural memory with rollback
+- [x] Multi-agent blackboard for explicit inter-agent negotiation
+- [x] Autonomous toolsmith lifecycle (generate -> test -> stage -> promote)
+- [x] Policy-gated self-updating procedural memory with rollback
 
 #### B. Data platform and connectors
 
@@ -219,11 +231,12 @@ Overall program completion toward target vision: **54%**
 - [x] Connection registry (`connections.json`) and runtime routing via `db_connection_id`
 - [x] Connection health/test/upsert/default APIs
 - [x] UI connection selector and refresh control
-- [ ] Postgres connector
-- [ ] Snowflake connector
-- [ ] BigQuery connector
-- [ ] Stream connector (Kafka/Kinesis)
+- [x] Postgres connector (registry + DSN validation + mirror-ingest readiness)
+- [x] Snowflake connector (registry + package validation + mirror-ingest readiness)
+- [x] BigQuery connector (registry + package validation + mirror-ingest readiness)
+- [x] Stream connector (Kafka/Kinesis URI registration + bounded snapshot readiness)
 - [ ] Document connector (PDF/DOCX/text) with citation-grade retrieval
+- [x] Document ingestion into semantic evidence table (`datada_documents`)
 
 #### C. Truth, quality, and explainability
 
@@ -234,8 +247,8 @@ Overall program completion toward target vision: **54%**
 - [x] Replay consistency checks
 - [x] Confidence scoring tied to audit quality
 - [x] Full regression suite rerun after autonomy + connection-routing changes
-- [ ] Multi-plan contradiction resolution with confidence decomposition per hypothesis
-- [ ] Cross-source truth checks (source-of-truth SQL/warehouse parity)
+- [x] Multi-plan contradiction resolution with confidence decomposition per hypothesis
+- [x] Cross-source truth checks (source-of-truth SQL/warehouse parity)
 
 #### D. Product UX
 
@@ -243,18 +256,26 @@ Overall program completion toward target vision: **54%**
 - [x] Technical details panel with SQL and trace
 - [x] Storyteller mode support
 - [x] Runtime choice (auto/local/openai/deterministic)
-- [ ] Rich visual diagnostics graph (agent-to-agent artifacts)
-- [ ] Guided correction UX (one-click apply/rollback suggestion)
-- [ ] Enterprise-grade dashboards for trust metrics and drift
+- [x] Rich visual diagnostics graph (agent-to-agent artifacts)
+- [x] Guided correction UX (one-click apply/rollback suggestion)
+- [x] Enterprise-grade dashboards for trust metrics and drift
 
 #### E. Enterprise readiness
 
 - [x] Logical multi-connection routing with deterministic default selection
 - [ ] RBAC + SSO + tenant isolation
 - [ ] Durable distributed session/memory backends
-- [ ] Async job orchestration and queueing
-- [ ] Cost controls and query budgets per tenant
+- [x] Async job orchestration and queueing
+- [x] Cost controls and query budgets per tenant
 - [ ] SLA/SLO observability and incident hooks
+
+## What remains to reach full enterprise target
+
+- SSO/OIDC integration and formal tenant RBAC policy store
+- Distributed shared session/memory backend (Redis/Postgres) for multi-node horizontal scale
+- Native pushdown connectors (Snowflake/BigQuery/Postgres) without DuckDB mirror step
+- Citation-grade RAG retrieval over documents with source spans in final answers
+- Incident hooks (PagerDuty/Slack/Webhook) and SLO burn-rate alerts
 
 ## Repo Documentation Policy
 

@@ -21,6 +21,7 @@ from haikugraph.io.smart_ingest import (
     smart_ingest_excel_to_duckdb,
     format_smart_ingestion_summary,
 )
+from haikugraph.io.document_ingest import ingest_documents_to_duckdb
 from haikugraph.io.profile import format_profile_summary, profile_database
 from haikugraph.llm.plan_generator import generate_plan
 from haikugraph.planning.ambiguity import (
@@ -174,6 +175,39 @@ def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
 def smart_ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
     """Backward-compatible alias for ingest (same pipeline)."""
     _run_unified_ingest(data_dir, db_path, sheet, force)
+
+
+@main.command("ingest-docs")
+@click.option(
+    "--docs-dir",
+    default="./data",
+    type=click.Path(file_okay=False, dir_okay=True),
+    help="Directory containing document files (.txt/.md/.pdf/.docx).",
+)
+@click.option(
+    "--db-path",
+    default="./data/haikugraph.db",
+    type=click.Path(),
+    help="Target DuckDB path (default: ./data/haikugraph.db).",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="If set, clears existing datada_documents before ingesting.",
+)
+def ingest_docs(docs_dir: str, db_path: str, force: bool):
+    """Ingest text-heavy documents into datada_documents for evidence retrieval."""
+    result = ingest_documents_to_duckdb(
+        docs_dir=Path(docs_dir),
+        db_path=Path(db_path),
+        force=force,
+    )
+    if result.get("success"):
+        click.echo(f"✅ {result.get('message')}")
+    else:
+        click.echo(f"❌ {result.get('message')}", err=True)
+        raise click.Abort()
 
 
 @main.command("use-db")

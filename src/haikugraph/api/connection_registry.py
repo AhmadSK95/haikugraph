@@ -9,6 +9,7 @@ The registry is persisted as JSON to keep configuration explicit and portable.
 from __future__ import annotations
 
 import json
+import importlib.util
 import re
 import threading
 from datetime import datetime
@@ -19,6 +20,7 @@ import duckdb
 
 
 _ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,64}$")
+_SUPPORTED_KINDS = {"duckdb", "postgres", "snowflake", "bigquery", "stream", "documents"}
 
 
 class ConnectionRegistry:
@@ -60,13 +62,20 @@ class ConnectionRegistry:
     ) -> dict[str, Any]:
         cid = self._validate_id(connection_id)
         clean_kind = kind.strip().lower() or "duckdb"
-        if clean_kind != "duckdb":
-            # Keep schema open for roadmap values but signal unsupported at runtime.
-            clean_kind = clean_kind
+        if clean_kind not in _SUPPORTED_KINDS:
+            raise ValueError(
+                f"Unsupported connection kind '{clean_kind}'. "
+                f"Supported kinds: {', '.join(sorted(_SUPPORTED_KINDS))}"
+            )
+        normalized_path = (
+            self._normalize_path(path)
+            if clean_kind in {"duckdb", "documents"}
+            else str(path or "").strip()
+        )
         return {
             "id": cid,
             "kind": clean_kind,
-            "path": self._normalize_path(path),
+            "path": normalized_path,
             "description": (description or "").strip(),
             "enabled": bool(enabled),
             "created_at": created_at or self._now(),
@@ -242,15 +251,75 @@ class ConnectionRegistry:
 
     def test(self, *, kind: str, path: str) -> tuple[bool, str]:
         clean_kind = kind.strip().lower() or "duckdb"
-        db_path = Path(self._normalize_path(path))
-        if clean_kind != "duckdb":
-            return False, f"Connection kind '{clean_kind}' is not supported yet."
-        if not db_path.exists():
-            return False, f"Database file not found at {db_path}"
-        try:
-            conn = duckdb.connect(str(db_path), read_only=True)
-            conn.execute("SELECT 1").fetchone()
-            conn.close()
-            return True, f"Connected successfully to {db_path}"
-        except Exception as exc:
-            return False, f"Connection failed for {db_path}: {exc}"
+        if clean_kind not in _SUPPORTED_KINDS:
+            return False, f"Unsupported connection kind '{clean_kind}'."
+
+        if clean_kind == "duckdb":
+            db_path = Path(self._normalize_path(path))
+            if not db_path.exists():
+                return False, f"Database file not found at {db_path}"
+            try:
+                conn = duckdb.connect(str(db_path), read_only=True)
+                conn.execute("SELECT 1").fetchone()
+                conn.close()
+                return True, f"Connected successfully to {db_path}"
+            except Exception as exc:
+                return False, f"Connection failed for {db_path}: {exc}"
+
+        if clean_kind == "postgres":
+            raw = (path or "").strip()
+            if not raw.startswith(("postgres://", "postgresql://")):
+                return (
+                    False,
+                    "Postgres connection expects a DSN like postgresql://user:pass@host:5432/db",
+                )
+            if importlib.util.find_spec("psycopg") is None:
+                return False, "Install psycopg to test Postgres connections."
+            try:
+                import psycopg  # type: ignore
+
+                with psycopg.connect(raw, connect_timeout=3) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                        cur.fetchone()
+                return True, "Connected successfully to Postgres."
+            except Exception as exc:
+                return False, f"Postgres connection failed: {exc}"
+
+        if clean_kind == "snowflake":
+            if importlib.util.find_spec("snowflake.connector") is None:
+                return (
+                    False,
+                    "Install snowflake-connector-python to test Snowflake connections.",
+                )
+            return (
+                True,
+                "Snowflake connector package found. Use connector sync workflow for mirrored ingestion.",
+            )
+
+        if clean_kind == "bigquery":
+            if importlib.util.find_spec("google.cloud.bigquery") is None:
+                return (
+                    False,
+                    "Install google-cloud-bigquery to test BigQuery connections.",
+                )
+            return (
+                True,
+                "BigQuery client package found. Use connector sync workflow for mirrored ingestion.",
+            )
+
+        if clean_kind == "stream":
+            raw = (path or "").strip().lower()
+            if raw.startswith(("kafka://", "kinesis://")):
+                return True, "Stream URI accepted. Runtime uses bounded stream snapshot ingestion."
+            return False, "Stream path must start with kafka:// or kinesis://."
+
+        if clean_kind == "documents":
+            p = Path(path).expanduser()
+            if not p.is_absolute():
+                p = (Path.cwd() / p).resolve()
+            if not p.exists():
+                return False, f"Document path not found at {p}"
+            return True, f"Document source path ready at {p}"
+
+        return False, f"Connection kind '{clean_kind}' is not supported yet."

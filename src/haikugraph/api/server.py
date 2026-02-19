@@ -2,24 +2,30 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
+import json
 import os
 import socket
 import threading
+import time
+import uuid
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from haikugraph.api.connection_registry import ConnectionRegistry
+from haikugraph.api.runtime_store import RuntimeStore
 from haikugraph.agents.contracts import AssistantQueryResponse
 from haikugraph.llm.router import DEFAULT_MODELS
 from haikugraph.poc import AgenticAnalyticsTeam, AutonomyConfig, RuntimeSelection, load_dotenv_file
+from haikugraph.poc.source_truth import run_source_truth_suite
 
 
 DEFAULT_DB_CANDIDATES = (
@@ -60,6 +66,10 @@ class QueryRequest(BaseModel):
     strict_truth: bool = Field(default=True)
     max_refinement_rounds: int = Field(default=2, ge=0, le=6)
     max_candidate_plans: int = Field(default=5, ge=1, le=12)
+    tenant_id: str | None = Field(default=None, max_length=128)
+    user_id: str | None = Field(default=None, max_length=128)
+    role: str | None = Field(default=None, max_length=32)
+    api_key: str | None = Field(default=None, max_length=512)
 
 
 class FeedbackRequest(BaseModel):
@@ -83,6 +93,168 @@ class FeedbackResponse(BaseModel):
     correction_id: str | None = None
 
 
+class CorrectionRuleInfo(BaseModel):
+    correction_id: str
+    created_at: str = ""
+    source: str = ""
+    keyword: str
+    target_table: str
+    target_metric: str
+    target_dimensions: list[str] = Field(default_factory=list)
+    notes: str = ""
+    weight: float = 1.0
+    enabled: bool = True
+
+
+class CorrectionsResponse(BaseModel):
+    db_connection_id: str
+    rules: list[CorrectionRuleInfo] = Field(default_factory=list)
+
+
+class CorrectionToggleRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    correction_id: str = Field(..., min_length=1, max_length=128)
+    enabled: bool = True
+
+
+class CorrectionToggleResponse(BaseModel):
+    success: bool
+    message: str
+    db_connection_id: str
+    correction_id: str
+    enabled: bool
+
+
+class CorrectionRollbackRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    correction_id: str = Field(..., min_length=1, max_length=128)
+
+
+class ToolCandidateInfo(BaseModel):
+    tool_id: str
+    created_at: str = ""
+    updated_at: str = ""
+    status: str
+    source: str = ""
+    title: str = ""
+    sql_text: str = ""
+    test_sql_text: str = ""
+    test_success: bool = False
+    test_message: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolCandidatesResponse(BaseModel):
+    db_connection_id: str
+    tools: list[ToolCandidateInfo] = Field(default_factory=list)
+
+
+class ToolCandidateActionRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    tool_id: str = Field(..., min_length=1, max_length=128)
+    reason: str = Field(default="", max_length=280)
+
+
+class ToolCandidateActionResponse(BaseModel):
+    success: bool
+    message: str
+    db_connection_id: str
+    tool_id: str
+    status: str = ""
+
+
+class TrustModeMetric(BaseModel):
+    mode: str
+    runs: int
+    success_rate: float
+    avg_confidence: float
+    avg_execution_ms: float
+
+
+class TrustFailureSample(BaseModel):
+    created_at: str
+    connection_id: str
+    llm_mode: str
+    goal: str = ""
+    warning_terms: list[str] = Field(default_factory=list)
+
+
+class TrustDashboardResponse(BaseModel):
+    generated_at: str
+    tenant_id: str
+    window_hours: int
+    runs: int
+    success_runs: int
+    success_rate: float
+    avg_confidence: float
+    avg_execution_ms: float
+    p95_execution_ms: float
+    total_warnings: int
+    by_mode: list[TrustModeMetric] = Field(default_factory=list)
+    recent_failures: list[TrustFailureSample] = Field(default_factory=list)
+
+
+class AsyncQueryRequest(QueryRequest):
+    priority: str = Field(default="normal", max_length=24)
+
+
+class AsyncQueryAccepted(BaseModel):
+    success: bool
+    message: str
+    job_id: str
+    status: str
+    db_connection_id: str
+    session_id: str
+    tenant_id: str
+
+
+class AsyncJobStatusResponse(BaseModel):
+    success: bool
+    job_id: str
+    status: str
+    db_connection_id: str
+    session_id: str
+    tenant_id: str
+    runtime_ms: float = 0.0
+    response: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class SessionClearRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    session_id: str = Field(..., min_length=1, max_length=128)
+    tenant_id: str | None = Field(default=None, max_length=128)
+
+
+class SourceTruthCaseResult(BaseModel):
+    case_id: str
+    question: str
+    note: str = ""
+    status: str
+    reason: str = ""
+    exact_match: bool
+    latency_ms: float
+    expected_sql: str
+    actual_sql: str
+    expected_cols: list[str] = Field(default_factory=list)
+    actual_cols: list[str] = Field(default_factory=list)
+    expected_rows: list[Any] = Field(default_factory=list)
+    actual_rows: list[Any] = Field(default_factory=list)
+
+
+class SourceTruthResponse(BaseModel):
+    db_connection_id: str
+    mode_requested: str
+    mode_actual: str
+    provider: str = ""
+    cases: int
+    evaluated_cases: int
+    exact_matches: int
+    accuracy_pct: float
+    avg_latency_ms: float
+    runs: list[SourceTruthCaseResult] = Field(default_factory=list)
+
+
 class ConnectionInfo(BaseModel):
     id: str
     kind: str
@@ -97,6 +269,17 @@ class ConnectionInfo(BaseModel):
 class ConnectionsResponse(BaseModel):
     default_connection_id: str
     connections: list[ConnectionInfo] = Field(default_factory=list)
+
+
+class ConnectorCapability(BaseModel):
+    kind: str
+    query_routing_supported: bool
+    mirror_ingest_supported: bool
+    notes: str = ""
+
+
+class ConnectorsResponse(BaseModel):
+    connectors: list[ConnectorCapability] = Field(default_factory=list)
 
 
 class ConnectionUpsertRequest(BaseModel):
@@ -150,6 +333,7 @@ class HealthResponse(BaseModel):
     default_connection_id: str = "default"
     available_connections: int = 1
     active_connection_kind: str = "duckdb"
+    runtime_store_path: str = ""
     version: str = "2.0.0-poc"
 
 
@@ -169,20 +353,26 @@ class ArchitectureResponse(BaseModel):
         "1. Chief Analyst Agent - Supervises team and decomposes mission",
         "2. Connection Router - Resolves db_connection_id to a governed data source",
         "3. Memory Agent - Recalls similar runs + learned correction rules",
-        "4. Intake Agent - Clarifies intent, metrics, filters, time scope",
-        "5. Semantic Retrieval Agent - Maps query to semantic marts",
-        "6. Planning Agent - Produces task graph and metric definitions",
-        "7. Specialist Agents - Transactions, Customers, Revenue, Risk",
-        "8. Query Engineer + Execution Agents - Compile and run SQL",
-        "9. Audit Agent - Validates consistency, grounding, replay checks",
-        "10. Autonomy Agent - Evaluates candidate plans and self-corrects",
-        "11. Narrative + Visualization Agents - Final insight and chart spec",
+        "4. Blackboard - Shares artifacts between agents with explicit producer/consumer edges",
+        "5. Intake Agent - Clarifies intent, metrics, filters, time scope",
+        "6. Semantic Retrieval Agent - Maps query to semantic marts",
+        "7. Planning Agent - Produces task graph and metric definitions",
+        "8. Specialist Agents - Transactions, Customers, Revenue, Risk",
+        "9. Query Engineer + Execution Agents - Compile and run SQL",
+        "10. Audit Agent - Validates consistency, grounding, replay checks",
+        "11. Autonomy Agent - Evaluates hypotheses with confidence decomposition + contradiction resolution",
+        "12. Toolsmith Agent - Captures probe intelligence into staged/promoted reusable tools",
+        "13. Narrative + Visualization Agents - Final insight and chart spec",
+        "14. Trust Agent - Records reliability telemetry and drift indicators",
     ]
     guardrails: list[str] = [
         "Read-only SQL only",
         "Blocked destructive keywords",
         "Bounded result sizes",
         "Bounded autonomy controls (candidate/iteration caps)",
+        "Tenant-aware session isolation",
+        "Per-tenant query budgets",
+        "Role-gated mutation endpoints (analyst/admin)",
         "Structured evidence packets",
         "Per-agent trace for every answer",
         "Runtime mode transparency (auto/local/openai/deterministic)",
@@ -391,14 +581,106 @@ def _get_connection_registry_path() -> Path:
     return Path("./data/connections.json")
 
 
+def _get_runtime_store_path() -> Path:
+    env_path = os.environ.get("HG_RUNTIME_STORE_PATH")
+    if env_path:
+        return Path(env_path).expanduser()
+    return Path("./data/runtime_store.duckdb")
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, str(default)))
+    except Exception:
+        return int(default)
+
+
+def _load_api_key_policies() -> dict[str, dict[str, str]]:
+    raw = os.environ.get("HG_API_KEYS_JSON", "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    out: dict[str, dict[str, str]] = {}
+    for key, cfg in parsed.items():
+        token = str(key or "").strip()
+        if not token:
+            continue
+        if isinstance(cfg, str):
+            out[token] = {"tenant_id": cfg.strip() or "public", "role": "analyst"}
+            continue
+        if isinstance(cfg, dict):
+            tenant_id = str(cfg.get("tenant_id") or cfg.get("tenant") or "public").strip() or "public"
+            role = str(cfg.get("role") or "analyst").strip().lower() or "analyst"
+            out[token] = {"tenant_id": tenant_id, "role": role}
+    return out
+
+
+def _resolve_access_context(
+    app: FastAPI,
+    *,
+    tenant_id: str | None,
+    role: str | None,
+    api_key_body: str | None,
+    api_key_header: str | None,
+) -> dict[str, str]:
+    keys = app.state.api_key_policies
+    require_key = bool(app.state.require_api_key)
+    provided_key = (api_key_body or api_key_header or "").strip()
+
+    key_policy = None
+    if keys:
+        if not provided_key:
+            raise HTTPException(status_code=401, detail="Missing API key.")
+        key_policy = keys.get(provided_key)
+        if not key_policy:
+            raise HTTPException(status_code=401, detail="Invalid API key.")
+    elif require_key and not provided_key:
+        raise HTTPException(status_code=401, detail="Missing API key.")
+
+    resolved_tenant = (
+        (tenant_id or "").strip()
+        or (key_policy or {}).get("tenant_id", "")
+        or "public"
+    )
+    resolved_role = (
+        (role or "").strip().lower()
+        or (key_policy or {}).get("role", "")
+        or "analyst"
+    )
+    if resolved_role not in {"viewer", "analyst", "admin"}:
+        resolved_role = "analyst"
+    return {"tenant_id": resolved_tenant, "role": resolved_role}
+
+
 def _connection_info_from_entry(entry: dict[str, Any], *, is_default: bool | None = None) -> ConnectionInfo:
-    path = Path(str(entry.get("path") or ""))
-    exists = path.exists()
-    size = path.stat().st_size if exists and path.is_file() else 0
+    kind = str(entry.get("kind") or "duckdb").lower()
+    raw_path = str(entry.get("path") or "")
+    if kind in {"duckdb", "documents"}:
+        path = Path(raw_path)
+        exists = path.exists()
+        size = path.stat().st_size if exists and path.is_file() else 0
+        display_path = str(path)
+    else:
+        exists = bool(raw_path.strip())
+        size = 0
+        display_path = raw_path
     return ConnectionInfo(
         id=str(entry.get("id") or ""),
-        kind=str(entry.get("kind") or "duckdb"),
-        path=str(path),
+        kind=kind,
+        path=display_path,
         description=str(entry.get("description") or ""),
         enabled=bool(entry.get("enabled", True)),
         is_default=bool(entry.get("is_default")) if is_default is None else bool(is_default),
@@ -427,8 +709,8 @@ def _resolve_team_for_connection(
         raise HTTPException(
             status_code=501,
             detail=(
-                f"Connection kind '{kind}' is not supported yet by runtime. "
-                "Roadmap kinds are allowed in registry but query routing currently supports duckdb only."
+                f"Connection kind '{kind}' is registered but not directly query-routable yet. "
+                "Use mirrored ingestion into a DuckDB serving layer for bounded-autonomy runtime execution."
             ),
         )
 
@@ -463,6 +745,142 @@ def _resolve_team_for_connection(
         app.state.team = team
 
     return team, db_path, entry
+
+
+def _role_rank(role: str) -> int:
+    clean = (role or "").strip().lower()
+    if clean == "admin":
+        return 3
+    if clean == "analyst":
+        return 2
+    if clean == "viewer":
+        return 1
+    return 0
+
+
+def _require_min_role(role: str, minimum: str) -> None:
+    if _role_rank(role) < _role_rank(minimum):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Operation requires {minimum} role.",
+        )
+
+
+def _tenant_session_scope(tenant_id: str, connection_id: str, session_id: str) -> str:
+    return f"{tenant_id}:{connection_id}:{session_id}"
+
+
+def _execute_query_request(
+    app: FastAPI,
+    request: QueryRequest,
+    *,
+    tenant_id: str,
+    role: str,
+) -> AssistantQueryResponse:
+    del role  # role gates are enforced at route layer.
+
+    budget = app.state.runtime_store.consume_budget(
+        tenant_id=tenant_id,
+        limit_per_hour=int(app.state.query_budget_per_hour),
+    )
+    if not budget.get("allowed", False):
+        raise HTTPException(status_code=429, detail=str(budget.get("message") or "Query budget exceeded."))
+
+    team, db_path, connection_entry = _resolve_team_for_connection(
+        app,
+        request.db_connection_id,
+    )
+
+    if request.local_model:
+        state = _get_local_models_state()
+        installed = {opt.name.lower() for opt in state.options if opt.installed}
+        if request.local_model.lower() in installed:
+            _activate_local_models(request.local_model, request.local_model)
+        elif request.llm_mode in {LLMMode.LOCAL, LLMMode.AUTO}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Local model '{request.local_model}' is not installed. Download it first.",
+            )
+
+    runtime = _resolve_runtime(request.llm_mode)
+    autonomy = AutonomyConfig(
+        mode=request.autonomy_mode.strip().lower() or "bounded",
+        auto_correction=bool(request.auto_correction),
+        strict_truth=bool(request.strict_truth),
+        max_refinement_rounds=int(request.max_refinement_rounds),
+        max_candidate_plans=int(request.max_candidate_plans),
+    )
+    session_id = (request.session_id or "default").strip()[:128] or "default"
+    connection_id = str(connection_entry.get("id") or "default")
+    session_scope = _tenant_session_scope(tenant_id, connection_id, session_id)
+
+    history = app.state.runtime_store.load_session_turns(session_scope, limit=20)
+
+    started = time.perf_counter()
+    response = team.run(
+        request.goal,
+        runtime,
+        conversation_context=history,
+        storyteller_mode=request.storyteller_mode,
+        autonomy=autonomy,
+    )
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+
+    app.state.runtime_store.append_session_turn(
+        session_scope=session_scope,
+        connection_id=connection_id,
+        session_id=session_id,
+        goal=request.goal,
+        answer_markdown=response.answer_markdown,
+        success=bool(response.success),
+        sql=response.sql,
+        confidence_score=float(response.confidence_score or 0.0),
+        metadata={
+            "trace_id": response.trace_id,
+            "user_id": request.user_id or "",
+            "tenant_id": tenant_id,
+            "role": request.role or "",
+        },
+    )
+    conversation_turns = len(history) + 1
+
+    failed_checks = [c for c in (response.sanity_checks or []) if not bool(c.passed)]
+    warning_terms = (
+        ((response.data_quality or {}).get("grounding") or {}).get("goal_term_misses")
+        or []
+    )
+    app.state.runtime_store.record_run_metric(
+        tenant_id=tenant_id,
+        connection_id=connection_id,
+        session_scope=session_scope,
+        success=bool(response.success),
+        confidence_score=float(response.confidence_score or 0.0),
+        execution_ms=float(response.execution_time_ms or elapsed_ms),
+        llm_mode=str(runtime.mode or "deterministic"),
+        provider=str(runtime.provider or "none"),
+        row_count=int(response.row_count or 0),
+        warning_count=len(failed_checks),
+        metadata={
+            "goal": request.goal,
+            "trace_id": response.trace_id,
+            "warning_terms": warning_terms if isinstance(warning_terms, list) else [],
+        },
+    )
+
+    response.runtime = {
+        **(response.runtime or {}),
+        "session_id": session_id,
+        "session_scope": session_scope,
+        "db_connection_id": connection_id,
+        "db_path": str(db_path),
+        "db_kind": str(connection_entry.get("kind") or "duckdb"),
+        "conversation_turns": conversation_turns,
+        "tenant_id": tenant_id,
+        "role": request.role or "",
+        "budget_remaining": int(budget.get("remaining") or 0),
+        "budget_limit_per_hour": int(budget.get("limit_per_hour") or 0),
+    }
+    return response
 
 
 def _close_all_teams(app: FastAPI) -> None:
@@ -670,12 +1088,27 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         }
     }
     app.state.teams_lock = threading.RLock()
-    app.state.sessions: dict[str, list[dict[str, Any]]] = {}
-    app.state.sessions_lock = threading.RLock()
+    runtime_store_path = (
+        _get_runtime_store_path()
+        if os.environ.get("HG_RUNTIME_STORE_PATH")
+        else app.state.db_path.with_name(f"{app.state.db_path.stem}_runtime.duckdb")
+    )
+    app.state.runtime_store = RuntimeStore(runtime_store_path)
+    app.state.query_budget_per_hour = max(1, _env_int("HG_QUERY_BUDGET_PER_HOUR", 300))
+    app.state.require_api_key = _env_bool("HG_REQUIRE_API_KEY", False)
+    app.state.api_key_policies = _load_api_key_policies()
+    app.state.async_executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=max(1, _env_int("HG_ASYNC_WORKERS", 4)),
+        thread_name_prefix="datada-async",
+    )
 
     @app.on_event("shutdown")
     async def shutdown_event() -> None:
         _close_all_teams(app)
+        try:
+            app.state.async_executor.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
 
     _register_routes(app)
     return app
@@ -702,6 +1135,7 @@ def _register_routes(app: FastAPI) -> None:
                 default_connection_id="default",
                 available_connections=0,
                 active_connection_kind="duckdb",
+                runtime_store_path=str(app.state.runtime_store.db_path),
             )
 
         db_path = Path(str(default_entry.get("path") or app.state.db_path))
@@ -727,6 +1161,7 @@ def _register_routes(app: FastAPI) -> None:
             default_connection_id=str(listed.get("default_connection_id") or "default"),
             available_connections=len(listed.get("connections", [])),
             active_connection_kind=str(default_entry.get("kind") or "duckdb"),
+            runtime_store_path=str(app.state.runtime_store.db_path),
         )
 
     @app.get("/api/assistant/connections", response_model=ConnectionsResponse)
@@ -739,6 +1174,49 @@ def _register_routes(app: FastAPI) -> None:
         return ConnectionsResponse(
             default_connection_id=str(listed.get("default_connection_id") or "default"),
             connections=rows,
+        )
+
+    @app.get("/api/assistant/connectors", response_model=ConnectorsResponse)
+    async def connectors() -> ConnectorsResponse:
+        return ConnectorsResponse(
+            connectors=[
+                ConnectorCapability(
+                    kind="duckdb",
+                    query_routing_supported=True,
+                    mirror_ingest_supported=True,
+                    notes="Native runtime path. Also used as mirrored serving layer for other sources.",
+                ),
+                ConnectorCapability(
+                    kind="postgres",
+                    query_routing_supported=False,
+                    mirror_ingest_supported=True,
+                    notes="Use connector sync into DuckDB mirror for bounded-autonomy execution.",
+                ),
+                ConnectorCapability(
+                    kind="snowflake",
+                    query_routing_supported=False,
+                    mirror_ingest_supported=True,
+                    notes="Connector metadata + mirror workflow supported; direct pushdown is roadmap.",
+                ),
+                ConnectorCapability(
+                    kind="bigquery",
+                    query_routing_supported=False,
+                    mirror_ingest_supported=True,
+                    notes="Connector metadata + mirror workflow supported; direct pushdown is roadmap.",
+                ),
+                ConnectorCapability(
+                    kind="stream",
+                    query_routing_supported=False,
+                    mirror_ingest_supported=True,
+                    notes="Bounded stream snapshots (Kafka/Kinesis URI registration).",
+                ),
+                ConnectorCapability(
+                    kind="documents",
+                    query_routing_supported=False,
+                    mirror_ingest_supported=True,
+                    notes="Text-rich documents can be ingested into semantic evidence tables.",
+                ),
+            ]
         )
 
     @app.post("/api/assistant/connections/upsert", response_model=ConnectionActionResponse)
@@ -942,6 +1420,13 @@ def _register_routes(app: FastAPI) -> None:
                 outputs=["memory hints", "learned correction rules"],
             ),
             AgentInfo(
+                name="BlackboardAgent",
+                role="Artifact exchange bus",
+                description="Publishes and routes structured artifacts between agents with transparent producer/consumer edges",
+                inputs=["agent outputs"],
+                outputs=["shared artifacts", "diagnostic flow graph"],
+            ),
+            AgentInfo(
                 name="IntakeAgent",
                 role="Intent parser",
                 description="Extracts intent, metric, dimensions, filters, time scope",
@@ -991,6 +1476,20 @@ def _register_routes(app: FastAPI) -> None:
                 outputs=["selected plan", "correction rationale", "probe findings"],
             ),
             AgentInfo(
+                name="ToolsmithAgent",
+                role="Procedural tool lifecycle",
+                description="Turns successful probe SQL into governed candidates with stage/promote/rollback states",
+                inputs=["probe findings", "policy gates"],
+                outputs=["tool candidates", "staged/promoted tools"],
+            ),
+            AgentInfo(
+                name="TrustAgent",
+                role="Reliability telemetry",
+                description="Aggregates run quality, confidence, latency, and drift metrics for enterprise trust dashboard",
+                inputs=["run metrics", "audit outputs"],
+                outputs=["trust dashboard", "failure samples"],
+            ),
+            AgentInfo(
                 name="NarrativeAgent",
                 role="Answer writer",
                 description="Writes final business answer",
@@ -1008,74 +1507,39 @@ def _register_routes(app: FastAPI) -> None:
         return ArchitectureResponse(agents=agents)
 
     @app.post("/api/assistant/query", response_model=AssistantQueryResponse)
-    async def query(request: QueryRequest) -> AssistantQueryResponse:
-        team, db_path, connection_entry = _resolve_team_for_connection(
+    async def query(
+        request: QueryRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> AssistantQueryResponse:
+        access = _resolve_access_context(
             app,
-            request.db_connection_id,
+            tenant_id=request.tenant_id,
+            role=request.role,
+            api_key_body=request.api_key,
+            api_key_header=x_datada_api_key,
         )
-
-        if request.local_model:
-            state = _get_local_models_state()
-            installed = {opt.name.lower() for opt in state.options if opt.installed}
-            if request.local_model.lower() in installed:
-                _activate_local_models(request.local_model, request.local_model)
-            elif request.llm_mode in {LLMMode.LOCAL, LLMMode.AUTO}:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Local model '{request.local_model}' is not installed. Download it first.",
-                )
-
-        runtime = _resolve_runtime(request.llm_mode)
-        autonomy = AutonomyConfig(
-            mode=request.autonomy_mode.strip().lower() or "bounded",
-            auto_correction=bool(request.auto_correction),
-            strict_truth=bool(request.strict_truth),
-            max_refinement_rounds=int(request.max_refinement_rounds),
-            max_candidate_plans=int(request.max_candidate_plans),
+        request.tenant_id = access["tenant_id"]
+        request.role = access["role"]
+        return _execute_query_request(
+            app,
+            request,
+            tenant_id=access["tenant_id"],
+            role=access["role"],
         )
-        session_id = (request.session_id or "default").strip()[:128] or "default"
-        connection_id = str(connection_entry.get("id") or "default")
-        session_scope = f"{connection_id}:{session_id}"
-
-        with app.state.sessions_lock:
-            history = list(app.state.sessions.get(session_scope, []))
-
-        response = team.run(
-            request.goal,
-            runtime,
-            conversation_context=history,
-            storyteller_mode=request.storyteller_mode,
-            autonomy=autonomy,
-        )
-
-        turn = {
-            "goal": request.goal,
-            "user_goal": request.goal,
-            "answer_markdown": response.answer_markdown,
-            "success": response.success,
-            "sql": response.sql,
-            "confidence_score": response.confidence_score,
-        }
-        with app.state.sessions_lock:
-            turns = app.state.sessions.setdefault(session_scope, [])
-            turns.append(turn)
-            if len(turns) > 20:
-                del turns[:-20]
-            conversation_turns = len(turns)
-
-        response.runtime = {
-            **(response.runtime or {}),
-            "session_id": session_id,
-            "session_scope": session_scope,
-            "db_connection_id": connection_id,
-            "db_path": str(db_path),
-            "db_kind": str(connection_entry.get("kind") or "duckdb"),
-            "conversation_turns": conversation_turns,
-        }
-        return response
 
     @app.post("/api/assistant/feedback", response_model=FeedbackResponse)
-    async def feedback(request: FeedbackRequest) -> FeedbackResponse:
+    async def feedback(
+        request: FeedbackRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> FeedbackResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=None,
+            role=None,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+        )
+        _require_min_role(access["role"], "analyst")
         team, _, connection_entry = _resolve_team_for_connection(
             app,
             request.db_connection_id,
@@ -1105,6 +1569,326 @@ def _register_routes(app: FastAPI) -> None:
             ),
             feedback_id=saved.get("feedback_id"),
             correction_id=saved.get("correction_id") or None,
+        )
+
+    @app.get("/api/assistant/corrections", response_model=CorrectionsResponse)
+    async def list_corrections(
+        db_connection_id: str = "default",
+        include_disabled: bool = True,
+        limit: int = 120,
+    ) -> CorrectionsResponse:
+        team, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        rows = team.list_corrections(limit=limit, include_disabled=include_disabled)
+        rules = [CorrectionRuleInfo(**row) for row in rows]
+        return CorrectionsResponse(
+            db_connection_id=str(connection_entry.get("id") or db_connection_id),
+            rules=rules,
+        )
+
+    @app.post("/api/assistant/corrections/toggle", response_model=CorrectionToggleResponse)
+    async def toggle_correction(
+        request: CorrectionToggleRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> CorrectionToggleResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=None,
+            role=None,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+        )
+        _require_min_role(access["role"], "analyst")
+        team, _, connection_entry = _resolve_team_for_connection(
+            app,
+            request.db_connection_id,
+        )
+        ok = team.set_correction_enabled(request.correction_id, request.enabled)
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown correction_id '{request.correction_id}'.",
+            )
+        state = "enabled" if request.enabled else "disabled"
+        return CorrectionToggleResponse(
+            success=True,
+            message=f"Correction rule {request.correction_id} {state}.",
+            db_connection_id=str(connection_entry.get("id") or request.db_connection_id),
+            correction_id=request.correction_id,
+            enabled=request.enabled,
+        )
+
+    @app.post("/api/assistant/corrections/rollback", response_model=CorrectionToggleResponse)
+    async def rollback_correction(
+        request: CorrectionRollbackRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> CorrectionToggleResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=None,
+            role=None,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+        )
+        _require_min_role(access["role"], "analyst")
+        team, _, connection_entry = _resolve_team_for_connection(
+            app,
+            request.db_connection_id,
+        )
+        result = team.rollback_correction(request.correction_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result.get("message") or "Rollback failed."))
+        return CorrectionToggleResponse(
+            success=True,
+            message=str(result.get("message") or "Correction rollback applied."),
+            db_connection_id=str(connection_entry.get("id") or request.db_connection_id),
+            correction_id=request.correction_id,
+            enabled=bool(result.get("enabled", True)),
+        )
+
+    @app.get("/api/assistant/toolsmith", response_model=ToolCandidatesResponse)
+    async def list_toolsmith(
+        db_connection_id: str = "default",
+        status: str | None = None,
+        limit: int = 120,
+    ) -> ToolCandidatesResponse:
+        team, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        rows = team.list_tool_candidates(status=status, limit=limit)
+        tools = [ToolCandidateInfo(**row) for row in rows]
+        return ToolCandidatesResponse(
+            db_connection_id=str(connection_entry.get("id") or db_connection_id),
+            tools=tools,
+        )
+
+    @app.post("/api/assistant/toolsmith/stage", response_model=ToolCandidateActionResponse)
+    async def stage_toolsmith(
+        request: ToolCandidateActionRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> ToolCandidateActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=None,
+            role=None,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+        )
+        _require_min_role(access["role"], "analyst")
+        team, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        result = team.stage_tool_candidate(request.tool_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result.get("message") or "Stage failed."))
+        return ToolCandidateActionResponse(
+            success=True,
+            message=str(result.get("message") or ""),
+            db_connection_id=str(connection_entry.get("id") or request.db_connection_id),
+            tool_id=request.tool_id,
+            status="staged",
+        )
+
+    @app.post("/api/assistant/toolsmith/promote", response_model=ToolCandidateActionResponse)
+    async def promote_toolsmith(
+        request: ToolCandidateActionRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> ToolCandidateActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=None,
+            role=None,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        result = team.promote_tool_candidate(request.tool_id)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result.get("message") or "Promote failed."))
+        return ToolCandidateActionResponse(
+            success=True,
+            message=str(result.get("message") or ""),
+            db_connection_id=str(connection_entry.get("id") or request.db_connection_id),
+            tool_id=request.tool_id,
+            status="promoted",
+        )
+
+    @app.post("/api/assistant/toolsmith/rollback", response_model=ToolCandidateActionResponse)
+    async def rollback_toolsmith(
+        request: ToolCandidateActionRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> ToolCandidateActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=None,
+            role=None,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        result = team.rollback_tool_candidate(request.tool_id, reason=request.reason)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result.get("message") or "Rollback failed."))
+        return ToolCandidateActionResponse(
+            success=True,
+            message=str(result.get("message") or ""),
+            db_connection_id=str(connection_entry.get("id") or request.db_connection_id),
+            tool_id=request.tool_id,
+            status="rolled_back",
+        )
+
+    @app.get("/api/assistant/trust/dashboard", response_model=TrustDashboardResponse)
+    async def trust_dashboard(
+        tenant_id: str | None = None,
+        hours: int = 168,
+    ) -> TrustDashboardResponse:
+        payload = app.state.runtime_store.trust_dashboard(tenant_id=tenant_id, hours=hours)
+        return TrustDashboardResponse(
+            generated_at=str(payload.get("generated_at") or ""),
+            tenant_id=str(payload.get("tenant_id") or "all"),
+            window_hours=int(payload.get("window_hours") or 0),
+            runs=int(payload.get("runs") or 0),
+            success_runs=int(payload.get("success_runs") or 0),
+            success_rate=float(payload.get("success_rate") or 0.0),
+            avg_confidence=float(payload.get("avg_confidence") or 0.0),
+            avg_execution_ms=float(payload.get("avg_execution_ms") or 0.0),
+            p95_execution_ms=float(payload.get("p95_execution_ms") or 0.0),
+            total_warnings=int(payload.get("total_warnings") or 0),
+            by_mode=[TrustModeMetric(**row) for row in payload.get("by_mode", [])],
+            recent_failures=[TrustFailureSample(**row) for row in payload.get("recent_failures", [])],
+        )
+
+    @app.get("/api/assistant/source-truth/check", response_model=SourceTruthResponse)
+    async def source_truth_check(
+        db_connection_id: str = "default",
+        llm_mode: LLMMode = LLMMode.DETERMINISTIC,
+        local_model: str | None = None,
+        max_cases: int = 6,
+    ) -> SourceTruthResponse:
+        team, db_path, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        if local_model:
+            state = _get_local_models_state()
+            installed = {opt.name.lower() for opt in state.options if opt.installed}
+            if local_model.lower() in installed:
+                _activate_local_models(local_model, local_model)
+        runtime = _resolve_runtime(llm_mode)
+        payload = run_source_truth_suite(
+            team=team,
+            db_path=db_path,
+            runtime=runtime,
+            max_cases=max_cases,
+        )
+        return SourceTruthResponse(
+            db_connection_id=str(connection_entry.get("id") or db_connection_id),
+            mode_requested=llm_mode.value,
+            mode_actual=str(runtime.mode),
+            provider=str(runtime.provider or ""),
+            cases=int(payload.get("cases") or 0),
+            evaluated_cases=int(payload.get("evaluated_cases") or 0),
+            exact_matches=int(payload.get("exact_matches") or 0),
+            accuracy_pct=float(payload.get("accuracy_pct") or 0.0),
+            avg_latency_ms=float(payload.get("avg_latency_ms") or 0.0),
+            runs=[SourceTruthCaseResult(**row) for row in payload.get("runs", [])],
+        )
+
+    @app.post("/api/assistant/query/async", response_model=AsyncQueryAccepted)
+    async def query_async(
+        request: AsyncQueryRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> AsyncQueryAccepted:
+        access = _resolve_access_context(
+            app,
+            tenant_id=request.tenant_id,
+            role=request.role,
+            api_key_body=request.api_key,
+            api_key_header=x_datada_api_key,
+        )
+        request.tenant_id = access["tenant_id"]
+        request.role = access["role"]
+
+        connection_id = (request.db_connection_id or "default").strip() or "default"
+        session_id = (request.session_id or "default").strip()[:128] or "default"
+        job_id = app.state.runtime_store.create_async_job(
+            tenant_id=access["tenant_id"],
+            connection_id=connection_id,
+            session_id=session_id,
+            request_payload=request.model_dump(),
+        )
+        payload = QueryRequest(**request.model_dump())
+
+        def _run_job() -> None:
+            started = time.perf_counter()
+            try:
+                app.state.runtime_store.update_async_job(job_id=job_id, status="running")
+                response = _execute_query_request(
+                    app,
+                    payload,
+                    tenant_id=access["tenant_id"],
+                    role=access["role"],
+                )
+                app.state.runtime_store.update_async_job(
+                    job_id=job_id,
+                    status="completed",
+                    response_payload=response.model_dump(),
+                    runtime_ms=round((time.perf_counter() - started) * 1000, 2),
+                )
+            except Exception as exc:
+                app.state.runtime_store.update_async_job(
+                    job_id=job_id,
+                    status="failed",
+                    error_text=str(exc),
+                    runtime_ms=round((time.perf_counter() - started) * 1000, 2),
+                )
+
+        app.state.async_executor.submit(_run_job)
+        return AsyncQueryAccepted(
+            success=True,
+            message="Async query accepted.",
+            job_id=job_id,
+            status="queued",
+            db_connection_id=connection_id,
+            session_id=session_id,
+            tenant_id=access["tenant_id"],
+        )
+
+    @app.get("/api/assistant/query/async/{job_id}", response_model=AsyncJobStatusResponse)
+    async def query_async_status(job_id: str) -> AsyncJobStatusResponse:
+        row = app.state.runtime_store.get_async_job(job_id)
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Unknown async job '{job_id}'.")
+        return AsyncJobStatusResponse(
+            success=row.get("status") == "completed",
+            job_id=row["job_id"],
+            status=row["status"],
+            db_connection_id=row.get("connection_id", "default"),
+            session_id=row.get("session_id", "default"),
+            tenant_id=row.get("tenant_id", "public"),
+            runtime_ms=float(row.get("runtime_ms") or 0.0),
+            response=row.get("response") or None,
+            error=row.get("error") or None,
+        )
+
+    @app.post("/api/assistant/session/clear", response_model=ConnectionActionResponse)
+    async def clear_session(
+        request: SessionClearRequest,
+        x_datada_api_key: str | None = Header(default=None),
+    ) -> ConnectionActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=request.tenant_id,
+            role=None,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+        )
+        _require_min_role(access["role"], "viewer")
+        _, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        connection_id = str(connection_entry.get("id") or request.db_connection_id)
+        scope = _tenant_session_scope(access["tenant_id"], connection_id, request.session_id)
+        deleted = app.state.runtime_store.clear_session(scope)
+        return ConnectionActionResponse(
+            success=True,
+            message=f"Cleared {deleted} turn(s) from session '{request.session_id}'.",
+            connection=_connection_info_from_entry(
+                connection_entry,
+                is_default=connection_id == app.state.connection_registry.default_connection_id(),
+            ),
         )
 
     @app.post("/ask", response_model=LegacyAskResponse)
@@ -1877,6 +2661,76 @@ def get_ui_html() -> str:
       margin-top: 5px;
     }
 
+    .correction-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 8px;
+      max-height: 180px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .correction-item {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 7px 8px;
+      background: #0e1524;
+    }
+
+    .correction-item .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .trust-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 7px 8px;
+      background: #0e1524;
+      color: #dceaff;
+      font-size: 0.78rem;
+    }
+
+    .trust-kpis {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    .flow-wrap {
+      margin: 8px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px;
+      background: #0e1524;
+    }
+
+    .flow-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 8px;
+    }
+
+    .flow-card {
+      border: 1px solid #2c3d57;
+      border-radius: 9px;
+      padding: 7px;
+      background: #101a2c;
+      font-size: 0.76rem;
+      color: #9fb7d4;
+    }
+
+    .flow-card strong {
+      color: #d8ebff;
+      display: block;
+      margin-bottom: 3px;
+    }
+
     @media (max-width: 1020px) {
       .layout {
         grid-template-columns: 1fr;
@@ -1956,6 +2810,13 @@ def get_ui_html() -> str:
             <button class="btn ghost" id="refreshModelsBtn" type="button">Refresh Models</button>
             <button class="btn ghost" id="toggleArchBtn" type="button">View Agent Team Map</button>
           </div>
+          <div class="composer-actions">
+            <button class="btn ghost" id="refreshCorrectionsBtn" type="button">Review Corrections</button>
+            <button class="btn ghost" id="refreshTrustBtn" type="button">Trust Dashboard</button>
+            <button class="btn ghost" id="runTruthCheckBtn" type="button">Run Source Truth Check</button>
+          </div>
+          <div class="correction-list" id="correctionsList"></div>
+          <div class="correction-list" id="trustPanel"></div>
           <div class="model-catalog" id="modelCatalog"></div>
           <div class="examples" id="examples"></div>
           <div class="hint" id="statusText" style="margin-top:9px;">Ready.</div>
@@ -1987,6 +2848,7 @@ def get_ui_html() -> str:
     const STORAGE_SESSION_KEY = 'datada_session_id';
     const STORAGE_THREAD_KEY = 'datada_thread';
     const STORAGE_CONN_KEY = 'datada_connection_id';
+    const STORAGE_TENANT_KEY = 'datada_tenant_id';
 
     const els = {
       queryInput: document.getElementById('queryInput'),
@@ -1998,7 +2860,12 @@ def get_ui_html() -> str:
       connectionSelect: document.getElementById('connectionSelect'),
       refreshConnectionsBtn: document.getElementById('refreshConnectionsBtn'),
       refreshModelsBtn: document.getElementById('refreshModelsBtn'),
+      refreshCorrectionsBtn: document.getElementById('refreshCorrectionsBtn'),
+      refreshTrustBtn: document.getElementById('refreshTrustBtn'),
+      runTruthCheckBtn: document.getElementById('runTruthCheckBtn'),
       modelCatalog: document.getElementById('modelCatalog'),
+      correctionsList: document.getElementById('correctionsList'),
+      trustPanel: document.getElementById('trustPanel'),
       examples: document.getElementById('examples'),
       statusText: document.getElementById('statusText'),
       thread: document.getElementById('thread'),
@@ -2017,7 +2884,8 @@ def get_ui_html() -> str:
       sessionId: null,
       turns: [],
       architectureLoaded: false,
-      connectionId: 'default'
+      connectionId: 'default',
+      tenantId: 'public'
     };
 
     function esc(value) {
@@ -2132,24 +3000,43 @@ def get_ui_html() -> str:
       return `sess-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
     }
 
+    function safeStorageGet(key) {
+      try {
+        return localStorage.getItem(key);
+      } catch (err) {
+        return null;
+      }
+    }
+
+    function safeStorageSet(key, value) {
+      try {
+        localStorage.setItem(key, value);
+      } catch (err) {
+        // Ignore storage errors (private mode or blocked storage).
+      }
+    }
+
     function saveState() {
-      localStorage.setItem(STORAGE_SESSION_KEY, state.sessionId);
-      localStorage.setItem(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(0, 30)));
-      localStorage.setItem(STORAGE_CONN_KEY, state.connectionId || 'default');
+      safeStorageSet(STORAGE_SESSION_KEY, state.sessionId);
+      safeStorageSet(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(0, 30)));
+      safeStorageSet(STORAGE_CONN_KEY, state.connectionId || 'default');
+      safeStorageSet(STORAGE_TENANT_KEY, state.tenantId || 'public');
     }
 
     function loadState() {
-      const existingSession = localStorage.getItem(STORAGE_SESSION_KEY);
+      const existingSession = safeStorageGet(STORAGE_SESSION_KEY);
       state.sessionId = existingSession || newSessionId();
       try {
-        const raw = localStorage.getItem(STORAGE_THREAD_KEY);
+        const raw = safeStorageGet(STORAGE_THREAD_KEY);
         const parsed = raw ? JSON.parse(raw) : [];
         if (Array.isArray(parsed)) state.turns = parsed;
       } catch (err) {
         state.turns = [];
       }
-      const savedConn = localStorage.getItem(STORAGE_CONN_KEY);
+      const savedConn = safeStorageGet(STORAGE_CONN_KEY);
       state.connectionId = savedConn || 'default';
+      const savedTenant = safeStorageGet(STORAGE_TENANT_KEY);
+      state.tenantId = (savedTenant || 'public').trim() || 'public';
       updateSessionChip();
     }
 
@@ -2251,6 +3138,139 @@ def get_ui_html() -> str:
       }
     }
 
+    async function toggleCorrection(correctionId, enabled) {
+      try {
+        const response = await fetch('/api/assistant/corrections/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            db_connection_id: state.connectionId || 'default',
+            correction_id: correctionId,
+            enabled
+          })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || data.message || 'Toggle failed');
+        setStatus(data.message || 'Correction updated.');
+        await loadCorrections();
+      } catch (err) {
+        setStatus(`Correction update failed: ${err.message}`);
+      }
+    }
+
+    async function loadCorrections() {
+      try {
+        const q = new URLSearchParams({
+          db_connection_id: state.connectionId || 'default',
+          include_disabled: 'true',
+          limit: '60'
+        });
+        const data = await fetch(`/api/assistant/corrections?${q}`).then((r) => r.json());
+        const rules = Array.isArray(data.rules) ? data.rules : [];
+        if (!rules.length) {
+          els.correctionsList.innerHTML = '<div class="hint">No learned corrections yet.</div>';
+          return;
+        }
+        els.correctionsList.innerHTML = rules.map((rule) => {
+          const dims = Array.isArray(rule.target_dimensions) && rule.target_dimensions.length
+            ? rule.target_dimensions.join(', ')
+            : 'none';
+          return `
+            <div class="correction-item">
+              <div class="top">
+                <strong>${esc(rule.keyword || 'keyword')}</strong>
+                <button class="btn ${rule.enabled ? 'warn' : 'primary'}" data-correction-id="${esc(rule.correction_id)}" data-next-enabled="${rule.enabled ? '0' : '1'}" type="button" style="padding:4px 8px; font-size:0.72rem;">
+                  ${rule.enabled ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+              <div class="hint">→ ${esc(rule.target_table)} • ${esc(rule.target_metric)} • dims: ${esc(dims)}</div>
+              <div class="hint">weight=${esc(fmt(rule.weight || 0))} • ${rule.enabled ? 'enabled' : 'disabled'}</div>
+            </div>
+          `;
+        }).join('');
+
+        Array.from(els.correctionsList.querySelectorAll('button[data-correction-id]')).forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const correctionId = btn.getAttribute('data-correction-id');
+            const nextEnabled = btn.getAttribute('data-next-enabled') === '1';
+            if (!correctionId) return;
+            await toggleCorrection(correctionId, nextEnabled);
+          });
+        });
+      } catch (err) {
+        els.correctionsList.innerHTML = `<div class="hint">Corrections unavailable: ${esc(err.message)}</div>`;
+      }
+    }
+
+    function renderTrustDashboard(data) {
+      const modes = Array.isArray(data.by_mode) ? data.by_mode : [];
+      const modeRows = modes.length
+        ? modes.map((m) => (
+            `<div class="hint">${esc(m.mode)} • runs=${esc(fmt(m.runs))} • success=${esc(fmt(Math.round((m.success_rate || 0) * 100)))}% • avg=${esc(fmt(m.avg_execution_ms || 0))} ms</div>`
+          )).join('')
+        : '<div class="hint">No mode metrics yet.</div>';
+      const failures = Array.isArray(data.recent_failures) ? data.recent_failures.slice(0, 4) : [];
+      const failureRows = failures.length
+        ? failures.map((f) => `<div class="hint">${esc(f.created_at)} • ${esc(f.llm_mode)} • ${esc((f.goal || '').slice(0, 90))}</div>`).join('')
+        : '<div class="hint">No recent failed runs.</div>';
+      els.trustPanel.innerHTML = `
+        <div class="trust-card">
+          <div><strong>Trust window:</strong> ${esc(fmt(data.window_hours || 0))}h • tenant=${esc(data.tenant_id || 'all')}</div>
+          <div class="trust-kpis">
+            <div class="hint">runs: <strong>${esc(fmt(data.runs || 0))}</strong></div>
+            <div class="hint">success: <strong>${esc(fmt(Math.round((data.success_rate || 0) * 100)))}%</strong></div>
+            <div class="hint">avg confidence: <strong>${esc(fmt(Math.round((data.avg_confidence || 0) * 100)))}%</strong></div>
+            <div class="hint">p95 execution: <strong>${esc(fmt(data.p95_execution_ms || 0))} ms</strong></div>
+          </div>
+          <div style="margin-top:6px;"><strong>By mode</strong></div>
+          ${modeRows}
+          <div style="margin-top:6px;"><strong>Recent failures</strong></div>
+          ${failureRows}
+        </div>
+      `;
+    }
+
+    async function loadTrustDashboard() {
+      try {
+        const q = new URLSearchParams({
+          tenant_id: state.tenantId || 'public',
+          hours: '168'
+        });
+        const data = await fetch(`/api/assistant/trust/dashboard?${q}`).then((r) => r.json());
+        renderTrustDashboard(data);
+      } catch (err) {
+        els.trustPanel.innerHTML = `<div class="hint">Trust metrics unavailable: ${esc(err.message)}</div>`;
+      }
+    }
+
+    async function runSourceTruthCheck() {
+      setStatus('Running source-truth parity checks...');
+      try {
+        const q = new URLSearchParams({
+          db_connection_id: state.connectionId || 'default',
+          llm_mode: els.modeSelect.value || 'deterministic',
+          max_cases: '6'
+        });
+        if (els.localModelSelect.value) q.set('local_model', els.localModelSelect.value);
+        const response = await fetch(`/api/assistant/source-truth/check?${q}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Source-truth check failed');
+        const rows = Array.isArray(data.runs) ? data.runs : [];
+        const preview = rows.slice(0, 4).map((r) => (
+          `<div class="hint">${esc(r.case_id)} • ${r.exact_match ? 'match' : 'mismatch'} • ${esc(fmt(r.latency_ms || 0))} ms</div>`
+        )).join('');
+        els.trustPanel.innerHTML = `
+          <div class="trust-card">
+            <div><strong>Source truth:</strong> accuracy=${esc(fmt(data.accuracy_pct || 0))}% • exact=${esc(fmt(data.exact_matches || 0))}/${esc(fmt(data.evaluated_cases || 0))} • mode=${esc(data.mode_actual || '')}</div>
+            <div style="margin-top:6px;">${preview || '<span class="hint">No cases evaluated.</span>'}</div>
+          </div>
+        ` + els.trustPanel.innerHTML;
+        setStatus('Source-truth check complete.');
+      } catch (err) {
+        setStatus(`Source-truth check failed: ${err.message}`);
+      }
+    }
+
     async function selectLocalModel(modelName) {
       setStatus(`Activating ${modelName}...`);
       try {
@@ -2324,6 +3344,35 @@ def get_ui_html() -> str:
           </div>
         `;
       }).join('')}</div>`;
+    }
+
+    function renderBlackboardFlow(evidencePackets) {
+      const packet = Array.isArray(evidencePackets)
+        ? evidencePackets.find((p) => p && p.agent === 'Blackboard')
+        : null;
+      if (!packet || !Array.isArray(packet.artifacts) || !packet.artifacts.length) {
+        return '<div class="hint">No blackboard artifacts captured.</div>';
+      }
+      const artifacts = packet.artifacts.slice(-12);
+      const cards = artifacts.map((a) => {
+        const consumers = Array.isArray(a.consumed_by) && a.consumed_by.length
+          ? a.consumed_by.join(', ')
+          : 'none';
+        return `
+          <div class="flow-card">
+            <strong>${esc(a.producer || 'agent')} • ${esc(a.artifact_type || 'artifact')}</strong>
+            <div>${esc(a.summary || '')}</div>
+            <div class="hint" style="margin-top:4px;">consumed by: ${esc(consumers)}</div>
+          </div>
+        `;
+      }).join('');
+      const edgeLines = Array.isArray(packet.edges)
+        ? packet.edges.slice(0, 24).map((e) => `${e.from} → ${e.to} (${e.artifact_type})`)
+        : [];
+      const edgeHtml = edgeLines.length
+        ? `<div class="hint" style="margin-top:8px;"><strong>Flow edges:</strong> ${esc(edgeLines.join(' | '))}</div>`
+        : '';
+      return `<div class="flow-wrap"><div class="flow-grid">${cards}</div>${edgeHtml}</div>`;
     }
 
     function checksHtml(checks) {
@@ -2409,6 +3458,7 @@ def get_ui_html() -> str:
           </div>
         </div>
       `;
+      const blackboardHtml = renderBlackboardFlow(data.evidence_packets || []);
 
       return `
         <div class="bubble assistant md-block">${md(data.answer_markdown || '')}</div>
@@ -2444,6 +3494,7 @@ def get_ui_html() -> str:
           <summary>Technical details (SQL, trace, quality)</summary>
           <div class="mono">${esc(data.sql || 'No SQL generated')}</div>
           ${renderTrace(data.agent_trace || [])}
+          ${blackboardHtml}
           <div class="mono">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</div>
         </details>
       `;
@@ -2554,7 +3605,9 @@ def get_ui_html() -> str:
             llm_mode: els.modeSelect.value,
             local_model: els.localModelSelect.value || null,
             session_id: state.sessionId,
-            storyteller_mode: !!els.storyMode.checked
+            storyteller_mode: !!els.storyMode.checked,
+            tenant_id: state.tenantId || 'public',
+            role: 'analyst'
           })
         });
         const data = await response.json();
@@ -2593,11 +3646,15 @@ def get_ui_html() -> str:
     function wireEvents() {
       els.runBtn.addEventListener('click', runQuery);
       els.refreshModelsBtn.addEventListener('click', loadLocalModels);
+      els.refreshCorrectionsBtn.addEventListener('click', loadCorrections);
+      els.refreshTrustBtn.addEventListener('click', loadTrustDashboard);
+      els.runTruthCheckBtn.addEventListener('click', runSourceTruthCheck);
       els.refreshConnectionsBtn.addEventListener('click', loadConnections);
       els.connectionSelect.addEventListener('change', () => {
         state.connectionId = els.connectionSelect.value || 'default';
         saveState();
         setStatus(`Using connection: ${state.connectionId}`);
+        loadCorrections();
       });
       els.localModelSelect.addEventListener('change', async () => {
         const model = els.localModelSelect.value;
@@ -2605,10 +3662,23 @@ def get_ui_html() -> str:
         await selectLocalModel(model);
       });
       els.newSessionBtn.addEventListener('click', () => resetSession(true));
-      els.clearThreadBtn.addEventListener('click', () => {
+      els.clearThreadBtn.addEventListener('click', async () => {
         state.turns = [];
         saveState();
         renderThread();
+        try {
+          await fetch('/api/assistant/session/clear', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              db_connection_id: state.connectionId || 'default',
+              session_id: state.sessionId,
+              tenant_id: state.tenantId || 'public'
+            })
+          });
+        } catch (err) {
+          // local clear already completed
+        }
         setStatus('Thread cleared in this session.');
       });
       els.toggleArchBtn.addEventListener('click', async () => {
@@ -2633,6 +3703,7 @@ def get_ui_html() -> str:
       renderThread();
       wireEvents();
       await Promise.all([initSystemStatus(), loadLocalModels(), loadConnections()]);
+      await Promise.all([loadCorrections(), loadTrustDashboard()]);
       setStatus('Ready.');
     }
 

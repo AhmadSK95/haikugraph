@@ -708,6 +708,27 @@ class AgenticAnalyticsTeam:
             "correction_id": correction_id,
         }
 
+    def list_corrections(self, *, limit: int = 250, include_disabled: bool = True) -> list[dict[str, Any]]:
+        return self.memory.list_corrections(limit=limit, include_disabled=include_disabled)
+
+    def set_correction_enabled(self, correction_id: str, enabled: bool) -> bool:
+        return self.memory.set_correction_enabled(correction_id, enabled)
+
+    def rollback_correction(self, correction_id: str) -> dict[str, Any]:
+        return self.memory.rollback_correction(correction_id)
+
+    def list_tool_candidates(self, *, status: str | None = None, limit: int = 120) -> list[dict[str, Any]]:
+        return self.memory.list_tool_candidates(status=status, limit=limit)
+
+    def stage_tool_candidate(self, tool_id: str) -> dict[str, Any]:
+        return self.memory.stage_tool_candidate(tool_id, db_path=self.db_path)
+
+    def promote_tool_candidate(self, tool_id: str) -> dict[str, Any]:
+        return self.memory.promote_tool_candidate(tool_id)
+
+    def rollback_tool_candidate(self, tool_id: str, *, reason: str = "") -> dict[str, Any]:
+        return self.memory.rollback_tool_candidate(tool_id, reason=reason)
+
     def run(
         self,
         goal: str,
@@ -719,6 +740,7 @@ class AgenticAnalyticsTeam:
     ) -> AssistantQueryResponse:
         trace_id = str(uuid.uuid4())
         trace: list[dict[str, Any]] = []
+        blackboard: list[dict[str, Any]] = []
         started = time.perf_counter()
         history = conversation_context or []
         autonomy_cfg = autonomy or AutonomyConfig()
@@ -733,7 +755,25 @@ class AgenticAnalyticsTeam:
                 history,
                 runtime,
             )
+            self._blackboard_post(
+                blackboard,
+                producer="ContextAgent",
+                artifact_type="resolved_goal",
+                payload={"goal": goal, "resolved_goal": effective_goal},
+                consumed_by=["ChiefAnalystAgent", "IntakeAgent"],
+            )
             catalog = self._run_agent(trace, "DataEngineeringTeam", "semantic_layer", self.semantic.prepare)
+            self._blackboard_post(
+                blackboard,
+                producer="DataEngineeringTeam",
+                artifact_type="semantic_catalog",
+                payload={
+                    "marts": list((catalog.get("marts") or {}).keys()),
+                    "source_tables": catalog.get("source_tables", {}),
+                    "quality": catalog.get("quality", {}),
+                },
+                consumed_by=["ChiefAnalystAgent", "SemanticRetrievalAgent", "PlanningAgent"],
+            )
             mission = self._run_agent(
                 trace,
                 "ChiefAnalystAgent",
@@ -743,6 +783,13 @@ class AgenticAnalyticsTeam:
                 runtime,
                 catalog,
             )
+            self._blackboard_post(
+                blackboard,
+                producer="ChiefAnalystAgent",
+                artifact_type="mission_brief",
+                payload=mission,
+                consumed_by=["IntakeAgent"],
+            )
             memory_hints = self._run_agent(
                 trace,
                 "MemoryAgent",
@@ -750,12 +797,26 @@ class AgenticAnalyticsTeam:
                 self.memory.recall,
                 effective_goal,
             )
+            self._blackboard_post(
+                blackboard,
+                producer="MemoryAgent",
+                artifact_type="episodic_memory_hints",
+                payload={"count": len(memory_hints), "top": (memory_hints or [])[:2]},
+                consumed_by=["IntakeAgent", "AutonomyAgent"],
+            )
             learned_corrections = self._run_agent(
                 trace,
                 "MemoryAgent",
                 "correction_rule_recall",
                 self.memory.get_matching_corrections,
                 effective_goal,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="MemoryAgent",
+                artifact_type="correction_rules",
+                payload={"count": len(learned_corrections), "top": (learned_corrections or [])[:3]},
+                consumed_by=["AutonomyAgent", "PlanningAgent"],
             )
             intake = self._run_agent(
                 trace,
@@ -768,6 +829,13 @@ class AgenticAnalyticsTeam:
                 catalog,
                 memory_hints,
             )
+            self._blackboard_post(
+                blackboard,
+                producer="IntakeAgent",
+                artifact_type="structured_goal",
+                payload=intake,
+                consumed_by=["SemanticRetrievalAgent", "GovernanceAgent"],
+            )
 
             pre_gov = self._run_agent(
                 trace,
@@ -775,6 +843,13 @@ class AgenticAnalyticsTeam:
                 "policy_gate",
                 self._governance_precheck,
                 effective_goal,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="GovernanceAgent",
+                artifact_type="policy_gate",
+                payload=pre_gov,
+                consumed_by=["ChiefAnalystAgent", "PlanningAgent"],
             )
             if not pre_gov["allowed"]:
                 return AssistantQueryResponse(
@@ -844,7 +919,10 @@ class AgenticAnalyticsTeam:
                         )
                     ],
                     trace_id=trace_id,
-                    runtime=self._runtime_payload(runtime, autonomy=autonomy_cfg),
+                    runtime={
+                        **self._runtime_payload(runtime, autonomy=autonomy_cfg),
+                        "blackboard_entries": len(blackboard),
+                    },
                     agent_trace=trace,
                     chart_spec={
                         "type": "table",
@@ -865,6 +943,13 @@ class AgenticAnalyticsTeam:
                 intake,
                 catalog,
             )
+            self._blackboard_post(
+                blackboard,
+                producer="SemanticRetrievalAgent",
+                artifact_type="domain_mapping",
+                payload=retrieval,
+                consumed_by=["PlanningAgent"],
+            )
             plan = self._run_agent(
                 trace,
                 "PlanningAgent",
@@ -873,6 +958,20 @@ class AgenticAnalyticsTeam:
                 intake,
                 retrieval,
                 catalog,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="PlanningAgent",
+                artifact_type="execution_plan",
+                payload=plan,
+                consumed_by=[
+                    "TransactionsSpecialistAgent",
+                    "CustomerSpecialistAgent",
+                    "RevenueSpecialistAgent",
+                    "RiskSpecialistAgent",
+                    "QueryEngineerAgent",
+                    "AutonomyAgent",
+                ],
             )
 
             tx_findings = self._run_agent(
@@ -903,6 +1002,18 @@ class AgenticAnalyticsTeam:
                 self._risk_specialist,
                 plan,
             )
+            self._blackboard_post(
+                blackboard,
+                producer="SpecialistAgents",
+                artifact_type="domain_findings",
+                payload={
+                    "transactions": tx_findings,
+                    "customers": customer_findings,
+                    "revenue": revenue_findings,
+                    "risk": risk_findings,
+                },
+                consumed_by=["QueryEngineerAgent", "AutonomyAgent"],
+            )
 
             query_plan = self._run_agent(
                 trace,
@@ -912,12 +1023,26 @@ class AgenticAnalyticsTeam:
                 plan,
                 [tx_findings, customer_findings, revenue_findings, risk_findings],
             )
+            self._blackboard_post(
+                blackboard,
+                producer="QueryEngineerAgent",
+                artifact_type="query_plan",
+                payload=query_plan,
+                consumed_by=["ExecutionAgent", "AuditAgent", "AutonomyAgent"],
+            )
             execution = self._run_agent(
                 trace,
                 "ExecutionAgent",
                 "safe_execution",
                 self._execution_agent,
                 query_plan,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="ExecutionAgent",
+                artifact_type="execution_result",
+                payload=execution,
+                consumed_by=["AuditAgent", "AutonomyAgent", "NarrativeAgent", "VisualizationAgent"],
             )
             audit = self._run_agent(
                 trace,
@@ -927,6 +1052,13 @@ class AgenticAnalyticsTeam:
                 plan,
                 query_plan,
                 execution,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="AuditAgent",
+                artifact_type="audit_report",
+                payload=audit,
+                consumed_by=["AutonomyAgent", "NarrativeAgent"],
             )
             autonomy_result = self._run_agent(
                 trace,
@@ -942,6 +1074,20 @@ class AgenticAnalyticsTeam:
                 memory_hints,
                 learned_corrections,
                 autonomy_cfg,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="AutonomyAgent",
+                artifact_type="refinement_decision",
+                payload={
+                    "correction_applied": autonomy_result.get("correction_applied", False),
+                    "correction_reason": autonomy_result.get("correction_reason", ""),
+                    "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                    "confidence_decomposition": autonomy_result.get("confidence_decomposition", []),
+                    "contradiction_resolution": autonomy_result.get("contradiction_resolution", {}),
+                    "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
+                },
+                consumed_by=["NarrativeAgent", "ChiefAnalystAgent"],
             )
             plan = autonomy_result.get("plan", plan)
             query_plan = autonomy_result.get("query_plan", query_plan)
@@ -961,6 +1107,13 @@ class AgenticAnalyticsTeam:
                 storyteller_mode,
                 history,
             )
+            self._blackboard_post(
+                blackboard,
+                producer="NarrativeAgent",
+                artifact_type="business_answer",
+                payload=narration,
+                consumed_by=["ChiefAnalystAgent"],
+            )
             chart_spec = self._run_agent(
                 trace,
                 "VisualizationAgent",
@@ -968,6 +1121,13 @@ class AgenticAnalyticsTeam:
                 self._viz_agent,
                 plan,
                 execution,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="VisualizationAgent",
+                artifact_type="visualization_spec",
+                payload=chart_spec,
+                consumed_by=["ChiefAnalystAgent"],
             )
 
             confidence_score = max(0.0, min(1.0, float(audit.get("score", 0.6))))
@@ -1006,7 +1166,16 @@ class AgenticAnalyticsTeam:
                     "applied": autonomy_result.get("correction_applied", False),
                     "reason": autonomy_result.get("correction_reason", ""),
                     "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                    "confidence_decomposition": autonomy_result.get("confidence_decomposition", []),
+                    "contradiction_resolution": autonomy_result.get("contradiction_resolution", {}),
                     "probe_findings": autonomy_result.get("probe_findings", []),
+                    "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
+                },
+                {
+                    "agent": "Blackboard",
+                    "artifact_count": len(blackboard),
+                    "artifacts": blackboard,
+                    "edges": self._blackboard_edges(blackboard),
                 },
             ]
 
@@ -1060,6 +1229,7 @@ class AgenticAnalyticsTeam:
                     "llm_intake_used": bool(intake.get("_llm_intake_used", False)),
                     "llm_narrative_used": bool(narration.get("llm_narrative_used", False)),
                     "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                    "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
                 },
             )
 
@@ -1091,7 +1261,8 @@ class AgenticAnalyticsTeam:
                     llm_narrative_used=bool(narration.get("llm_narrative_used", False)),
                     autonomy=autonomy_cfg,
                     correction_applied=bool(autonomy_result.get("correction_applied", False)),
-                ),
+                )
+                | {"blackboard_entries": len(blackboard)},
                 agent_trace=trace,
                 chart_spec=chart_spec,
                 evidence_packets=evidence_packets,
@@ -1104,7 +1275,11 @@ class AgenticAnalyticsTeam:
                         "correction_applied": bool(autonomy_result.get("correction_applied", False)),
                         "correction_reason": autonomy_result.get("correction_reason"),
                         "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                        "confidence_decomposition": autonomy_result.get("confidence_decomposition", []),
+                        "contradiction_resolution": autonomy_result.get("contradiction_resolution", {}),
+                        "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
                     },
+                    "blackboard": {"artifact_count": len(blackboard), "edges": self._blackboard_edges(blackboard)},
                 },
                 suggested_questions=narration.get("suggested_questions", []),
             )
@@ -1866,13 +2041,15 @@ class AgenticAnalyticsTeam:
     ) -> dict[str, Any]:
         """Evaluate candidate plans and autonomously switch when evidence improves."""
 
-        base_score = self._candidate_score(goal, base_plan, base_execution, base_audit)
+        base_breakdown = self._candidate_score_breakdown(goal, base_plan, base_execution, base_audit)
+        base_score = float(base_breakdown["total"])
         selected = {
             "plan": base_plan,
             "query_plan": base_query_plan,
             "execution": base_execution,
             "audit": base_audit,
             "score": base_score,
+            "score_breakdown": base_breakdown,
             "reason": "base_plan",
         }
         candidate_evals: list[dict[str, Any]] = [
@@ -1881,6 +2058,7 @@ class AgenticAnalyticsTeam:
                 "table": base_plan.get("table"),
                 "metric": base_plan.get("metric"),
                 "score": round(base_score, 4),
+                "decomposition": base_breakdown,
                 "row_count": int(base_execution.get("row_count") or 0),
                 "goal_term_misses": list(base_audit.get("grounding", {}).get("goal_term_misses", [])),
             }
@@ -1892,9 +2070,12 @@ class AgenticAnalyticsTeam:
             return {
                 **selected,
                 "evaluated_candidates": candidate_evals,
+                "confidence_decomposition": candidate_evals,
+                "contradiction_resolution": self._resolve_candidate_contradictions(candidate_evals),
                 "correction_applied": False,
                 "correction_reason": "",
                 "probe_findings": [],
+                "toolsmith_candidates": [],
             }
 
         candidates = self._generate_candidate_plans(
@@ -1916,13 +2097,15 @@ class AgenticAnalyticsTeam:
             query_plan = self._query_engine_agent(candidate, [])
             execution = self._execution_agent(query_plan)
             audit = self._audit_agent(candidate, query_plan, execution)
-            score = self._candidate_score(goal, candidate, execution, audit)
+            breakdown = self._candidate_score_breakdown(goal, candidate, execution, audit)
+            score = float(breakdown["total"])
             candidate_evals.append(
                 {
                     "candidate": candidate.get("_variant_reason", "variant"),
                     "table": candidate.get("table"),
                     "metric": candidate.get("metric"),
                     "score": round(score, 4),
+                    "decomposition": breakdown,
                     "row_count": int(execution.get("row_count") or 0),
                     "goal_term_misses": list(audit.get("grounding", {}).get("goal_term_misses", [])),
                 }
@@ -1934,6 +2117,7 @@ class AgenticAnalyticsTeam:
                     "execution": execution,
                     "audit": audit,
                     "score": score,
+                    "score_breakdown": breakdown,
                     "reason": candidate.get("_variant_reason", "higher_score"),
                 }
 
@@ -1960,6 +2144,7 @@ class AgenticAnalyticsTeam:
                 "execution": base_execution,
                 "audit": base_audit,
                 "score": base_score,
+                "score_breakdown": base_breakdown,
                 "reason": "base_plan",
             }
 
@@ -1969,6 +2154,11 @@ class AgenticAnalyticsTeam:
             audit=selected["audit"],
             max_probes=max(0, autonomy.max_probe_queries),
         )
+        toolsmith_candidates = self._register_toolsmith_candidates(
+            goal=goal,
+            plan=selected["plan"],
+            probe_findings=probe_findings,
+        )
         return {
             "plan": selected["plan"],
             "query_plan": selected["query_plan"],
@@ -1976,9 +2166,12 @@ class AgenticAnalyticsTeam:
             "audit": selected["audit"],
             "score": selected["score"],
             "evaluated_candidates": candidate_evals,
+            "confidence_decomposition": candidate_evals,
+            "contradiction_resolution": self._resolve_candidate_contradictions(candidate_evals),
             "correction_applied": correction_applied,
             "correction_reason": correction_reason,
             "probe_findings": probe_findings,
+            "toolsmith_candidates": toolsmith_candidates,
         }
 
     def _generate_candidate_plans(
@@ -2188,6 +2381,55 @@ class AgenticAnalyticsTeam:
             json.dumps(plan.get("value_filters") or [], sort_keys=True, default=str),
         )
 
+    def _candidate_score_breakdown(
+        self,
+        goal: str,
+        plan: dict[str, Any],
+        execution: dict[str, Any],
+        audit: dict[str, Any],
+    ) -> dict[str, Any]:
+        audit_base = float(audit.get("score", 0.0))
+        execution_bonus = 0.04 if execution.get("success") else 0.0
+        non_empty_bonus = 0.04 if int(execution.get("row_count") or 0) > 0 else 0.0
+
+        grounding = audit.get("grounding", {})
+        misses = list(grounding.get("goal_term_misses", []))
+        goal_miss_penalty = 0.08 * len(misses)
+
+        lower = goal.lower()
+        dims = list(plan.get("dimensions") or [])
+        dimension_bonus = 0.0
+        if re.search(r"\b(by month|month wise|monthly|trend)\b", lower) and "__month__" in dims:
+            dimension_bonus += 0.03
+        if "platform" in lower and "platform_name" in dims:
+            dimension_bonus += 0.03
+        if "state" in lower and "state" in dims:
+            dimension_bonus += 0.02
+
+        latency_penalty = 0.0
+        if execution.get("execution_time_ms") and float(execution["execution_time_ms"]) > 6000:
+            latency_penalty = 0.03
+
+        raw_total = (
+            audit_base
+            + execution_bonus
+            + non_empty_bonus
+            + dimension_bonus
+            - goal_miss_penalty
+            - latency_penalty
+        )
+        total = max(0.0, min(1.0, raw_total))
+        return {
+            "audit_base": round(audit_base, 4),
+            "execution_bonus": round(execution_bonus, 4),
+            "non_empty_bonus": round(non_empty_bonus, 4),
+            "dimension_bonus": round(dimension_bonus, 4),
+            "goal_miss_penalty": round(goal_miss_penalty, 4),
+            "latency_penalty": round(latency_penalty, 4),
+            "goal_term_miss_count": len(misses),
+            "total": round(total, 4),
+        }
+
     def _candidate_score(
         self,
         goal: str,
@@ -2195,28 +2437,85 @@ class AgenticAnalyticsTeam:
         execution: dict[str, Any],
         audit: dict[str, Any],
     ) -> float:
-        score = float(audit.get("score", 0.0))
-        if execution.get("success"):
-            score += 0.04
-        if int(execution.get("row_count") or 0) > 0:
-            score += 0.04
+        return float(self._candidate_score_breakdown(goal, plan, execution, audit)["total"])
 
-        grounding = audit.get("grounding", {})
-        misses = list(grounding.get("goal_term_misses", []))
-        score -= 0.08 * len(misses)
+    def _resolve_candidate_contradictions(self, candidate_evals: list[dict[str, Any]]) -> dict[str, Any]:
+        if len(candidate_evals) < 2:
+            return {"detected": False, "reason": "single_candidate"}
+        ranked = sorted(candidate_evals, key=lambda x: float(x.get("score", 0.0)), reverse=True)
+        best = ranked[0]
+        runner = ranked[1]
+        score_gap = float(best.get("score", 0.0)) - float(runner.get("score", 0.0))
+        conflict = (
+            best.get("table") != runner.get("table")
+            or best.get("metric") != runner.get("metric")
+            or list(best.get("goal_term_misses", [])) != list(runner.get("goal_term_misses", []))
+        )
+        detected = bool(conflict and score_gap <= 0.08)
+        return {
+            "detected": detected,
+            "reason": (
+                "close_competing_hypotheses_resolved_by_score"
+                if detected
+                else "winner_clear_or_no_conflict"
+            ),
+            "score_gap": round(score_gap, 4),
+            "winner": {
+                "candidate": best.get("candidate"),
+                "table": best.get("table"),
+                "metric": best.get("metric"),
+                "score": best.get("score"),
+            },
+            "runner_up": {
+                "candidate": runner.get("candidate"),
+                "table": runner.get("table"),
+                "metric": runner.get("metric"),
+                "score": runner.get("score"),
+            },
+        }
 
-        lower = goal.lower()
-        dims = list(plan.get("dimensions") or [])
-        if re.search(r"\b(by month|month wise|monthly|trend)\b", lower) and "__month__" in dims:
-            score += 0.03
-        if "platform" in lower and "platform_name" in dims:
-            score += 0.03
-        if "state" in lower and "state" in dims:
-            score += 0.02
-        if execution.get("execution_time_ms") and float(execution["execution_time_ms"]) > 6000:
-            score -= 0.03
+    def _blackboard_post(
+        self,
+        blackboard: list[dict[str, Any]],
+        *,
+        producer: str,
+        artifact_type: str,
+        payload: Any,
+        consumed_by: list[str] | None = None,
+    ) -> None:
+        entry = {
+            "artifact_id": f"bb_{len(blackboard) + 1:03d}",
+            "time": datetime.utcnow().isoformat() + "Z",
+            "producer": producer,
+            "artifact_type": artifact_type,
+            "consumed_by": list(consumed_by or []),
+            "summary": _compact(payload, max_len=220),
+        }
+        if isinstance(payload, dict):
+            preview: dict[str, Any] = {}
+            for key in list(payload)[:8]:
+                preview[str(key)] = _compact(payload[key], max_len=140)
+            entry["payload_preview"] = preview
+        else:
+            entry["payload_preview"] = _compact(payload, max_len=180)
+        blackboard.append(entry)
 
-        return max(0.0, min(1.0, score))
+    def _blackboard_edges(self, blackboard: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        edges: list[dict[str, Any]] = []
+        for artifact in blackboard:
+            producer = str(artifact.get("producer") or "")
+            artifact_id = str(artifact.get("artifact_id") or "")
+            artifact_type = str(artifact.get("artifact_type") or "")
+            for consumer in artifact.get("consumed_by", []):
+                edges.append(
+                    {
+                        "artifact_id": artifact_id,
+                        "artifact_type": artifact_type,
+                        "from": producer,
+                        "to": str(consumer),
+                    }
+                )
+        return edges
 
     def _toolsmith_probe_findings(
         self,
@@ -2272,6 +2571,46 @@ class AgenticAnalyticsTeam:
                 }
             )
         return findings
+
+    def _register_toolsmith_candidates(
+        self,
+        *,
+        goal: str,
+        plan: dict[str, Any],
+        probe_findings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for finding in probe_findings:
+            if not finding.get("success"):
+                continue
+            probe_name = str(finding.get("probe") or "probe")
+            sql = str(finding.get("sql") or "").strip()
+            if not sql:
+                continue
+            tool_id = self.memory.register_tool_candidate(
+                title=f"{probe_name} for {plan.get('metric', 'metric')}",
+                sql_text=sql,
+                source="autonomy_probe",
+                metadata={
+                    "goal": goal,
+                    "table": plan.get("table"),
+                    "metric": plan.get("metric"),
+                    "probe": probe_name,
+                },
+            )
+            if not tool_id:
+                continue
+            stage = self.memory.stage_tool_candidate(tool_id, db_path=self.db_path)
+            status = "staged" if stage.get("success") else "candidate"
+            out.append(
+                {
+                    "tool_id": tool_id,
+                    "status": status,
+                    "probe": probe_name,
+                    "message": stage.get("message", ""),
+                }
+            )
+        return out
 
     def _transactions_specialist(self, plan: dict[str, Any]) -> dict[str, Any]:
         if plan["table"] != "datada_mart_transactions":
