@@ -355,15 +355,16 @@ class ArchitectureResponse(BaseModel):
         "3. Memory Agent - Recalls similar runs + learned correction rules",
         "4. Blackboard - Shares artifacts between agents with explicit producer/consumer edges",
         "5. Intake Agent - Clarifies intent, metrics, filters, time scope",
-        "6. Semantic Retrieval Agent - Maps query to semantic marts",
-        "7. Planning Agent - Produces task graph and metric definitions",
-        "8. Specialist Agents - Transactions, Customers, Revenue, Risk",
-        "9. Query Engineer + Execution Agents - Compile and run SQL",
-        "10. Audit Agent - Validates consistency, grounding, replay checks",
-        "11. Autonomy Agent - Evaluates hypotheses with confidence decomposition + contradiction resolution",
-        "12. Toolsmith Agent - Captures probe intelligence into staged/promoted reusable tools",
-        "13. Narrative + Visualization Agents - Final insight and chart spec",
-        "14. Trust Agent - Records reliability telemetry and drift indicators",
+        "6. Discovery Planner + Catalog Profiler - Deep dataset-overview intelligence for broad/vague questions",
+        "7. Semantic Retrieval Agent - Maps query to semantic marts",
+        "8. Planning Agent - Produces task graph and metric definitions",
+        "9. Specialist Agents - Transactions, Customers, Revenue, Risk",
+        "10. Query Engineer + Execution Agents - Compile and run SQL",
+        "11. Audit Agent - Validates consistency, grounding, replay checks",
+        "12. Autonomy Agent - Evaluates hypotheses with confidence decomposition + contradiction resolution",
+        "13. Toolsmith Agent - Captures probe intelligence into staged/promoted reusable tools",
+        "14. Narrative + Visualization Agents - Final insight and chart spec",
+        "15. Trust Agent - Records reliability telemetry and drift indicators",
     ]
     guardrails: list[str] = [
         "Read-only SQL only",
@@ -689,12 +690,65 @@ def _connection_info_from_entry(entry: dict[str, Any], *, is_default: bool | Non
     )
 
 
+def _find_working_duckdb_connection(app: FastAPI) -> dict[str, Any] | None:
+    listed = app.state.connection_registry.list_connections()
+    for item in listed.get("connections", []):
+        if not bool(item.get("enabled", True)):
+            continue
+        if str(item.get("kind") or "").lower() != "duckdb":
+            continue
+        p = Path(str(item.get("path") or "")).expanduser()
+        if p.exists():
+            return item
+    return None
+
+
+def _self_heal_default_connection(app: FastAPI) -> dict[str, Any] | None:
+    default_entry = app.state.connection_registry.resolve("default")
+    if (
+        default_entry
+        and bool(default_entry.get("enabled", True))
+        and str(default_entry.get("kind") or "").lower() == "duckdb"
+        and Path(str(default_entry.get("path") or "")).expanduser().exists()
+    ):
+        return default_entry
+
+    fallback = _find_working_duckdb_connection(app)
+    if fallback:
+        fallback_id = str(fallback.get("id") or "default")
+        try:
+            app.state.connection_registry.set_default(fallback_id)
+        except Exception:
+            pass
+        return app.state.connection_registry.resolve("default")
+
+    candidate = _get_db_path().expanduser()
+    if candidate.exists():
+        try:
+            app.state.connection_registry.upsert(
+                connection_id="default",
+                kind="duckdb",
+                path=str(candidate),
+                description="Primary local DuckDB connection",
+                enabled=True,
+                set_default=True,
+            )
+        except Exception:
+            return None
+        return app.state.connection_registry.resolve("default")
+
+    return default_entry
+
+
 def _resolve_team_for_connection(
     app: FastAPI,
     connection_id: str | None,
 ) -> tuple[AgenticAnalyticsTeam, Path, dict[str, Any]]:
     requested = (connection_id or "default").strip() or "default"
-    entry = app.state.connection_registry.resolve(requested)
+    if requested == "default":
+        entry = _self_heal_default_connection(app)
+    else:
+        entry = app.state.connection_registry.resolve(requested)
     if entry is None:
         raise HTTPException(status_code=404, detail=f"Unknown db_connection_id '{requested}'.")
 
@@ -1121,7 +1175,7 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/api/assistant/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
-        default_entry = app.state.connection_registry.resolve("default")
+        default_entry = _self_heal_default_connection(app)
         if default_entry is None:
             db_path = app.state.db_path
             exists = db_path.exists()
@@ -1432,6 +1486,20 @@ def _register_routes(app: FastAPI) -> None:
                 description="Extracts intent, metric, dimensions, filters, time scope",
                 inputs=["natural language goal"],
                 outputs=["structured query intent"],
+            ),
+            AgentInfo(
+                name="DiscoveryPlannerAgent",
+                role="Exploration planner",
+                description="For broad discovery questions, plans which marts and distributions to profile",
+                inputs=["catalog", "goal"],
+                outputs=["overview profiling plan"],
+            ),
+            AgentInfo(
+                name="CatalogProfilerAgent",
+                role="Data profiler",
+                description="Builds deeper overview stats (top segments, timelines, signal presence)",
+                inputs=["overview plan", "semantic marts"],
+                outputs=["profile snapshots"],
             ),
             AgentInfo(
                 name="SemanticRetrievalAgent",
@@ -1951,9 +2019,9 @@ def get_ui_html() -> str:
     }
 
     .app {
-      max-width: 1300px;
+      max-width: 1460px;
       margin: 0 auto;
-      padding: 18px 14px 28px;
+      padding: 20px 18px 34px;
     }
 
     .hero {
@@ -2027,8 +2095,8 @@ def get_ui_html() -> str:
 
     .layout {
       display: grid;
-      grid-template-columns: minmax(330px, 440px) minmax(0, 1fr);
-      gap: 12px;
+      grid-template-columns: minmax(330px, 410px) minmax(0, 1fr);
+      gap: 16px;
       align-items: start;
     }
 
@@ -2037,8 +2105,8 @@ def get_ui_html() -> str:
       background: var(--panel);
       border-radius: 14px;
       box-shadow: var(--soft-shadow);
-      padding: 12px;
-      margin-bottom: 10px;
+      padding: 14px;
+      margin-bottom: 12px;
     }
 
     .panel h3 {
@@ -2077,11 +2145,30 @@ def get_ui_html() -> str:
     }
 
     .composer-actions {
-      margin-top: 8px;
+      margin-top: 9px;
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
     }
+
+    .control-section {
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #101a29;
+      padding: 8px 10px;
+    }
+
+    .control-section > summary {
+      list-style: none;
+      cursor: pointer;
+      font-size: 0.83rem;
+      color: #9ed4ff;
+      user-select: none;
+    }
+
+    .control-section > summary::-webkit-details-marker { display: none; }
+    .control-section[open] > summary { margin-bottom: 7px; }
 
     .row {
       margin-top: 8px;
@@ -2295,6 +2382,37 @@ def get_ui_html() -> str:
       border: 1px solid var(--line);
       border-radius: 9px;
       margin-top: 8px;
+    }
+
+    .mini-chart {
+      margin-top: 8px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 8px;
+      background: #101a29;
+    }
+
+    .mini-chart .row-item {
+      display: grid;
+      grid-template-columns: minmax(90px, 160px) 1fr auto;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-size: 0.78rem;
+      color: #d3e5ff;
+    }
+
+    .mini-chart .bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #1c2d47;
+      overflow: hidden;
+    }
+
+    .mini-chart .bar i {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, #24d6a2, #79c9ff);
     }
 
     table {
@@ -2771,53 +2889,65 @@ def get_ui_html() -> str:
             <button class="btn warn" id="clearThreadBtn" type="button">Clear Thread</button>
           </div>
 
-          <div class="row">
-            <label>
-              <div class="hint">LLM Mode</div>
-              <select id="llmMode">
-                <option value="auto">Auto</option>
-                <option value="local">Local Ollama</option>
-                <option value="openai">OpenAI</option>
-                <option value="deterministic">Deterministic</option>
-              </select>
-            </label>
-            <label>
-              <div class="hint">Local Model</div>
-              <select id="localModel">
-                <option value="">Auto-select</option>
-              </select>
-            </label>
-          </div>
-          <div class="row">
-            <label>
-              <div class="hint">Data Connection</div>
-              <select id="connectionSelect">
-                <option value="default">default</option>
-              </select>
-            </label>
-            <label>
-              <div class="hint">Connections</div>
-              <button class="btn ghost" id="refreshConnectionsBtn" type="button" style="margin-top:3px;">Refresh Connections</button>
-            </label>
-          </div>
+          <details class="control-section" open>
+            <summary>Runtime + Connection</summary>
+            <div class="row">
+              <label>
+                <div class="hint">LLM Mode</div>
+                <select id="llmMode">
+                  <option value="auto">Auto</option>
+                  <option value="local">Local Ollama</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="deterministic">Deterministic</option>
+                </select>
+              </label>
+              <label>
+                <div class="hint">Local Model</div>
+                <select id="localModel">
+                  <option value="">Auto-select</option>
+                </select>
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                <div class="hint">Data Connection</div>
+                <select id="connectionSelect">
+                  <option value="default">default</option>
+                </select>
+              </label>
+              <label>
+                <div class="hint">Connections</div>
+                <button class="btn ghost" id="refreshConnectionsBtn" type="button" style="margin-top:3px;">Refresh Connections</button>
+              </label>
+            </div>
+            <div class="composer-actions">
+              <button class="btn ghost" id="refreshModelsBtn" type="button">Refresh Models</button>
+            </div>
+            <div class="model-catalog" id="modelCatalog"></div>
+          </details>
 
-          <div class="toggle-row">
-            <label for="storyMode"><strong>Storyteller mode</strong> (friendlier narration)</label>
-            <input type="checkbox" id="storyMode" />
-          </div>
+          <details class="control-section">
+            <summary>Agent Controls</summary>
+            <div class="toggle-row">
+              <label for="storyMode"><strong>Storyteller mode</strong> (friendlier narration)</label>
+              <input type="checkbox" id="storyMode" />
+            </div>
+            <div class="composer-actions">
+              <button class="btn ghost" id="toggleArchBtn" type="button">View Agent Team Map</button>
+            </div>
+          </details>
 
-          <div class="composer-actions">
-            <button class="btn ghost" id="refreshModelsBtn" type="button">Refresh Models</button>
-            <button class="btn ghost" id="toggleArchBtn" type="button">View Agent Team Map</button>
-          </div>
-          <div class="composer-actions">
-            <button class="btn ghost" id="refreshCorrectionsBtn" type="button">Review Corrections</button>
-            <button class="btn ghost" id="refreshTrustBtn" type="button">Trust Dashboard</button>
-            <button class="btn ghost" id="runTruthCheckBtn" type="button">Run Source Truth Check</button>
-          </div>
-          <div class="correction-list" id="correctionsList"></div>
-          <div class="correction-list" id="trustPanel"></div>
-          <div class="model-catalog" id="modelCatalog"></div>
+          <details class="control-section">
+            <summary>Trust + Corrections</summary>
+            <div class="composer-actions">
+              <button class="btn ghost" id="refreshCorrectionsBtn" type="button">Review Corrections</button>
+              <button class="btn ghost" id="refreshTrustBtn" type="button">Trust Dashboard</button>
+              <button class="btn ghost" id="runTruthCheckBtn" type="button">Run Source Truth Check</button>
+            </div>
+            <div class="correction-list" id="correctionsList"></div>
+            <div class="correction-list" id="trustPanel"></div>
+          </details>
+
           <div class="examples" id="examples"></div>
           <div class="hint" id="statusText" style="margin-top:9px;">Ready.</div>
         </section>
@@ -3320,6 +3450,31 @@ def get_ui_html() -> str:
       return `<div class="table-wrap"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
     }
 
+    function renderMiniChart(chartSpec, columns, rows) {
+      if (!Array.isArray(rows) || rows.length < 2) return '';
+      const hasMetric = Array.isArray(columns) && columns.includes('metric_value');
+      if (!hasMetric) return '';
+      const xKey = chartSpec && chartSpec.x ? chartSpec.x : (columns.find((c) => c !== 'metric_value') || null);
+      if (!xKey) return '';
+      const items = rows
+        .map((r) => ({ label: fmt(r[xKey]), value: Number(r.metric_value || 0) }))
+        .filter((r) => Number.isFinite(r.value))
+        .slice(0, 8);
+      if (!items.length) return '';
+      const maxVal = Math.max(...items.map((i) => i.value), 1);
+      const bars = items.map((item) => {
+        const width = Math.max(4, Math.round((item.value / maxVal) * 100));
+        return `
+          <div class="row-item">
+            <span>${esc(item.label)}</span>
+            <span class="bar"><i style="width:${width}%"></i></span>
+            <span>${esc(fmt(item.value))}</span>
+          </div>
+        `;
+      }).join('');
+      return `<div class="mini-chart">${bars}</div>`;
+    }
+
     function renderTrace(trace) {
       if (!Array.isArray(trace) || trace.length === 0) return '<div class="hint">No trace.</div>';
       const maxDuration = Math.max(
@@ -3400,6 +3555,7 @@ def get_ui_html() -> str:
       if (!data) return `<div class="bubble assistant">Thinking...</div>`;
       const runtime = data.runtime || {};
       const quality = data.data_quality || {};
+      const chartSpec = data.chart_spec || {};
       const grounding = quality.grounding || {};
       const confidencePct = Math.round((data.confidence_score || 0) * 100);
       const headline = pickHeadlineValue(data);
@@ -3489,6 +3645,7 @@ def get_ui_html() -> str:
         ${diagOutcome}
         ${checksHtml(checks)}
         ${suggestionHtml}
+        ${renderMiniChart(chartSpec, data.columns || [], data.sample_rows || [])}
         ${renderTable(data.columns || [], data.sample_rows || [])}
         <details>
           <summary>Technical details (SQL, trace, quality)</summary>

@@ -878,6 +878,36 @@ class AgenticAnalyticsTeam:
                 )
 
             if intake.get("intent") == "data_overview":
+                discovery_plan = self._run_agent(
+                    trace,
+                    "DiscoveryPlannerAgent",
+                    "overview_planning",
+                    self._data_overview_plan_agent,
+                    goal,
+                    catalog,
+                )
+                self._blackboard_post(
+                    blackboard,
+                    producer="DiscoveryPlannerAgent",
+                    artifact_type="overview_plan",
+                    payload=discovery_plan,
+                    consumed_by=["CatalogProfilerAgent", "CatalogExplainerAgent"],
+                )
+                overview_profile = self._run_agent(
+                    trace,
+                    "CatalogProfilerAgent",
+                    "dataset_profiling",
+                    self._data_overview_profile_agent,
+                    discovery_plan,
+                    catalog,
+                )
+                self._blackboard_post(
+                    blackboard,
+                    producer="CatalogProfilerAgent",
+                    artifact_type="overview_profile",
+                    payload=overview_profile,
+                    consumed_by=["CatalogExplainerAgent", "ChiefAnalystAgent"],
+                )
                 overview = self._run_agent(
                     trace,
                     "CatalogExplainerAgent",
@@ -886,6 +916,15 @@ class AgenticAnalyticsTeam:
                     goal,
                     catalog,
                     storyteller_mode,
+                    runtime,
+                    overview_profile,
+                )
+                self._blackboard_post(
+                    blackboard,
+                    producer="CatalogExplainerAgent",
+                    artifact_type="overview_answer",
+                    payload=overview,
+                    consumed_by=["ChiefAnalystAgent"],
                 )
                 total_ms = (time.perf_counter() - started) * 1000
                 trace.append(
@@ -925,13 +964,33 @@ class AgenticAnalyticsTeam:
                     },
                     agent_trace=trace,
                     chart_spec={
-                        "type": "table",
-                        "columns": ["mart", "row_count"],
-                        "title": "Available semantic marts",
+                        "type": "bar",
+                        "x": "mart",
+                        "y": "row_count",
+                        "title": "Data footprint by mart",
                     },
-                    data_quality=catalog.get("quality", {}),
+                    evidence_packets=[
+                        {
+                            "agent": "DiscoveryPlannerAgent",
+                            "tasks": discovery_plan.get("tasks", []),
+                        },
+                        {
+                            "agent": "CatalogProfilerAgent",
+                            "profile": overview_profile,
+                        },
+                        {
+                            "agent": "Blackboard",
+                            "artifact_count": len(blackboard),
+                            "artifacts": blackboard,
+                            "edges": self._blackboard_edges(blackboard),
+                        },
+                    ],
+                    data_quality={
+                        **catalog.get("quality", {}),
+                        "overview_profile": overview_profile,
+                    },
                     sample_rows=overview.get("sample_rows", []),
-                    columns=["mart", "row_count"],
+                    columns=overview.get("columns", ["mart", "row_count"]),
                     suggested_questions=overview.get("suggested_questions", []),
                 )
 
@@ -1442,42 +1501,341 @@ class AgenticAnalyticsTeam:
 
         return f"{goal}. Context: previous question was '{last_goal}'."
 
+    def _data_overview_plan_agent(
+        self,
+        goal: str,
+        catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        marts = catalog.get("marts", {})
+        tasks: list[dict[str, Any]] = []
+        for mart, meta in marts.items():
+            row_count = int(meta.get("row_count") or 0)
+            if row_count <= 0:
+                continue
+            tasks.append(
+                {
+                    "mart": mart,
+                    "row_count": row_count,
+                    "priority": "high" if row_count > 10000 else "normal",
+                    "focus": "distribution + timeline + top dimensions",
+                }
+            )
+        tasks.sort(key=lambda x: x.get("row_count", 0), reverse=True)
+        return {
+            "goal": goal,
+            "tasks": tasks,
+            "plan_summary": f"profile {len(tasks)} active marts",
+        }
+
+    def _profile_sql_value(
+        self,
+        sql: str,
+        *,
+        column: str = "metric_value",
+        default: Any = None,
+    ) -> Any:
+        result = self.executor.execute(sql)
+        if not result.success or not result.rows:
+            return default
+        return result.rows[0].get(column, default)
+
+    def _profile_sql_rows(self, sql: str, *, limit: int = 6) -> list[dict[str, Any]]:
+        result = self.executor.execute(sql)
+        if not result.success:
+            return []
+        return list(result.rows[: max(1, min(20, int(limit)))])
+
+    def _data_overview_profile_agent(
+        self,
+        discovery_plan: dict[str, Any],
+        catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        del discovery_plan  # currently deterministic; plan reserved for richer strategy negotiation.
+        marts = catalog.get("marts", {})
+        profile: dict[str, Any] = {
+            "marts": [],
+            "domains": {},
+            "highlights": [],
+        }
+        for mart, meta in marts.items():
+            profile["marts"].append(
+                {
+                    "mart": mart,
+                    "row_count": int(meta.get("row_count") or 0),
+                    "columns": list(meta.get("columns", []))[:24],
+                }
+            )
+        profile["marts"].sort(key=lambda x: x["row_count"], reverse=True)
+
+        if "datada_mart_transactions" in marts and int(marts["datada_mart_transactions"].get("row_count") or 0) > 0:
+            tx = {
+                "top_platforms": self._profile_sql_rows(
+                    """
+                    SELECT platform_name AS dimension, COUNT(DISTINCT transaction_key) AS metric_value
+                    FROM datada_mart_transactions
+                    WHERE platform_name IS NOT NULL AND TRIM(platform_name) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "top_states": self._profile_sql_rows(
+                    """
+                    SELECT state AS dimension, COUNT(DISTINCT transaction_key) AS metric_value
+                    FROM datada_mart_transactions
+                    WHERE state IS NOT NULL AND TRIM(state) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "mt103_count": int(
+                    self._profile_sql_value(
+                        """
+                        SELECT SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS metric_value
+                        FROM datada_mart_transactions
+                        """,
+                        default=0,
+                    )
+                    or 0
+                ),
+                "refund_count": int(
+                    self._profile_sql_value(
+                        """
+                        SELECT SUM(CASE WHEN has_refund THEN 1 ELSE 0 END) AS metric_value
+                        FROM datada_mart_transactions
+                        """,
+                        default=0,
+                    )
+                    or 0
+                ),
+                "amount_total": float(
+                    self._profile_sql_value(
+                        "SELECT SUM(amount) AS metric_value FROM datada_mart_transactions",
+                        default=0.0,
+                    )
+                    or 0.0
+                ),
+                "time_window": self._profile_sql_rows(
+                    """
+                    SELECT MIN(event_ts) AS min_ts, MAX(event_ts) AS max_ts
+                    FROM datada_mart_transactions
+                    """,
+                    limit=1,
+                ),
+            }
+            profile["domains"]["transactions"] = tx
+
+        if "datada_mart_quotes" in marts and int(marts["datada_mart_quotes"].get("row_count") or 0) > 0:
+            quotes = {
+                "top_currency_pairs": self._profile_sql_rows(
+                    """
+                    SELECT CONCAT(COALESCE(from_currency, '?'), '->', COALESCE(to_currency, '?')) AS dimension,
+                           COUNT(DISTINCT quote_key) AS metric_value
+                    FROM datada_mart_quotes
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "forex_markup_revenue": float(
+                    self._profile_sql_value(
+                        "SELECT SUM(forex_markup) AS metric_value FROM datada_mart_quotes",
+                        default=0.0,
+                    )
+                    or 0.0
+                ),
+                "charges_total": float(
+                    self._profile_sql_value(
+                        "SELECT SUM(total_additional_charges) AS metric_value FROM datada_mart_quotes",
+                        default=0.0,
+                    )
+                    or 0.0
+                ),
+                "time_window": self._profile_sql_rows(
+                    "SELECT MIN(created_ts) AS min_ts, MAX(created_ts) AS max_ts FROM datada_mart_quotes",
+                    limit=1,
+                ),
+            }
+            profile["domains"]["quotes"] = quotes
+
+        if "datada_dim_customers" in marts and int(marts["datada_dim_customers"].get("row_count") or 0) > 0:
+            customers = {
+                "top_countries": self._profile_sql_rows(
+                    """
+                    SELECT address_country AS dimension, COUNT(DISTINCT customer_key) AS metric_value
+                    FROM datada_dim_customers
+                    WHERE address_country IS NOT NULL AND TRIM(address_country) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "top_customer_types": self._profile_sql_rows(
+                    """
+                    SELECT customer_type AS dimension, COUNT(DISTINCT customer_key) AS metric_value
+                    FROM datada_dim_customers
+                    WHERE customer_type IS NOT NULL AND TRIM(customer_type) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "university_count": int(
+                    self._profile_sql_value(
+                        """
+                        SELECT SUM(CASE WHEN is_university THEN 1 ELSE 0 END) AS metric_value
+                        FROM datada_dim_customers
+                        """,
+                        default=0,
+                    )
+                    or 0
+                ),
+            }
+            profile["domains"]["customers"] = customers
+
+        if "datada_mart_bookings" in marts and int(marts["datada_mart_bookings"].get("row_count") or 0) > 0:
+            bookings = {
+                "top_deal_types": self._profile_sql_rows(
+                    """
+                    SELECT deal_type AS dimension, COUNT(DISTINCT booking_key) AS metric_value
+                    FROM datada_mart_bookings
+                    WHERE deal_type IS NOT NULL AND TRIM(deal_type) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "currency_mix": self._profile_sql_rows(
+                    """
+                    SELECT currency AS dimension, SUM(booked_amount) AS metric_value
+                    FROM datada_mart_bookings
+                    WHERE currency IS NOT NULL AND TRIM(currency) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "booked_total": float(
+                    self._profile_sql_value(
+                        "SELECT SUM(booked_amount) AS metric_value FROM datada_mart_bookings",
+                        default=0.0,
+                    )
+                    or 0.0
+                ),
+            }
+            profile["domains"]["bookings"] = bookings
+
+        if profile["marts"]:
+            biggest = profile["marts"][0]
+            profile["highlights"].append(
+                f"Largest mart is {biggest['mart']} with {_fmt_number(biggest['row_count'])} rows."
+            )
+        if profile["domains"].get("quotes", {}).get("forex_markup_revenue", 0.0) > 0:
+            markup = profile["domains"]["quotes"]["forex_markup_revenue"]
+            profile["highlights"].append(f"Forex markup signal exists with total {_fmt_number(markup)}.")
+        if profile["domains"].get("transactions", {}).get("mt103_count", 0) > 0:
+            mt103 = profile["domains"]["transactions"]["mt103_count"]
+            profile["highlights"].append(f"MT103 activity detected: {_fmt_number(mt103)} transactions.")
+        return profile
+
     def _data_overview_agent(
         self,
         goal: str,
         catalog: dict[str, Any],
         storyteller_mode: bool,
+        runtime: RuntimeSelection,
+        overview_profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        marts = catalog.get("marts", {})
-        rows = [
-            {"mart": mart, "row_count": meta.get("row_count", 0)}
-            for mart, meta in marts.items()
-        ]
-        rows.sort(key=lambda x: x["row_count"], reverse=True)
+        marts = list((overview_profile or {}).get("marts") or [])
+        domains = dict((overview_profile or {}).get("domains") or {})
+        highlights = list((overview_profile or {}).get("highlights") or [])
+        if not marts:
+            marts = [
+                {"mart": mart, "row_count": int(meta.get("row_count") or 0)}
+                for mart, meta in (catalog.get("marts", {}) or {}).items()
+            ]
+            marts.sort(key=lambda x: x["row_count"], reverse=True)
 
-        bullets = []
-        for row in rows:
-            bullets.append(f"- `{row['mart']}`: {_fmt_number(row['row_count'])} rows")
+        map_lines = [f"- `{row['mart']}`: {_fmt_number(row['row_count'])} rows" for row in marts[:8]]
 
-        intro = "Here is the map of your data." if storyteller_mode else "Here is what data you currently have."
+        tx = domains.get("transactions", {})
+        quotes = domains.get("quotes", {})
+        customers = domains.get("customers", {})
+        bookings = domains.get("bookings", {})
+
+        insight_lines: list[str] = []
+        if tx:
+            top_platform = (tx.get("top_platforms") or [{}])[0]
+            insight_lines.append(
+                "Transactions: "
+                f"{_fmt_number(tx.get('mt103_count', 0))} MT103, "
+                f"{_fmt_number(tx.get('refund_count', 0))} refunds, "
+                f"top platform `{top_platform.get('dimension', 'n/a')}`."
+            )
+        if quotes:
+            top_pair = (quotes.get("top_currency_pairs") or [{}])[0]
+            insight_lines.append(
+                "Quotes: "
+                f"forex markup total `{_fmt_number(quotes.get('forex_markup_revenue', 0.0))}`, "
+                f"charges `{_fmt_number(quotes.get('charges_total', 0.0))}`, "
+                f"leading pair `{top_pair.get('dimension', 'n/a')}`."
+            )
+        if customers:
+            top_country = (customers.get("top_countries") or [{}])[0]
+            insight_lines.append(
+                "Customers: "
+                f"{_fmt_number(customers.get('university_count', 0))} universities, "
+                f"largest country segment `{top_country.get('dimension', 'n/a')}`."
+            )
+        if bookings:
+            top_type = (bookings.get("top_deal_types") or [{}])[0]
+            insight_lines.append(
+                "Bookings: "
+                f"booked total `{_fmt_number(bookings.get('booked_total', 0.0))}`, "
+                f"top deal type `{top_type.get('dimension', 'n/a')}`."
+            )
+
+        intro = (
+            "Here is the richer map of your data universe."
+            if storyteller_mode
+            else "Here is the full map of what data you have and where deeper signals live."
+        )
         answer = (
             f"**{goal}**\n\n"
             f"{intro}\n\n"
-            + "\n".join(bullets)
-            + "\n\nI can answer questions on transactions, quotes, customers, and bookings."
+            "**Data map**\n"
+            + "\n".join(map_lines)
+            + "\n\n**What is inside each stream**\n"
+            + ("\n".join(f"- {line}" for line in insight_lines) if insight_lines else "- Core marts are available.")
         )
-        if storyteller_mode:
-            answer += (
-                "\n\nThink of this as four chapters: payments, quotes, customer profiles, and booking activity."
-            )
+        if highlights:
+            answer += "\n\n**Notable signals**\n" + "\n".join(f"- {line}" for line in highlights[:4])
+        answer += (
+            "\n\nI can now drill down by platform, month, state, currency pair, customer segment, or deal type."
+        )
+        if runtime.use_llm and runtime.provider:
+            answer += "\n(Generated with agentic profiling + narrative synthesis.)"
+
+        sample_rows = marts[:8]
+        sample_columns = ["mart", "row_count"]
 
         return {
             "answer_markdown": answer,
-            "sample_rows": rows,
+            "sample_rows": sample_rows,
+            "columns": sample_columns,
             "suggested_questions": [
-                "Show total transaction amount by month",
-                "Show MT103 count by month and platform",
-                "Which countries have the most customers?",
+                "Show monthly trend of transaction amount and MT103 side by side",
+                "Which currency pairs and platforms contribute most to forex markup?",
+                "Where do refunds cluster by state and platform?",
+                "Explain customer mix by country and type like a business briefing",
             ],
         }
 

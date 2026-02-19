@@ -207,3 +207,16 @@ def test_source_truth_endpoint(client):
     assert payload["mode_actual"] in {"deterministic", "local", "openai", "auto"}
     assert isinstance(payload["runs"], list)
 
+
+def test_data_overview_uses_discovery_agents(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={"goal": "What kind of data do I have?", "llm_mode": "deterministic"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    assert "Data map" in payload["answer_markdown"]
+    agent_names = [step.get("agent") for step in payload.get("agent_trace", [])]
+    assert "DiscoveryPlannerAgent" in agent_names
+    assert "CatalogProfilerAgent" in agent_names
