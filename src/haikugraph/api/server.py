@@ -2269,7 +2269,7 @@ def get_ui_html() -> str:
       border-radius: 14px;
       background: #fff;
       box-shadow: var(--soft-shadow);
-      min-height: 480px;
+      min-height: 360px;
       padding: 10px;
       display: flex;
       flex-direction: column;
@@ -2779,6 +2779,131 @@ def get_ui_html() -> str:
       margin-top: 5px;
     }
 
+    .mission-control {
+      margin: 8px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0e1524;
+      padding: 9px;
+    }
+
+    .mission-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .mission-head strong {
+      color: #d8ebff;
+      font-size: 0.84rem;
+    }
+
+    .mission-path {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      font-size: 0.74rem;
+    }
+
+    .path-node {
+      border: 1px solid #2c3d57;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #101a2c;
+      color: #d7e9ff;
+    }
+
+    .path-arrow {
+      color: #7cb6ff;
+      font-weight: 700;
+    }
+
+    .mission-list {
+      max-height: 360px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .mission-insight {
+      margin-top: 6px;
+      font-size: 0.78rem;
+      color: #c9def7;
+      line-height: 1.42;
+    }
+
+    .handoff-row {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .handoff-pill {
+      border: 1px solid #2f6f58;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #102823;
+      color: #bff6dc;
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
+
+    .artifact-row {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .artifact-pill {
+      border: 1px solid #2a3f63;
+      border-radius: 999px;
+      padding: 2px 8px;
+      background: #112037;
+      color: #9ec9f5;
+      font-size: 0.72rem;
+      white-space: nowrap;
+    }
+
+    .quality-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 7px;
+      margin-top: 8px;
+    }
+
+    .quality-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px;
+      background: #101a2a;
+      font-size: 0.76rem;
+      color: #cde4ff;
+    }
+
+    .quality-card .k {
+      color: var(--subtle);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 0.7rem;
+    }
+
+    .quality-card .v {
+      margin-top: 3px;
+      color: #e6f2ff;
+      overflow-wrap: anywhere;
+    }
+
+    .json-view {
+      max-height: 280px;
+      overflow: auto;
+      margin-top: 7px;
+    }
+
     .correction-list {
       display: flex;
       flex-direction: column;
@@ -2818,35 +2943,6 @@ def get_ui_html() -> str:
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 6px;
       margin-top: 6px;
-    }
-
-    .flow-wrap {
-      margin: 8px 0;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 8px;
-      background: #0e1524;
-    }
-
-    .flow-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-      gap: 8px;
-    }
-
-    .flow-card {
-      border: 1px solid #2c3d57;
-      border-radius: 9px;
-      padding: 7px;
-      background: #101a2c;
-      font-size: 0.76rem;
-      color: #9fb7d4;
-    }
-
-    .flow-card strong {
-      color: #d8ebff;
-      display: block;
-      margin-bottom: 3px;
     }
 
     @media (max-width: 1020px) {
@@ -3475,59 +3571,198 @@ def get_ui_html() -> str:
       return `<div class="mini-chart">${bars}</div>`;
     }
 
-    function renderTrace(trace) {
-      if (!Array.isArray(trace) || trace.length === 0) return '<div class="hint">No trace.</div>';
+    function humanizeToken(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      return raw
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function shortText(value, maxLen = 200) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      if (text.length <= maxLen) return text;
+      return `${text.slice(0, Math.max(0, maxLen - 1)).trim()}…`;
+    }
+
+    function friendlySummary(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return 'No summary emitted by this step.';
+      if (raw.startsWith('{') || raw.startsWith('[')) {
+        return shortText(
+          raw
+            .replace(/[{}[\]"]/g, ' ')
+            .replace(/'/g, '')
+            .replace(/,\s*/g, ' | ')
+            .replace(/\s+/g, ' ')
+            .trim(),
+          260
+        );
+      }
+      return shortText(raw, 260);
+    }
+
+    function summarizePreview(payloadPreview) {
+      if (payloadPreview === null || payloadPreview === undefined) return '';
+      if (typeof payloadPreview === 'string') return shortText(payloadPreview, 120);
+      if (Array.isArray(payloadPreview)) return shortText(payloadPreview.map((v) => fmt(v)).join(', '), 120);
+      if (typeof payloadPreview === 'object') {
+        const pairs = Object.entries(payloadPreview)
+          .slice(0, 3)
+          .map(([k, v]) => `${humanizeToken(k)}: ${fmt(v)}`);
+        return shortText(pairs.join(' | '), 140);
+      }
+      return shortText(fmt(payloadPreview), 120);
+    }
+
+    function buildBlackboardMaps(evidencePackets) {
+      const packet = Array.isArray(evidencePackets)
+        ? evidencePackets.find((p) => p && p.agent === 'Blackboard')
+        : null;
+      const artifacts = packet && Array.isArray(packet.artifacts) ? packet.artifacts : [];
+      const edges = packet && Array.isArray(packet.edges) ? packet.edges : [];
+      const artifactsByProducer = new Map();
+      artifacts.forEach((artifact) => {
+        const producer = String((artifact && artifact.producer) || 'UnknownAgent');
+        const bucket = artifactsByProducer.get(producer) || [];
+        bucket.push(artifact);
+        artifactsByProducer.set(producer, bucket);
+      });
+      const handoffsByFrom = new Map();
+      edges.forEach((edge) => {
+        const from = String((edge && edge.from) || '');
+        const to = String((edge && edge.to) || '');
+        if (!from || !to) return;
+        const artifactType = String((edge && edge.artifact_type) || '');
+        const bucket = handoffsByFrom.get(from) || [];
+        if (!bucket.some((handoff) => handoff.to === to && handoff.artifactType === artifactType)) {
+          bucket.push({ to, artifactType });
+        }
+        handoffsByFrom.set(from, bucket);
+      });
+      return { artifacts, edges, artifactsByProducer, handoffsByFrom };
+    }
+
+    function renderAgentMission(trace, evidencePackets) {
+      const steps = Array.isArray(trace) ? trace : [];
+      const maps = buildBlackboardMaps(evidencePackets);
+      if (!steps.length && !maps.artifacts.length) return '<div class="hint">No trace captured.</div>';
+
       const maxDuration = Math.max(
         1,
-        ...trace.map((step) => {
+        ...steps.map((step) => {
           const ms = Number(step && step.duration_ms);
           return Number.isFinite(ms) ? ms : 0;
         })
       );
+      const totalDuration = steps.reduce((acc, step) => acc + (Number(step && step.duration_ms) || 0), 0);
 
-      return `<div class="trace trace-wrap">${trace.map((step) => {
-        const status = String(step.status || 'unknown').toLowerCase();
-        const duration = Number(step.duration_ms || 0);
-        const pct = Math.max(4, Math.round((Math.max(0, duration) / maxDuration) * 100));
-        const cls = status === 'success' ? 'ok' : 'warn';
-        return `
-          <div class="trace-step ${cls}">
-            <div class="head"><span>${esc(step.agent || 'agent')}</span><span>${esc(status)} • ${esc(fmt(duration))} ms</span></div>
-            <div class="trace-bar"><i style="width:${pct}%"></i></div>
-            <div>${esc(step.summary || '')}</div>
-            <div class="meta"><span>${esc(step.role || '')}</span><span>${esc(step.time || '')}</span></div>
+      const path = [];
+      steps.forEach((step) => {
+        const agent = String((step && step.agent) || 'Agent');
+        if (!path.length || path[path.length - 1] !== agent) path.push(agent);
+      });
+      if (!path.length) {
+        maps.artifacts.forEach((artifact) => {
+          const producer = String((artifact && artifact.producer) || 'Agent');
+          if (!path.includes(producer)) path.push(producer);
+        });
+      }
+
+      const pathHtml = path.length > 1
+        ? `<div class="mission-path">${path.map((agent, idx) => (
+            `${idx ? '<span class="path-arrow">→</span>' : ''}<span class="path-node">${esc(agent)}</span>`
+          )).join('')}</div>`
+        : '';
+
+      let cards = '';
+      if (steps.length) {
+        cards = steps.map((step, idx) => {
+          const agent = String(step.agent || 'Agent');
+          const role = humanizeToken(step.role || 'step');
+          const status = String(step.status || 'unknown').toLowerCase();
+          const duration = Number(step.duration_ms || 0);
+          const pct = Math.max(4, Math.round((Math.max(0, duration) / maxDuration) * 100));
+          const cls = status === 'success' ? 'ok' : 'warn';
+          const insight = friendlySummary(step.summary || '');
+          const handoffs = (maps.handoffsByFrom.get(agent) || []).slice(0, 4);
+          const produced = (maps.artifactsByProducer.get(agent) || []).slice(-2);
+          const handoffHtml = handoffs.length
+            ? `<div class="handoff-row">${handoffs.map((handoff) => {
+                const artifactLabel = handoff.artifactType ? ` • ${humanizeToken(handoff.artifactType)}` : '';
+                return `<span class="handoff-pill">${esc(agent)} → ${esc(handoff.to)}${esc(artifactLabel)}</span>`;
+              }).join('')}</div>`
+            : '';
+          const artifactHtml = produced.length
+            ? `<div class="artifact-row">${produced.map((artifact) => (
+                `<span class="artifact-pill">${esc(humanizeToken(artifact.artifact_type || 'artifact'))}: ${esc(summarizePreview(artifact.payload_preview || artifact.summary || ''))}</span>`
+              )).join('')}</div>`
+            : '';
+
+          return `
+            <div class="trace-step ${cls}">
+              <div class="head"><span>${esc(agent)} • ${esc(role || 'step')}</span><span>${esc(status)} • ${esc(fmt(duration))} ms</span></div>
+              <div class="trace-bar"><i style="width:${pct}%"></i></div>
+              <div class="mission-insight">${esc(insight)}</div>
+              ${handoffHtml}
+              ${artifactHtml}
+              <div class="meta"><span>step ${esc(idx + 1)}</span><span>${esc(step.time || '')}</span></div>
+            </div>
+          `;
+        }).join('');
+      } else {
+        cards = maps.artifacts.slice(-8).map((artifact) => (
+          `<div class="trace-step ok">
+            <div class="head"><span>${esc(artifact.producer || 'Agent')} • ${esc(humanizeToken(artifact.artifact_type || 'artifact'))}</span><span>captured</span></div>
+            <div class="mission-insight">${esc(friendlySummary(artifact.summary || ''))}</div>
+          </div>`
+        )).join('');
+      }
+
+      const edgeRows = maps.edges
+        .slice(0, 40)
+        .map((edge) => `${edge.from || 'agent'} → ${edge.to || 'agent'} (${humanizeToken(edge.artifact_type || 'artifact')})`);
+      const edgesHtml = edgeRows.length
+        ? `
+          <details>
+            <summary>Full handoff list (${esc(fmt(maps.edges.length))})</summary>
+            <div class="mono">${esc(edgeRows.join('\n'))}</div>
+          </details>
+        `
+        : '';
+
+      return `
+        <div class="mission-control">
+          <div class="mission-head">
+            <strong>Agent mission trace</strong>
+            <span class="hint">${esc(fmt(steps.length || maps.artifacts.length))} steps • ${esc(fmt(totalDuration))} ms</span>
           </div>
-        `;
-      }).join('')}</div>`;
+          ${pathHtml}
+          <div class="trace mission-list">${cards}</div>
+          ${edgesHtml}
+        </div>
+      `;
     }
 
-    function renderBlackboardFlow(evidencePackets) {
-      const packet = Array.isArray(evidencePackets)
-        ? evidencePackets.find((p) => p && p.agent === 'Blackboard')
-        : null;
-      if (!packet || !Array.isArray(packet.artifacts) || !packet.artifacts.length) {
-        return '<div class="hint">No blackboard artifacts captured.</div>';
-      }
-      const artifacts = packet.artifacts.slice(-12);
-      const cards = artifacts.map((a) => {
-        const consumers = Array.isArray(a.consumed_by) && a.consumed_by.length
-          ? a.consumed_by.join(', ')
-          : 'none';
-        return `
-          <div class="flow-card">
-            <strong>${esc(a.producer || 'agent')} • ${esc(a.artifact_type || 'artifact')}</strong>
-            <div>${esc(a.summary || '')}</div>
-            <div class="hint" style="margin-top:4px;">consumed by: ${esc(consumers)}</div>
-          </div>
-        `;
-      }).join('');
-      const edgeLines = Array.isArray(packet.edges)
-        ? packet.edges.slice(0, 24).map((e) => `${e.from} → ${e.to} (${e.artifact_type})`)
-        : [];
-      const edgeHtml = edgeLines.length
-        ? `<div class="hint" style="margin-top:8px;"><strong>Flow edges:</strong> ${esc(edgeLines.join(' | '))}</div>`
-        : '';
-      return `<div class="flow-wrap"><div class="flow-grid">${cards}</div>${edgeHtml}</div>`;
+    function renderQualityOverview(quality) {
+      const payload = quality && typeof quality === 'object' ? quality : {};
+      const grounding = payload.grounding && typeof payload.grounding === 'object' ? payload.grounding : {};
+      const cards = [
+        ['Audit score', payload.audit_score === undefined ? 'n/a' : fmt(payload.audit_score)],
+        ['Source table', grounding.table || 'unknown'],
+        ['Metric', grounding.metric || 'n/a'],
+        ['Metric logic', grounding.metric_expr || 'n/a'],
+        ['Goal terms hit', Array.isArray(grounding.goal_terms_detected) && grounding.goal_terms_detected.length ? grounding.goal_terms_detected.join(', ') : 'none'],
+        ['Goal terms missed', Array.isArray(grounding.goal_term_misses) && grounding.goal_term_misses.length ? grounding.goal_term_misses.join(', ') : 'none']
+      ];
+      return `
+        <div class="quality-grid">
+          ${cards.map(([k, v]) => `<div class="quality-card"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}
+        </div>
+      `;
     }
 
     function checksHtml(checks) {
@@ -3614,7 +3849,7 @@ def get_ui_html() -> str:
           </div>
         </div>
       `;
-      const blackboardHtml = renderBlackboardFlow(data.evidence_packets || []);
+      const missionHtml = renderAgentMission(data.agent_trace || [], data.evidence_packets || []);
 
       return `
         <div class="bubble assistant md-block">${md(data.answer_markdown || '')}</div>
@@ -3648,11 +3883,14 @@ def get_ui_html() -> str:
         ${renderMiniChart(chartSpec, data.columns || [], data.sample_rows || [])}
         ${renderTable(data.columns || [], data.sample_rows || [])}
         <details>
-          <summary>Technical details (SQL, trace, quality)</summary>
+          <summary>Technical details (SQL + agent mission)</summary>
           <div class="mono">${esc(data.sql || 'No SQL generated')}</div>
-          ${renderTrace(data.agent_trace || [])}
-          ${blackboardHtml}
-          <div class="mono">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</div>
+          ${missionHtml}
+          ${renderQualityOverview(data.data_quality || {})}
+          <details>
+            <summary>Raw diagnostics JSON (advanced)</summary>
+            <div class="mono json-view">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</div>
+          </details>
         </details>
       `;
     }
