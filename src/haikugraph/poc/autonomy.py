@@ -243,7 +243,29 @@ class AgentMemoryStore:
             try:
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_memory VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_memory (
+                        memory_id,
+                        created_at,
+                        tenant_id,
+                        trace_id,
+                        goal,
+                        resolved_goal,
+                        runtime_mode,
+                        provider,
+                        success,
+                        confidence_score,
+                        row_count,
+                        table_name,
+                        metric,
+                        dimensions_json,
+                        time_filter_json,
+                        value_filters_json,
+                        sql_text,
+                        audit_warnings_json,
+                        correction_applied,
+                        correction_reason,
+                        metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         memory_id,
@@ -373,7 +395,18 @@ class AgentMemoryStore:
             try:
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_feedback VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_feedback (
+                        feedback_id,
+                        created_at,
+                        tenant_id,
+                        trace_id,
+                        session_id,
+                        goal,
+                        issue,
+                        suggested_fix,
+                        severity,
+                        metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         feedback_id,
@@ -433,7 +466,19 @@ class AgentMemoryStore:
                 correction_id = str(uuid.uuid4())
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_corrections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_corrections (
+                        correction_id,
+                        created_at,
+                        tenant_id,
+                        source,
+                        keyword,
+                        target_table,
+                        target_metric,
+                        target_dimensions_json,
+                        notes,
+                        weight,
+                        enabled
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         correction_id,
@@ -600,7 +645,16 @@ class AgentMemoryStore:
                 )
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_correction_events (
+                        event_id,
+                        created_at,
+                        tenant_id,
+                        correction_id,
+                        action,
+                        enabled_before,
+                        enabled_after,
+                        note
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         str(uuid.uuid4()),
@@ -667,7 +721,16 @@ class AgentMemoryStore:
                 )
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_correction_events (
+                        event_id,
+                        created_at,
+                        tenant_id,
+                        correction_id,
+                        action,
+                        enabled_before,
+                        enabled_after,
+                        note
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         str(uuid.uuid4()),
@@ -722,7 +785,20 @@ class AgentMemoryStore:
                 tool_id = str(uuid.uuid4())
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_toolsmith VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_toolsmith (
+                        tool_id,
+                        created_at,
+                        updated_at,
+                        tenant_id,
+                        status,
+                        source,
+                        title,
+                        sql_text,
+                        test_sql_text,
+                        test_success,
+                        test_message,
+                        metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         tool_id,

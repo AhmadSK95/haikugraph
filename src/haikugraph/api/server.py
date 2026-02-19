@@ -4393,6 +4393,39 @@ def get_ui_html() -> str:
         .trim();
     }
 
+    function friendlyTableName(tableName) {
+      const table = String(tableName || '').trim();
+      if (!table) return 'unknown';
+      const map = {
+        datada_mart_transactions: 'Transactions',
+        datada_mart_quotes: 'Quotes',
+        datada_dim_customers: 'Customers',
+        datada_mart_bookings: 'Bookings',
+        datada_document_chunks: 'Documents'
+      };
+      return map[table] || humanizeToken(table);
+    }
+
+    function friendlyCheckLabel(name) {
+      const key = String(name || '').trim();
+      const map = {
+        execution_success: 'Query ran successfully',
+        non_empty_result: 'Returned data',
+        time_scope_applied: 'Time filter applied',
+        concept_alignment: 'Question and metric aligned',
+        goal_term_coverage: 'Question concept coverage',
+        schema_grounding: 'Metric grounded to schema',
+        replay_consistency: 'Result reproducible',
+        catalog_ready: 'Semantic catalog ready',
+        semantic_versioned: 'Dataset snapshot versioned',
+        governance: 'Governance check passed',
+        document_table_available: 'Document index available',
+        citation_matches: 'Document citations found',
+        pipeline: 'Pipeline completed'
+      };
+      return map[key] || humanizeToken(key || 'check');
+    }
+
     function shortText(value, maxLen = 200) {
       const text = String(value || '').trim();
       if (!text) return '';
@@ -4581,7 +4614,7 @@ def get_ui_html() -> str:
       if (!Array.isArray(checks) || checks.length === 0) return '<span class="hint">No checks.</span>';
       return checks.map((c) => {
         const ok = !!c.passed;
-        return `<span class="tag ${ok ? 'ok' : 'warn'}">${ok ? 'PASS' : 'WARN'} ${esc(c.check_name || 'check')}</span>`;
+        return `<span class="tag ${ok ? 'ok' : 'warn'}">${ok ? 'OK' : 'REVIEW'} ${esc(friendlyCheckLabel(c.check_name || 'check'))}</span>`;
       }).join(' ');
     }
 
@@ -4607,6 +4640,12 @@ def get_ui_html() -> str:
       const confidencePct = Math.round((data.confidence_score || 0) * 100);
       const headline = pickHeadlineValue(data);
       const checks = Array.isArray(data.sanity_checks) ? data.sanity_checks : [];
+      const passedChecks = checks.filter((c) => !!c.passed).length;
+      const totalChecks = checks.length;
+      const checksSummary = totalChecks ? `${passedChecks}/${totalChecks} checks passed` : 'No checks yet';
+      const understoodIntent = humanizeToken(grounding.intent || 'metric');
+      const understoodMetric = humanizeToken(grounding.metric || 'metric');
+      const scopeLabel = friendlyTableName(grounding.table || '');
 
       const suggestions = (data.suggested_questions || []).slice(0, 4);
       const suggestionHtml = suggestions.length
@@ -4627,6 +4666,7 @@ def get_ui_html() -> str:
         ? 'n/a'
         : `${fmt(grounding.concept_coverage_pct)}%`;
       const semanticVersion = quality.semantic_version || 'n/a';
+      const snapshotLabel = semanticVersion === 'n/a' ? 'n/a' : `version ${semanticVersion}`;
       const failedChecks = checks.filter((c) => !c.passed).map((c) => c.check_name || 'check');
       const outcomeMessages = [];
       if (termMisses.length) outcomeMessages.push(`Missing goal concepts: ${termMisses.join(', ')}`);
@@ -4634,21 +4674,21 @@ def get_ui_html() -> str:
       if (failedChecks.length) outcomeMessages.push(`Checks flagged: ${failedChecks.join(', ')}`);
 
       const diagOutcome = outcomeMessages.length
-        ? `<div class="diag-outcome warn"><strong>Debug focus:</strong> ${esc(outcomeMessages.join(' | '))}</div>`
-        : `<div class="diag-outcome ok"><strong>Validation:</strong> concept, replay, and sanity checks are aligned.</div>`;
+        ? `<div class="diag-outcome warn"><strong>Where to improve:</strong> ${esc(outcomeMessages.join(' | '))}</div>`
+        : `<div class="diag-outcome ok"><strong>Validation:</strong> your question, data scope, and checks are aligned.</div>`;
 
       const diagHtml = `
         <div class="diag-grid">
           <div class="diag-card">
-            <div class="k">Interpretation</div>
-            <div class="v">intent=<code>${esc(grounding.intent || 'n/a')}</code> metric=<code>${esc(grounding.metric || 'n/a')}</code></div>
+            <div class="k">What I Understood</div>
+            <div class="v">Question type: <strong>${esc(understoodIntent)}</strong><br/>Metric: <strong>${esc(understoodMetric)}</strong></div>
           </div>
           <div class="diag-card">
-            <div class="k">Data Scope</div>
-            <div class="v">table=<code>${esc(grounding.table || 'unknown')}</code> group_by=<code>${esc(dimsLabel)}</code></div>
+            <div class="k">Data Used</div>
+            <div class="v">${esc(scopeLabel)} (<code>${esc(grounding.table || 'unknown')}</code>)<br/>Grouped by: <strong>${esc(dimsLabel)}</strong></div>
           </div>
           <div class="diag-card">
-            <div class="k">Time Window</div>
+            <div class="k">Time Period</div>
             <div class="v">${esc(fmtTimeFilter(grounding.time_filter))}</div>
           </div>
           <div class="diag-card">
@@ -4656,16 +4696,16 @@ def get_ui_html() -> str:
             <div class="v">${esc(filtersLabel)}</div>
           </div>
           <div class="diag-card">
-            <div class="k">Validation</div>
-            <div class="v">concept=<strong>${termMisses.length ? 'warn' : 'pass'}</strong>, coverage=<strong>${esc(conceptCoverage)}</strong>, replay=<strong>${esc(replayText)}</strong></div>
+            <div class="k">Reliability</div>
+            <div class="v">${esc(checksSummary)}<br/>Concept coverage: <strong>${esc(conceptCoverage)}</strong><br/>Replay: <strong>${esc(replayText)}</strong></div>
           </div>
           <div class="diag-card">
-            <div class="k">Execution Path</div>
-            <div class="v">mode=<code>${esc(runtime.mode || 'unknown')}</code> connection=<code>${esc(runtime.db_connection_id || 'default')}</code></div>
+            <div class="k">Engine</div>
+            <div class="v">${esc((runtime.mode || 'unknown').toUpperCase())} on connection <code>${esc(runtime.db_connection_id || 'default')}</code></div>
           </div>
           <div class="diag-card">
-            <div class="k">Semantic Profile</div>
-            <div class="v"><code>${esc(semanticVersion)}</code></div>
+            <div class="k">Dataset Snapshot</div>
+            <div class="v">${esc(snapshotLabel)}</div>
           </div>
         </div>
       `;
@@ -4689,12 +4729,12 @@ def get_ui_html() -> str:
         </div>
         <div style="margin-bottom:6px;">
           <span class="tag ${data.success ? 'ok' : 'warn'}">${data.success ? 'SUCCESS' : 'DEGRADED'}</span>
-          <span class="tag ${data.success ? 'ok' : 'warn'}">${esc(runtime.mode || 'unknown')}</span>
+          <span class="tag ${data.success ? 'ok' : 'warn'}">${esc((runtime.mode || 'unknown').toUpperCase())} ENGINE</span>
           <span class="hint">rows: ${esc(fmt(data.row_count || 0))}</span>
         </div>
         <div style="margin-bottom:6px;">
-          <span class="tag ${conceptTagClass}">Concept ${termMisses.length ? 'warn' : 'pass'}</span>
-          <span class="tag ${grounding.replay_match === false ? 'warn' : 'ok'}">Replay ${esc(replayText)}</span>
+          <span class="tag ${conceptTagClass}">${termMisses.length ? 'Question match needs review' : 'Question match looks good'}</span>
+          <span class="tag ${grounding.replay_match === false ? 'warn' : 'ok'}">${grounding.replay_match === false ? 'Replay mismatch' : 'Replay check passed'}</span>
         </div>
         ${diagHtml}
         ${diagOutcome}

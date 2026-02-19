@@ -104,7 +104,7 @@ Current bounded controls exposed in API:
 - query timeout guardrails in UI to prevent stuck runs
 - semantic profile versioning + per-domain coverage metrics in every run
 - autonomy refinement rounds with per-round score/evidence tracking
-- full automated test suite passing (`247 passed`, `15 skipped`)
+- full automated test suite passing (`249 passed`, `15 skipped`)
 
 ## Quick Start
 

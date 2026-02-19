@@ -2510,6 +2510,8 @@ class AgenticAnalyticsTeam:
             for k in [
                 "top ",
                 "split by",
+                "split ",
+                "split",
                 "breakdown",
                 " by ",
                 " per ",
@@ -2662,12 +2664,18 @@ class AgenticAnalyticsTeam:
         }
 
         dimensions: list[str] = []
-        if domain != "documents" and re.search(r"\b(by month|monthly|month[\s-]?wise|trend)\b", lower):
+        dim_signal = any(
+            t in lower
+            for t in [" by ", "split", "breakdown", "top", "wise", "per ", "month wise", "grouped", "group by"]
+        )
+        has_month_signal = bool(
+            re.search(r"\b(by month|monthly|month[\s-]?wise|trend)\b", lower)
+            or ("month" in lower and dim_signal)
+            or ("split my month" in lower)
+        )
+        if domain != "documents" and has_month_signal:
             dimensions.append("__month__")
 
-        dim_signal = any(
-            t in lower for t in [" by ", "split", "breakdown", "top", "wise", "per ", "month wise"]
-        )
         for key, col in dim_candidates.get(domain, {}).items():
             if key == "month":
                 continue
@@ -2813,6 +2821,28 @@ class AgenticAnalyticsTeam:
                 add_filter("has_refund", "true")
                 if any(t in lower for t in amount_terms) and not has_count_words:
                     out["metric"] = "total_amount"
+
+        if "split" in lower and str(out.get("intent") or "") == "metric":
+            out["intent"] = "grouped_metric"
+
+        dims = list(out.get("dimensions") or [])
+        dim0 = out.get("dimension")
+        if not dims and isinstance(dim0, str) and dim0.strip():
+            dims = [dim0.strip()]
+        dim_signal = any(
+            token in lower for token in [" by ", "split", "breakdown", "wise", "per ", "grouped", "group by"]
+        )
+        if "month" in lower and dim_signal and "__month__" not in dims:
+            dims.append("__month__")
+        if out.get("domain") == "transactions":
+            if "platform" in lower and dim_signal and "platform_name" not in dims:
+                dims.append("platform_name")
+            if "state" in lower and dim_signal and "state" not in dims:
+                dims.append("state")
+        if len(dims) > 2:
+            dims = dims[:2]
+        out["dimensions"] = dims
+        out["dimension"] = dims[0] if dims else None
 
         out["value_filters"] = value_filters
         return out

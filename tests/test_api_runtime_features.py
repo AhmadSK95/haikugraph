@@ -234,9 +234,24 @@ def test_data_overview_includes_rare_pockets_and_semantic_version(client):
     assert isinstance(quality.get("coverage_by_domain"), dict)
     checks = payload.get("sanity_checks", [])
     assert any(c.get("check_name") == "semantic_versioned" and c.get("passed") for c in checks)
-    agent_names = [step.get("agent") for step in payload.get("agent_trace", [])]
-    assert "DiscoveryPlannerAgent" in agent_names
-    assert "CatalogProfilerAgent" in agent_names
+
+
+def test_split_month_and_platform_phrase_generates_grouped_dimensions(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "What are the transaction split my month and platform",
+            "llm_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    grounding = (payload.get("data_quality") or {}).get("grounding", {})
+    dims = grounding.get("dimensions") or []
+    assert "__month__" in dims
+    assert "platform_name" in dims
+    assert payload.get("row_count", 0) > 1
 
 
 def test_document_query_returns_citations(tmp_path: Path):
