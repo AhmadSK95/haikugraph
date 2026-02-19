@@ -90,6 +90,30 @@ def test_query_includes_blackboard_and_confidence_decomposition(client):
     assert isinstance(autonomy.get("contradiction_resolution", {}), dict)
 
 
+def test_autonomy_reports_refinement_rounds_and_signatures(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "What is the forex markup revenue for December 2025?",
+            "llm_mode": "deterministic",
+            "max_refinement_rounds": 3,
+            "max_candidate_plans": 4,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    autonomy = (data.get("data_quality") or {}).get("autonomy", {})
+    rounds = autonomy.get("refinement_rounds", [])
+    assert isinstance(rounds, list)
+    assert len(rounds) >= 1
+    assert len(rounds) <= 3
+    assert all("round" in r and "ending_score" in r for r in rounds)
+
+    grounding = (data.get("data_quality") or {}).get("grounding", {})
+    assert "concept_coverage_pct" in grounding
+    assert grounding.get("execution_signature")
+
+
 def test_corrections_can_be_listed_and_toggled(client):
     feedback = client.post(
         "/api/assistant/feedback",

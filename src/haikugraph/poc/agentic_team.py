@@ -6,6 +6,7 @@ simulates a compact analytics and data-engineering team.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -100,6 +101,11 @@ def _fmt_number(value: Any) -> str:
     if abs(num) >= 1000 or num.is_integer():
         return f"{num:,.0f}" if num.is_integer() else f"{num:,.2f}"
     return f"{num:.4g}"
+
+
+def _semantic_signature(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()[:12]
 
 
 @dataclass
@@ -529,6 +535,7 @@ class SemanticLayerManager:
             "source_tables": source_tables,
             "marts": {},
             "dimension_values": {},
+            "semantic_version": "",
             "metrics_by_table": {
                 "datada_mart_transactions": {
                     "transaction_count": "COUNT(DISTINCT transaction_key)",
@@ -571,7 +578,10 @@ class SemanticLayerManager:
                     "mt103_rate": "mt103_created_ts",
                 }
             },
-            "quality": {},
+            "quality": {
+                "coverage_by_domain": {},
+                "semantic_version": "",
+            },
         }
 
         for mart in marts:
@@ -634,7 +644,85 @@ class SemanticLayerManager:
             tx_quality["transaction_key_null_rate"] = float(q[0] or 0.0)
             tx_quality["event_ts_null_rate"] = float(q[1] or 0.0)
             tx_quality["amount_nonzero_ratio"] = float(q[2] or 0.0)
-        catalog["quality"] = tx_quality
+
+        quote_rows = catalog["marts"]["datada_mart_quotes"]["row_count"]
+        quote_quality = {
+            "quotes_row_count": quote_rows,
+            "quote_key_null_rate": 0.0,
+            "markup_nonzero_ratio": 0.0,
+        }
+        if quote_rows > 0:
+            q = conn.execute(
+                """
+                SELECT
+                    AVG(CASE WHEN quote_key IS NULL THEN 1.0 ELSE 0.0 END),
+                    AVG(CASE WHEN forex_markup IS NULL OR forex_markup = 0 THEN 0.0 ELSE 1.0 END)
+                FROM datada_mart_quotes
+                """
+            ).fetchone()
+            quote_quality["quote_key_null_rate"] = float(q[0] or 0.0)
+            quote_quality["markup_nonzero_ratio"] = float(q[1] or 0.0)
+
+        customer_rows = catalog["marts"]["datada_dim_customers"]["row_count"]
+        customer_quality = {
+            "customers_row_count": customer_rows,
+            "customer_key_null_rate": 0.0,
+            "university_ratio": 0.0,
+        }
+        if customer_rows > 0:
+            q = conn.execute(
+                """
+                SELECT
+                    AVG(CASE WHEN customer_key IS NULL THEN 1.0 ELSE 0.0 END),
+                    AVG(CASE WHEN is_university THEN 1.0 ELSE 0.0 END)
+                FROM datada_dim_customers
+                """
+            ).fetchone()
+            customer_quality["customer_key_null_rate"] = float(q[0] or 0.0)
+            customer_quality["university_ratio"] = float(q[1] or 0.0)
+
+        booking_rows = catalog["marts"]["datada_mart_bookings"]["row_count"]
+        booking_quality = {
+            "bookings_row_count": booking_rows,
+            "booking_key_null_rate": 0.0,
+            "booked_amount_nonzero_ratio": 0.0,
+        }
+        if booking_rows > 0:
+            q = conn.execute(
+                """
+                SELECT
+                    AVG(CASE WHEN booking_key IS NULL THEN 1.0 ELSE 0.0 END),
+                    AVG(CASE WHEN booked_amount IS NULL OR booked_amount = 0 THEN 0.0 ELSE 1.0 END)
+                FROM datada_mart_bookings
+                """
+            ).fetchone()
+            booking_quality["booking_key_null_rate"] = float(q[0] or 0.0)
+            booking_quality["booked_amount_nonzero_ratio"] = float(q[1] or 0.0)
+
+        coverage_by_domain = {
+            "transactions": tx_rows,
+            "quotes": quote_rows,
+            "customers": customer_rows,
+            "bookings": booking_rows,
+        }
+
+        semantic_version_payload = {
+            "marts": {k: catalog["marts"][k]["columns"] for k in sorted(catalog["marts"])},
+            "metrics_by_table": catalog["metrics_by_table"],
+            "preferred_time_column": catalog["preferred_time_column"],
+            "preferred_time_column_by_metric": catalog["preferred_time_column_by_metric"],
+        }
+        semantic_version = _semantic_signature(semantic_version_payload)
+        catalog["semantic_version"] = semantic_version
+        catalog["quality"] = {
+            **tx_quality,
+            **quote_quality,
+            **customer_quality,
+            **booking_quality,
+            "coverage_by_domain": coverage_by_domain,
+            "semantic_version": semantic_version,
+            "semantic_marts_ready": all(v > 0 for v in coverage_by_domain.values()),
+        }
         return catalog
 
 
@@ -983,7 +1071,16 @@ class AgenticAnalyticsTeam:
                             check_name="catalog_ready",
                             passed=True,
                             message="Semantic marts built and discoverable.",
-                        )
+                        ),
+                        SanityCheck(
+                            check_name="semantic_versioned",
+                            passed=bool(catalog.get("semantic_version")),
+                            message=(
+                                f"Semantic profile version {catalog.get('semantic_version')}."
+                                if catalog.get("semantic_version")
+                                else "Semantic profile version missing."
+                            ),
+                        ),
                     ],
                     trace_id=trace_id,
                     runtime={
@@ -1345,6 +1442,7 @@ class AgenticAnalyticsTeam:
                     "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
                     "confidence_decomposition": autonomy_result.get("confidence_decomposition", []),
                     "contradiction_resolution": autonomy_result.get("contradiction_resolution", {}),
+                    "refinement_rounds": autonomy_result.get("refinement_rounds", []),
                     "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
                 },
                 consumed_by=["NarrativeAgent", "ChiefAnalystAgent"],
@@ -1428,6 +1526,7 @@ class AgenticAnalyticsTeam:
                     "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
                     "confidence_decomposition": autonomy_result.get("confidence_decomposition", []),
                     "contradiction_resolution": autonomy_result.get("contradiction_resolution", {}),
+                    "refinement_rounds": autonomy_result.get("refinement_rounds", []),
                     "probe_findings": autonomy_result.get("probe_findings", []),
                     "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
                 },
@@ -1490,11 +1589,12 @@ class AgenticAnalyticsTeam:
                     "llm_intake_used": bool(intake.get("_llm_intake_used", False)),
                     "llm_narrative_used": bool(narration.get("llm_narrative_used", False)),
                     "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
+                    "refinement_rounds": autonomy_result.get("refinement_rounds", []),
                     "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
                 },
             )
 
-            if autonomy_result.get("correction_applied") and confidence_score >= 0.78:
+            if execution["success"] and confidence_score >= 0.78:
                 self._memory_learn_from_success(
                     trace,
                     tenant_id=tenant_id,
@@ -1539,6 +1639,7 @@ class AgenticAnalyticsTeam:
                         "evaluated_candidates": autonomy_result.get("evaluated_candidates", []),
                         "confidence_decomposition": autonomy_result.get("confidence_decomposition", []),
                         "contradiction_resolution": autonomy_result.get("contradiction_resolution", {}),
+                        "refinement_rounds": autonomy_result.get("refinement_rounds", []),
                         "toolsmith_candidates": autonomy_result.get("toolsmith_candidates", []),
                     },
                     "blackboard": {"artifact_count": len(blackboard), "edges": self._blackboard_edges(blackboard)},
@@ -1759,6 +1860,8 @@ class AgenticAnalyticsTeam:
             "marts": [],
             "domains": {},
             "highlights": [],
+            "semantic_version": str(catalog.get("semantic_version") or ""),
+            "quality": dict(catalog.get("quality") or {}),
         }
         for mart, meta in marts.items():
             profile["marts"].append(
@@ -1828,6 +1931,30 @@ class AgenticAnalyticsTeam:
                     """,
                     limit=1,
                 ),
+                "monthly_activity": self._profile_sql_rows(
+                    """
+                    SELECT
+                        DATE_TRUNC('month', event_ts) AS dimension,
+                        COUNT(DISTINCT transaction_key) AS metric_value
+                    FROM datada_mart_transactions
+                    WHERE event_ts IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY 1 DESC
+                    LIMIT 12
+                    """,
+                    limit=12,
+                ),
+                "rare_platforms": self._profile_sql_rows(
+                    """
+                    SELECT platform_name AS dimension, COUNT(DISTINCT transaction_key) AS metric_value
+                    FROM datada_mart_transactions
+                    WHERE platform_name IS NOT NULL AND TRIM(platform_name) != ''
+                    GROUP BY 1
+                    ORDER BY 2 ASC, 1 ASC
+                    LIMIT 4
+                    """,
+                    limit=4,
+                ),
             }
             profile["domains"]["transactions"] = tx
 
@@ -1861,6 +1988,30 @@ class AgenticAnalyticsTeam:
                 "time_window": self._profile_sql_rows(
                     "SELECT MIN(created_ts) AS min_ts, MAX(created_ts) AS max_ts FROM datada_mart_quotes",
                     limit=1,
+                ),
+                "monthly_activity": self._profile_sql_rows(
+                    """
+                    SELECT
+                        DATE_TRUNC('month', created_ts) AS dimension,
+                        COUNT(DISTINCT quote_key) AS metric_value
+                    FROM datada_mart_quotes
+                    WHERE created_ts IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY 1 DESC
+                    LIMIT 12
+                    """,
+                    limit=12,
+                ),
+                "rare_currency_pairs": self._profile_sql_rows(
+                    """
+                    SELECT CONCAT(COALESCE(from_currency, '?'), '->', COALESCE(to_currency, '?')) AS dimension,
+                           COUNT(DISTINCT quote_key) AS metric_value
+                    FROM datada_mart_quotes
+                    GROUP BY 1
+                    ORDER BY 2 ASC, 1 ASC
+                    LIMIT 4
+                    """,
+                    limit=4,
                 ),
             }
             profile["domains"]["quotes"] = quotes
@@ -1899,6 +2050,30 @@ class AgenticAnalyticsTeam:
                     )
                     or 0
                 ),
+                "rare_countries": self._profile_sql_rows(
+                    """
+                    SELECT address_country AS dimension, COUNT(DISTINCT customer_key) AS metric_value
+                    FROM datada_dim_customers
+                    WHERE address_country IS NOT NULL AND TRIM(address_country) != ''
+                    GROUP BY 1
+                    ORDER BY 2 ASC, 1 ASC
+                    LIMIT 4
+                    """,
+                    limit=4,
+                ),
+                "monthly_new_customers": self._profile_sql_rows(
+                    """
+                    SELECT
+                        DATE_TRUNC('month', created_ts) AS dimension,
+                        COUNT(DISTINCT customer_key) AS metric_value
+                    FROM datada_dim_customers
+                    WHERE created_ts IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY 1 DESC
+                    LIMIT 12
+                    """,
+                    limit=12,
+                ),
             }
             profile["domains"]["customers"] = customers
 
@@ -1932,6 +2107,30 @@ class AgenticAnalyticsTeam:
                         default=0.0,
                     )
                     or 0.0
+                ),
+                "monthly_activity": self._profile_sql_rows(
+                    """
+                    SELECT
+                        DATE_TRUNC('month', booked_ts) AS dimension,
+                        COUNT(DISTINCT booking_key) AS metric_value
+                    FROM datada_mart_bookings
+                    WHERE booked_ts IS NOT NULL
+                    GROUP BY 1
+                    ORDER BY 1 DESC
+                    LIMIT 12
+                    """,
+                    limit=12,
+                ),
+                "rare_deal_types": self._profile_sql_rows(
+                    """
+                    SELECT deal_type AS dimension, COUNT(DISTINCT booking_key) AS metric_value
+                    FROM datada_mart_bookings
+                    WHERE deal_type IS NOT NULL AND TRIM(deal_type) != ''
+                    GROUP BY 1
+                    ORDER BY 2 ASC, 1 ASC
+                    LIMIT 4
+                    """,
+                    limit=4,
                 ),
             }
             profile["domains"]["bookings"] = bookings
@@ -1988,6 +2187,17 @@ class AgenticAnalyticsTeam:
                     """,
                     limit=6,
                 ),
+                "top_sources": self._profile_sql_rows(
+                    """
+                    SELECT source_path AS dimension, MAX(token_count) AS metric_value
+                    FROM datada_documents
+                    WHERE source_path IS NOT NULL AND TRIM(source_path) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
             }
             if has_doc_chunks_table:
                 documents["chunk_count"] = int(
@@ -2014,6 +2224,16 @@ class AgenticAnalyticsTeam:
             doc_count = profile["domains"]["documents"]["document_count"]
             profile["highlights"].append(
                 f"Document corpus available with {_fmt_number(doc_count)} files for citation-backed Q&A."
+            )
+        semantic_version = str(catalog.get("semantic_version") or "")
+        if semantic_version:
+            profile["highlights"].append(f"Semantic profile version `{semantic_version}` is active.")
+        coverage = dict((catalog.get("quality") or {}).get("coverage_by_domain") or {})
+        if coverage:
+            sparse_domain = min(coverage, key=lambda k: int(coverage.get(k) or 0))
+            sparse_rows = int(coverage.get(sparse_domain) or 0)
+            profile["highlights"].append(
+                f"Smallest active domain is `{sparse_domain}` with {_fmt_number(sparse_rows)} rows."
             )
         return profile
 
@@ -2042,6 +2262,20 @@ class AgenticAnalyticsTeam:
         customers = domains.get("customers", {})
         bookings = domains.get("bookings", {})
         documents = domains.get("documents", {})
+        quality = dict((overview_profile or {}).get("quality") or {})
+        semantic_version = str(
+            (overview_profile or {}).get("semantic_version")
+            or catalog.get("semantic_version")
+            or quality.get("semantic_version")
+            or "n/a"
+        )
+        coverage_by_domain = dict(quality.get("coverage_by_domain") or {})
+
+        def _rare_dimension(rows: Any) -> str:
+            if not isinstance(rows, list) or not rows:
+                return "n/a"
+            row0 = rows[0] if isinstance(rows[0], dict) else {}
+            return str(row0.get("dimension") or "n/a")
 
         insight_lines: list[str] = []
         if tx:
@@ -2087,6 +2321,23 @@ class AgenticAnalyticsTeam:
                 + f", leading type `{top_type.get('dimension', 'n/a')}`."
             )
 
+        rare_lines: list[str] = []
+        if tx:
+            rare_lines.append(f"Transactions rare platforms: `{_rare_dimension(tx.get('rare_platforms'))}`.")
+        if quotes:
+            rare_lines.append(f"Quotes rare currency pairs: `{_rare_dimension(quotes.get('rare_currency_pairs'))}`.")
+        if customers:
+            rare_lines.append(f"Customers rare countries: `{_rare_dimension(customers.get('rare_countries'))}`.")
+        if bookings:
+            rare_lines.append(f"Bookings rare deal types: `{_rare_dimension(bookings.get('rare_deal_types'))}`.")
+
+        schema_lines = []
+        for row in marts[:6]:
+            columns = list(row.get("columns") or [])
+            if not columns:
+                continue
+            schema_lines.append(f"- `{row['mart']}` key columns: {', '.join(columns[:6])}")
+
         intro = (
             "Here is the richer map of your data universe."
             if storyteller_mode
@@ -2100,8 +2351,17 @@ class AgenticAnalyticsTeam:
             + "\n\n**What is inside each stream**\n"
             + ("\n".join(f"- {line}" for line in insight_lines) if insight_lines else "- Core marts are available.")
         )
+        if schema_lines:
+            answer += "\n\n**Schema landmarks**\n" + "\n".join(schema_lines)
+        if rare_lines:
+            answer += "\n\n**Rare pockets worth exploring**\n" + "\n".join(f"- {line}" for line in rare_lines)
         if highlights:
-            answer += "\n\n**Notable signals**\n" + "\n".join(f"- {line}" for line in highlights[:4])
+            answer += "\n\n**Notable signals**\n" + "\n".join(f"- {line}" for line in highlights[:5])
+        if coverage_by_domain:
+            coverage_text = ", ".join(
+                f"{k}={_fmt_number(v)}" for k, v in sorted(coverage_by_domain.items())
+            )
+            answer += f"\n\n**Coverage snapshot**\n- {coverage_text}\n- semantic version: `{semantic_version}`"
         answer += (
             "\n\nI can now drill down by platform, month, state, currency pair, customer segment, or deal type."
         )
@@ -3019,10 +3279,12 @@ class AgenticAnalyticsTeam:
                 "decomposition": base_breakdown,
                 "row_count": int(base_execution.get("row_count") or 0),
                 "goal_term_misses": list(base_audit.get("grounding", {}).get("goal_term_misses", [])),
+                "round": 0,
             }
         ]
         correction_applied = False
         correction_reason = ""
+        refinement_rounds: list[dict[str, Any]] = []
 
         if not autonomy.auto_correction:
             return {
@@ -3032,52 +3294,78 @@ class AgenticAnalyticsTeam:
                 "contradiction_resolution": self._resolve_candidate_contradictions(candidate_evals),
                 "correction_applied": False,
                 "correction_reason": "",
+                "refinement_rounds": refinement_rounds,
                 "probe_findings": [],
                 "toolsmith_candidates": [],
             }
 
-        candidates = self._generate_candidate_plans(
-            goal=goal,
-            base_plan=base_plan,
-            base_execution=base_execution,
-            catalog=catalog,
-            memory_hints=memory_hints or [],
-            learned_corrections=learned_corrections or [],
-            autonomy=autonomy,
-        )
-
         seen = {self._plan_signature(base_plan)}
-        for candidate in candidates[: max(0, autonomy.max_candidate_plans - 1)]:
-            signature = self._plan_signature(candidate)
-            if signature in seen:
-                continue
-            seen.add(signature)
-            query_plan = self._query_engine_agent(candidate, [])
-            execution = self._execution_agent(query_plan)
-            audit = self._audit_agent(candidate, query_plan, execution)
-            breakdown = self._candidate_score_breakdown(goal, candidate, execution, audit)
-            score = float(breakdown["total"])
-            candidate_evals.append(
+        max_rounds = max(1, int(autonomy.max_refinement_rounds))
+        seed_plan = base_plan
+        seed_execution = base_execution
+        for round_idx in range(max_rounds):
+            round_no = round_idx + 1
+            round_started_score = float(selected["score"])
+            evaluated = 0
+            improved = False
+            candidates = self._generate_candidate_plans(
+                goal=goal,
+                base_plan=seed_plan,
+                base_execution=seed_execution,
+                catalog=catalog,
+                memory_hints=memory_hints or [],
+                learned_corrections=learned_corrections or [],
+                autonomy=autonomy,
+            )
+            for candidate in candidates[: max(1, autonomy.max_candidate_plans)]:
+                signature = self._plan_signature(candidate)
+                if signature in seen:
+                    continue
+                seen.add(signature)
+                evaluated += 1
+                query_plan = self._query_engine_agent(candidate, [])
+                execution = self._execution_agent(query_plan)
+                audit = self._audit_agent(candidate, query_plan, execution)
+                breakdown = self._candidate_score_breakdown(goal, candidate, execution, audit)
+                score = float(breakdown["total"])
+                candidate_evals.append(
+                    {
+                        "candidate": candidate.get("_variant_reason", "variant"),
+                        "table": candidate.get("table"),
+                        "metric": candidate.get("metric"),
+                        "score": round(score, 4),
+                        "decomposition": breakdown,
+                        "row_count": int(execution.get("row_count") or 0),
+                        "goal_term_misses": list(audit.get("grounding", {}).get("goal_term_misses", [])),
+                        "round": round_no,
+                    }
+                )
+                if score > selected["score"]:
+                    improved = True
+                    selected = {
+                        "plan": candidate,
+                        "query_plan": query_plan,
+                        "execution": execution,
+                        "audit": audit,
+                        "score": score,
+                        "score_breakdown": breakdown,
+                        "reason": candidate.get("_variant_reason", "higher_score"),
+                    }
+
+            refinement_rounds.append(
                 {
-                    "candidate": candidate.get("_variant_reason", "variant"),
-                    "table": candidate.get("table"),
-                    "metric": candidate.get("metric"),
-                    "score": round(score, 4),
-                    "decomposition": breakdown,
-                    "row_count": int(execution.get("row_count") or 0),
-                    "goal_term_misses": list(audit.get("grounding", {}).get("goal_term_misses", [])),
+                    "round": round_no,
+                    "evaluated_candidates": evaluated,
+                    "improved": improved,
+                    "starting_score": round(round_started_score, 4),
+                    "ending_score": round(float(selected["score"]), 4),
+                    "selected_reason": selected.get("reason", "base_plan"),
                 }
             )
-            if score > selected["score"]:
-                selected = {
-                    "plan": candidate,
-                    "query_plan": query_plan,
-                    "execution": execution,
-                    "audit": audit,
-                    "score": score,
-                    "score_breakdown": breakdown,
-                    "reason": candidate.get("_variant_reason", "higher_score"),
-                }
+            if not improved:
+                break
+            seed_plan = selected["plan"]
+            seed_execution = selected["execution"]
 
         base_misses = len(base_audit.get("grounding", {}).get("goal_term_misses", []))
         selected_misses = len(selected["audit"].get("grounding", {}).get("goal_term_misses", []))
@@ -3129,6 +3417,7 @@ class AgenticAnalyticsTeam:
             "contradiction_resolution": self._resolve_candidate_contradictions(candidate_evals),
             "correction_applied": correction_applied,
             "correction_reason": correction_reason,
+            "refinement_rounds": refinement_rounds,
             "probe_findings": probe_findings,
             "toolsmith_candidates": toolsmith_candidates,
         }
@@ -3758,6 +4047,13 @@ class AgenticAnalyticsTeam:
         goal_text = str(plan.get("goal", "")).lower()
         sql_lower = str(query_plan.get("sql", "")).lower()
         available_columns = [str(c).lower() for c in plan.get("available_columns", [])]
+        execution_signature = _semantic_signature(
+            {
+                "sql": str(query_plan.get("sql") or "").strip(),
+                "row_count": int(execution.get("row_count") or 0),
+                "sample_row": (execution.get("sample_rows") or [None])[0],
+            }
+        )
 
         checks.append(
             {
@@ -3838,14 +4134,56 @@ class AgenticAnalyticsTeam:
                 ),
             }
         )
+        concept_total = len(concept_hits) + len(concept_misses)
+        concept_coverage = 1.0 if concept_total == 0 else len(concept_hits) / concept_total
+        checks.append(
+            {
+                "name": "goal_term_coverage",
+                "passed": concept_coverage >= 0.66,
+                "message": f"Concept coverage {round(concept_coverage * 100, 1)}%",
+            }
+        )
+        if concept_coverage < 1.0:
+            warnings.append(
+                f"Goal concept coverage below full match ({round(concept_coverage * 100, 1)}%)."
+            )
+
+        metric_expr = str(plan.get("metric_expr") or "").lower()
+        metric_columns_detected = [
+            col
+            for col in available_columns
+            if len(col) >= 3 and re.search(rf"\b{re.escape(col)}\b", metric_expr)
+        ][:8]
+        schema_grounded = bool(metric_columns_detected) or metric_expr.startswith("count(")
+        checks.append(
+            {
+                "name": "schema_grounding",
+                "passed": schema_grounded,
+                "message": (
+                    "Metric expression grounded in known table columns."
+                    if schema_grounded
+                    else "Metric expression could not be grounded to known columns."
+                ),
+            }
+        )
+        if not schema_grounded:
+            warnings.append("Schema grounding check flagged metric expression.")
 
         replay_match: bool | None = None
+        replay_signature: str | None = None
         if execution["success"] and query_plan.get("sql"):
             replay = self.executor.execute(query_plan["sql"])
             if replay.success:
                 replay_match = replay.row_count == execution["row_count"]
                 if replay_match and replay.rows and execution.get("sample_rows"):
                     replay_match = replay.rows[0] == execution["sample_rows"][0]
+                replay_signature = _semantic_signature(
+                    {
+                        "sql": str(query_plan.get("sql") or "").strip(),
+                        "row_count": int(replay.row_count or 0),
+                        "sample_row": (replay.rows or [None])[0],
+                    }
+                )
                 checks.append(
                     {
                         "name": "replay_consistency",
@@ -3882,6 +4220,9 @@ class AgenticAnalyticsTeam:
         score -= 0.10 * len(warnings)
         if not concept_check_passed:
             score = min(score, 0.45)
+        score -= 0.08 * max(0.0, 1.0 - concept_coverage)
+        if not schema_grounded:
+            score -= 0.08
         score = max(0.0, min(1.0, score))
 
         query_columns_used = [c for c in available_columns if c in sql_lower]
@@ -3895,8 +4236,12 @@ class AgenticAnalyticsTeam:
                 "metric_expr": plan.get("metric_expr"),
                 "goal_terms_detected": concept_hits + concept_misses,
                 "goal_term_misses": concept_misses,
+                "concept_coverage_pct": round(concept_coverage * 100, 1),
+                "metric_columns_detected": metric_columns_detected,
                 "query_columns_used": query_columns_used[:12],
                 "replay_match": replay_match,
+                "execution_signature": execution_signature,
+                "replay_signature": replay_signature,
                 "intent": plan.get("intent"),
                 "dimensions": plan.get("dimensions", []),
                 "time_filter": plan.get("time_filter"),

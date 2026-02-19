@@ -218,6 +218,22 @@ def test_data_overview_uses_discovery_agents(client):
     payload = resp.json()
     assert payload["success"] is True
     assert "Data map" in payload["answer_markdown"]
+
+
+def test_data_overview_includes_rare_pockets_and_semantic_version(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={"goal": "What kind of data do I have?", "llm_mode": "deterministic"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    assert "Rare pockets worth exploring" in payload["answer_markdown"]
+    quality = payload.get("data_quality", {})
+    assert quality.get("semantic_version")
+    assert isinstance(quality.get("coverage_by_domain"), dict)
+    checks = payload.get("sanity_checks", [])
+    assert any(c.get("check_name") == "semantic_versioned" and c.get("passed") for c in checks)
     agent_names = [step.get("agent") for step in payload.get("agent_trace", [])]
     assert "DiscoveryPlannerAgent" in agent_names
     assert "CatalogProfilerAgent" in agent_names

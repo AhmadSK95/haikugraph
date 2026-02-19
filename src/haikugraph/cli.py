@@ -148,35 +148,6 @@ def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
     _run_unified_ingest(data_dir, db_path, sheet, force)
 
 
-@main.command("smart-ingest", hidden=True)
-@click.option(
-    "--data-dir",
-    default="./data",
-    type=click.Path(file_okay=False, dir_okay=True),
-    help="Directory containing Excel files (default: ./data)",
-)
-@click.option(
-    "--db-path",
-    default="./data/haikugraph.db",
-    type=click.Path(),
-    help="Path to DuckDB database file (default: ./data/haikugraph.db)",
-)
-@click.option(
-    "--sheet",
-    default=None,
-    help="Sheet name or index to read (default: first sheet)",
-)
-@click.option(
-    "--force",
-    is_flag=True,
-    default=True,
-    help="Overwrite existing tables (default: True)",
-)
-def smart_ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
-    """Backward-compatible alias for ingest (same pipeline)."""
-    _run_unified_ingest(data_dir, db_path, sheet, force)
-
-
 @main.command("ingest-docs")
 @click.option(
     "--docs-dir",

@@ -4623,6 +4623,10 @@ def get_ui_html() -> str:
       const replayText = grounding.replay_match === null || grounding.replay_match === undefined
         ? 'n/a'
         : (grounding.replay_match ? 'pass' : 'fail');
+      const conceptCoverage = grounding.concept_coverage_pct === null || grounding.concept_coverage_pct === undefined
+        ? 'n/a'
+        : `${fmt(grounding.concept_coverage_pct)}%`;
+      const semanticVersion = quality.semantic_version || 'n/a';
       const failedChecks = checks.filter((c) => !c.passed).map((c) => c.check_name || 'check');
       const outcomeMessages = [];
       if (termMisses.length) outcomeMessages.push(`Missing goal concepts: ${termMisses.join(', ')}`);
@@ -4653,11 +4657,15 @@ def get_ui_html() -> str:
           </div>
           <div class="diag-card">
             <div class="k">Validation</div>
-            <div class="v">concept=<strong>${termMisses.length ? 'warn' : 'pass'}</strong>, replay=<strong>${esc(replayText)}</strong></div>
+            <div class="v">concept=<strong>${termMisses.length ? 'warn' : 'pass'}</strong>, coverage=<strong>${esc(conceptCoverage)}</strong>, replay=<strong>${esc(replayText)}</strong></div>
           </div>
           <div class="diag-card">
             <div class="k">Execution Path</div>
             <div class="v">mode=<code>${esc(runtime.mode || 'unknown')}</code> connection=<code>${esc(runtime.db_connection_id || 'default')}</code></div>
+          </div>
+          <div class="diag-card">
+            <div class="k">Semantic Profile</div>
+            <div class="v"><code>${esc(semanticVersion)}</code></div>
           </div>
         </div>
       `;

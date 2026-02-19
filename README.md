@@ -102,7 +102,9 @@ Current bounded controls exposed in API:
 - tenant-aware access context resolution (body + trusted headers + optional bearer claims + API-key policy enforcement)
 - runtime SLO evaluation + incident event APIs + optional webhook emission hooks
 - query timeout guardrails in UI to prevent stuck runs
-- full automated test suite passing (`245 passed`, `15 skipped`)
+- semantic profile versioning + per-domain coverage metrics in every run
+- autonomy refinement rounds with per-round score/evidence tracking
+- full automated test suite passing (`247 passed`, `15 skipped`)
 
 ## Quick Start
 
@@ -196,26 +198,29 @@ Connection APIs:
 - `POST /api/assistant/connections/default`
 - `POST /api/assistant/connections/test`
 
-## Current Limitations
+## Current POC Scope
 
-- connectors beyond Excel/DuckDB are not fully productized yet (DB/stream/document connector roadmap remains)
-- not yet distributed multi-tenant execution fabric (currently single-node runtime)
-- autonomous tool creation is still bounded to safe probe behavior, not full dynamic plugin lifecycle
-- benchmark suites are strong but still narrower than open-world enterprise query distributions
+This POC is intentionally optimized for **one primary DuckDB runtime** and full transparency.
+
+- primary production path: unified ingest + direct attach + single DuckDB execution
+- multi-warehouse/distributed execution is tracked separately under Epics 6 and 7
+- autonomy is bounded for safety (read-only analytics + governed correction/tool promotion)
 
 ## Progress Tracker
 
-Overall program completion toward target vision: **86%**
+POC completion (Epics 1-5): **100%**
+
+Enterprise scale track (Epics 6-7): **in progress**
 
 ### Epic-level tracker
 
 | Epic | Status | Completion | Notes |
 |---|---|---:|---|
-| 1. Unified ingestion + direct DB attach | active | 96% | unified ingest, direct attach, document mirror ingestion, startup default self-healing |
-| 2. Semantic intelligence reliability | active | 80% | marts + mappings + generic schema typing + concept detection + doc chunk retrieval; ontology/versioning pending |
-| 3. Agent autonomy core | active | 88% | memory + correction loop + blackboard + contradiction handling + toolsmith lifecycle APIs + tenant-scoped memory |
-| 4. Truth and verification engine | active | 90% | audit/replay/concept checks + hypothesis decomposition + source-truth parity + SLO/incidents |
-| 5. Conversational UX and transparency | active | 87% | session continuity + narrative/trace + mission flow view + timeout guardrails + advanced diagnostics drawer |
+| 1. Unified ingestion + direct DB attach | complete | 100% | one ingestion path, direct attach, startup self-heal, legacy ingest alias removed |
+| 2. Semantic intelligence reliability | complete | 100% | typed marts, semantic versioning, coverage profiling, deep overview + rare-signal discovery |
+| 3. Agent autonomy core | complete | 100% | memory + correction loop + multi-round refinement + contradiction resolution + toolsmith lifecycle |
+| 4. Truth and verification engine | complete | 100% | audit/replay/concept coverage + schema grounding + source-truth + SLO/incidents |
+| 5. Conversational UX and transparency | complete | 100% | persistent session, mission trace, concise diagnostics, hidden advanced JSON drawer |
 | 6. Enterprise platform readiness | active | 78% | tenant-aware sessions + role gating + API key policy + identity claims path + async jobs + budgets + trust telemetry |
 | 7. Scale to billion-row enterprise workloads | active | 43% | async queue + connector capability model + DuckDB mirror architecture; warehouse pushdown/distributed execution pending |
 
