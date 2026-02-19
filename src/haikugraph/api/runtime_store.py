@@ -99,6 +99,23 @@ class RuntimeStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS datada_incident_events (
+                        incident_id VARCHAR,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        tenant_id VARCHAR,
+                        severity VARCHAR,
+                        status VARCHAR,
+                        source VARCHAR,
+                        title VARCHAR,
+                        summary VARCHAR,
+                        fingerprint VARCHAR,
+                        metadata_json VARCHAR
+                    )
+                    """
+                )
             finally:
                 conn.close()
 
@@ -529,3 +546,279 @@ class RuntimeStore:
             "recent_failures": failures,
         }
 
+    def evaluate_slo(
+        self,
+        *,
+        tenant_id: str | None = None,
+        hours: int = 24,
+        success_rate_target: float = 0.95,
+        p95_execution_ms_target: float = 3500.0,
+        warning_rate_target: float = 0.15,
+        min_runs: int = 20,
+    ) -> dict[str, Any]:
+        trust = self.trust_dashboard(tenant_id=tenant_id, hours=hours)
+        runs = int(trust.get("runs") or 0)
+        success_rate = float(trust.get("success_rate") or 0.0)
+        p95_execution_ms = float(trust.get("p95_execution_ms") or 0.0)
+        total_warnings = int(trust.get("total_warnings") or 0)
+        warning_rate = (total_warnings / runs) if runs > 0 else 0.0
+
+        breaches: list[dict[str, Any]] = []
+        if runs >= max(1, int(min_runs)):
+            if success_rate < float(success_rate_target):
+                breaches.append(
+                    {
+                        "metric": "success_rate",
+                        "actual": round(success_rate, 4),
+                        "target": round(float(success_rate_target), 4),
+                        "direction": "min",
+                        "delta": round(float(success_rate_target) - success_rate, 4),
+                    }
+                )
+            if p95_execution_ms > float(p95_execution_ms_target):
+                breaches.append(
+                    {
+                        "metric": "p95_execution_ms",
+                        "actual": round(p95_execution_ms, 2),
+                        "target": round(float(p95_execution_ms_target), 2),
+                        "direction": "max",
+                        "delta": round(p95_execution_ms - float(p95_execution_ms_target), 2),
+                    }
+                )
+            if warning_rate > float(warning_rate_target):
+                breaches.append(
+                    {
+                        "metric": "warning_rate",
+                        "actual": round(warning_rate, 4),
+                        "target": round(float(warning_rate_target), 4),
+                        "direction": "max",
+                        "delta": round(warning_rate - float(warning_rate_target), 4),
+                    }
+                )
+
+        status = "insufficient_data"
+        if runs >= max(1, int(min_runs)):
+            status = "healthy" if not breaches else "breach"
+
+        burn_rate = 0.0
+        if runs >= max(1, int(min_runs)):
+            ratios: list[float] = []
+            if float(success_rate_target) > 0:
+                ratios.append(max(0.0, (float(success_rate_target) - success_rate) / float(success_rate_target)))
+            if float(p95_execution_ms_target) > 0:
+                ratios.append(max(0.0, (p95_execution_ms - float(p95_execution_ms_target)) / float(p95_execution_ms_target)))
+            if float(warning_rate_target) > 0:
+                ratios.append(max(0.0, (warning_rate - float(warning_rate_target)) / float(warning_rate_target)))
+            burn_rate = max(ratios) if ratios else 0.0
+
+        return {
+            "generated_at": _utc_iso(),
+            "tenant_id": str(trust.get("tenant_id") or (tenant_id or "all")),
+            "window_hours": int(hours),
+            "runs": runs,
+            "status": status,
+            "success_rate": round(success_rate, 4),
+            "p95_execution_ms": round(p95_execution_ms, 2),
+            "warning_rate": round(warning_rate, 4),
+            "targets": {
+                "success_rate_min": round(float(success_rate_target), 4),
+                "p95_execution_ms_max": round(float(p95_execution_ms_target), 2),
+                "warning_rate_max": round(float(warning_rate_target), 4),
+                "min_runs": max(1, int(min_runs)),
+            },
+            "breaches": breaches,
+            "burn_rate": round(float(burn_rate), 4),
+            "trust": trust,
+        }
+
+    def record_incident(
+        self,
+        *,
+        tenant_id: str,
+        severity: str,
+        title: str,
+        summary: str,
+        source: str = "runtime",
+        fingerprint: str = "",
+        metadata: dict[str, Any] | None = None,
+        dedupe_window_minutes: int = 60,
+    ) -> dict[str, Any]:
+        clean_tenant = (tenant_id or "public").strip() or "public"
+        sev = (severity or "medium").strip().lower()
+        if sev not in {"info", "low", "medium", "high", "critical"}:
+            sev = "medium"
+        fp = (fingerprint or "").strip()
+        dedupe_minutes = max(1, int(dedupe_window_minutes))
+        cutoff = _utc_now() - timedelta(minutes=dedupe_minutes)
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                if fp:
+                    existing = conn.execute(
+                        """
+                        SELECT incident_id, created_at
+                        FROM datada_incident_events
+                        WHERE tenant_id = ?
+                          AND fingerprint = ?
+                          AND status IN ('open', 'acknowledged')
+                          AND created_at >= ?
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        [clean_tenant, fp, cutoff],
+                    ).fetchone()
+                    if existing:
+                        return {
+                            "incident_id": str(existing[0]),
+                            "created_at": str(existing[1] or ""),
+                            "created": False,
+                            "deduped": True,
+                        }
+
+                incident_id = str(uuid.uuid4())
+                now = _utc_now()
+                conn.execute(
+                    """
+                    INSERT INTO datada_incident_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        incident_id,
+                        now,
+                        now,
+                        clean_tenant,
+                        sev,
+                        "open",
+                        source,
+                        (title or "").strip()[:240],
+                        (summary or "").strip()[:2000],
+                        fp,
+                        json.dumps(metadata or {}, default=str),
+                    ],
+                )
+            finally:
+                conn.close()
+
+        return {
+            "incident_id": incident_id,
+            "created_at": _utc_iso(),
+            "created": True,
+            "deduped": False,
+        }
+
+    def list_incidents(
+        self,
+        *,
+        tenant_id: str | None = None,
+        status: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        where_parts: list[str] = []
+        params: list[Any] = []
+        clean_tenant = (tenant_id or "").strip()
+        clean_status = (status or "").strip().lower()
+        if clean_tenant:
+            where_parts.append("tenant_id = ?")
+            params.append(clean_tenant)
+        if clean_status:
+            where_parts.append("LOWER(status) = ?")
+            params.append(clean_status)
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        params.append(max(1, min(500, int(limit))))
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT incident_id, created_at, updated_at, tenant_id, severity, status, source,
+                           title, summary, fingerprint, metadata_json
+                    FROM datada_incident_events
+                    {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    params,
+                ).fetchall()
+            finally:
+                conn.close()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            metadata = {}
+            try:
+                parsed = json.loads(row[10] or "{}")
+                if isinstance(parsed, dict):
+                    metadata = parsed
+            except Exception:
+                metadata = {}
+            out.append(
+                {
+                    "incident_id": str(row[0] or ""),
+                    "created_at": str(row[1] or ""),
+                    "updated_at": str(row[2] or ""),
+                    "tenant_id": str(row[3] or ""),
+                    "severity": str(row[4] or ""),
+                    "status": str(row[5] or ""),
+                    "source": str(row[6] or ""),
+                    "title": str(row[7] or ""),
+                    "summary": str(row[8] or ""),
+                    "fingerprint": str(row[9] or ""),
+                    "metadata": metadata,
+                }
+            )
+        return out
+
+    def update_incident_status(
+        self,
+        *,
+        incident_id: str,
+        status: str,
+        note: str = "",
+    ) -> dict[str, Any]:
+        clean_id = (incident_id or "").strip()
+        if not clean_id:
+            return {"success": False, "message": "Missing incident_id."}
+        clean_status = (status or "").strip().lower()
+        if clean_status not in {"open", "acknowledged", "resolved", "dismissed"}:
+            return {"success": False, "message": "Invalid incident status."}
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT incident_id, metadata_json
+                    FROM datada_incident_events
+                    WHERE incident_id = ?
+                    LIMIT 1
+                    """,
+                    [clean_id],
+                ).fetchone()
+                if not row:
+                    return {"success": False, "message": f"Unknown incident_id '{clean_id}'."}
+
+                metadata = {}
+                try:
+                    parsed = json.loads(row[1] or "{}")
+                    if isinstance(parsed, dict):
+                        metadata = parsed
+                except Exception:
+                    metadata = {}
+                if note.strip():
+                    metadata["status_note"] = note.strip()[:400]
+                metadata["status_updated_at"] = _utc_iso()
+
+                conn.execute(
+                    """
+                    UPDATE datada_incident_events
+                    SET updated_at = ?, status = ?, metadata_json = ?
+                    WHERE incident_id = ?
+                    """,
+                    [_utc_now(), clean_status, json.dumps(metadata, default=str), clean_id],
+                )
+            finally:
+                conn.close()
+
+        return {"success": True, "message": f"Incident {clean_id} set to {clean_status}."}

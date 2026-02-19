@@ -12,6 +12,8 @@ import duckdb
 
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".markdown", ".log", ".rst", ".pdf", ".docx"}
+DEFAULT_CHUNK_CHARS = 1200
+DEFAULT_CHUNK_OVERLAP_CHARS = 180
 
 
 def _read_text_file(path: Path) -> str:
@@ -58,6 +60,51 @@ def _token_count(text: str) -> int:
     return len(re.findall(r"[a-zA-Z0-9_]+", text))
 
 
+def _chunk_text(
+    text: str,
+    *,
+    chunk_chars: int = DEFAULT_CHUNK_CHARS,
+    overlap_chars: int = DEFAULT_CHUNK_OVERLAP_CHARS,
+) -> list[dict[str, Any]]:
+    clean = (text or "").strip()
+    if not clean:
+        return []
+    cap = max(220, int(chunk_chars))
+    overlap = max(0, min(cap // 2, int(overlap_chars)))
+    out: list[dict[str, Any]] = []
+    start = 0
+    idx = 0
+    n = len(clean)
+    while start < n:
+        end = min(n, start + cap)
+        # Prefer cutting at sentence/newline boundaries when possible.
+        if end < n:
+            boundary_window = clean[start:end]
+            boundary = max(
+                boundary_window.rfind("\n\n"),
+                boundary_window.rfind(". "),
+                boundary_window.rfind("; "),
+            )
+            if boundary > 180:
+                end = start + boundary + 1
+        piece = clean[start:end].strip()
+        if piece:
+            out.append(
+                {
+                    "chunk_index": idx,
+                    "char_start": start,
+                    "char_end": end,
+                    "content": piece,
+                    "token_count": _token_count(piece),
+                }
+            )
+            idx += 1
+        if end >= n:
+            break
+        start = max(start + 1, end - overlap)
+    return out
+
+
 def ingest_documents_to_duckdb(
     *,
     docs_dir: Path | str,
@@ -93,23 +140,46 @@ def ingest_documents_to_duckdb(
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS datada_document_chunks (
+                chunk_id VARCHAR,
+                doc_id VARCHAR,
+                source_path VARCHAR,
+                file_name VARCHAR,
+                title VARCHAR,
+                chunk_index BIGINT,
+                char_start BIGINT,
+                char_end BIGINT,
+                content VARCHAR,
+                token_count BIGINT,
+                ingested_at TIMESTAMP
+            )
+            """
+        )
         if force:
             conn.execute("DELETE FROM datada_documents")
+            conn.execute("DELETE FROM datada_document_chunks")
 
         inserted = 0
         skipped = 0
+        chunk_inserted = 0
         for file_path in files:
             content = _extract_text(file_path).strip()
             if not content:
                 skipped += 1
                 continue
+            source_path = str(file_path)
+            conn.execute("DELETE FROM datada_document_chunks WHERE source_path = ?", [source_path])
+            conn.execute("DELETE FROM datada_documents WHERE source_path = ?", [source_path])
+            doc_id = str(uuid.uuid4())
             conn.execute(
                 """
                 INSERT INTO datada_documents VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
-                    str(uuid.uuid4()),
-                    str(file_path),
+                    doc_id,
+                    source_path,
                     file_path.name,
                     file_path.suffix.lower().lstrip("."),
                     file_path.stem,
@@ -118,15 +188,38 @@ def ingest_documents_to_duckdb(
                     datetime.utcnow(),
                 ],
             )
+            for chunk in _chunk_text(content):
+                conn.execute(
+                    """
+                    INSERT INTO datada_document_chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        str(uuid.uuid4()),
+                        doc_id,
+                        source_path,
+                        file_path.name,
+                        file_path.stem,
+                        int(chunk["chunk_index"]),
+                        int(chunk["char_start"]),
+                        int(chunk["char_end"]),
+                        str(chunk["content"]),
+                        int(chunk["token_count"]),
+                        datetime.utcnow(),
+                    ],
+                )
+                chunk_inserted += 1
             inserted += 1
     finally:
         conn.close()
 
     return {
         "success": True,
-        "message": f"Ingested {inserted} document(s); skipped {skipped}.",
+        "message": (
+            f"Ingested {inserted} document(s), {chunk_inserted} chunks; "
+            f"skipped {skipped}."
+        ),
         "ingested": inserted,
+        "chunks": chunk_inserted,
         "skipped": skipped,
         "db_path": str(db),
     }
-

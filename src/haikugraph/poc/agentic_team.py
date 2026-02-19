@@ -663,6 +663,7 @@ class AgenticAnalyticsTeam:
     def record_feedback(
         self,
         *,
+        tenant_id: str = "public",
         trace_id: str | None,
         session_id: str | None,
         goal: str | None,
@@ -677,6 +678,7 @@ class AgenticAnalyticsTeam:
         """Persist explicit user feedback and optional correction rules."""
 
         feedback_id = self.memory.store_feedback(
+            tenant_id=tenant_id,
             trace_id=trace_id,
             session_id=session_id,
             goal=goal,
@@ -694,6 +696,7 @@ class AgenticAnalyticsTeam:
         correction_id = ""
         if keyword and target_table and target_metric:
             correction_id = self.memory.upsert_correction(
+                tenant_id=tenant_id,
                 keyword=keyword,
                 target_table=target_table,
                 target_metric=target_metric,
@@ -708,32 +711,55 @@ class AgenticAnalyticsTeam:
             "correction_id": correction_id,
         }
 
-    def list_corrections(self, *, limit: int = 250, include_disabled: bool = True) -> list[dict[str, Any]]:
-        return self.memory.list_corrections(limit=limit, include_disabled=include_disabled)
+    def list_corrections(
+        self,
+        *,
+        tenant_id: str = "public",
+        limit: int = 250,
+        include_disabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        return self.memory.list_corrections(
+            tenant_id=tenant_id,
+            limit=limit,
+            include_disabled=include_disabled,
+        )
 
-    def set_correction_enabled(self, correction_id: str, enabled: bool) -> bool:
-        return self.memory.set_correction_enabled(correction_id, enabled)
+    def set_correction_enabled(self, correction_id: str, enabled: bool, *, tenant_id: str = "public") -> bool:
+        return self.memory.set_correction_enabled(correction_id, enabled, tenant_id=tenant_id)
 
-    def rollback_correction(self, correction_id: str) -> dict[str, Any]:
-        return self.memory.rollback_correction(correction_id)
+    def rollback_correction(self, correction_id: str, *, tenant_id: str = "public") -> dict[str, Any]:
+        return self.memory.rollback_correction(correction_id, tenant_id=tenant_id)
 
-    def list_tool_candidates(self, *, status: str | None = None, limit: int = 120) -> list[dict[str, Any]]:
-        return self.memory.list_tool_candidates(status=status, limit=limit)
+    def list_tool_candidates(
+        self,
+        *,
+        tenant_id: str = "public",
+        status: str | None = None,
+        limit: int = 120,
+    ) -> list[dict[str, Any]]:
+        return self.memory.list_tool_candidates(tenant_id=tenant_id, status=status, limit=limit)
 
-    def stage_tool_candidate(self, tool_id: str) -> dict[str, Any]:
-        return self.memory.stage_tool_candidate(tool_id, db_path=self.db_path)
+    def stage_tool_candidate(self, tool_id: str, *, tenant_id: str = "public") -> dict[str, Any]:
+        return self.memory.stage_tool_candidate(tool_id, tenant_id=tenant_id, db_path=self.db_path)
 
-    def promote_tool_candidate(self, tool_id: str) -> dict[str, Any]:
-        return self.memory.promote_tool_candidate(tool_id)
+    def promote_tool_candidate(self, tool_id: str, *, tenant_id: str = "public") -> dict[str, Any]:
+        return self.memory.promote_tool_candidate(tool_id, tenant_id=tenant_id)
 
-    def rollback_tool_candidate(self, tool_id: str, *, reason: str = "") -> dict[str, Any]:
-        return self.memory.rollback_tool_candidate(tool_id, reason=reason)
+    def rollback_tool_candidate(
+        self,
+        tool_id: str,
+        *,
+        tenant_id: str = "public",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        return self.memory.rollback_tool_candidate(tool_id, tenant_id=tenant_id, reason=reason)
 
     def run(
         self,
         goal: str,
         runtime: RuntimeSelection,
         *,
+        tenant_id: str = "public",
         conversation_context: list[dict[str, Any]] | None = None,
         storyteller_mode: bool = False,
         autonomy: AutonomyConfig | None = None,
@@ -796,6 +822,7 @@ class AgenticAnalyticsTeam:
                 "episodic_recall",
                 self.memory.recall,
                 effective_goal,
+                tenant_id=tenant_id,
             )
             self._blackboard_post(
                 blackboard,
@@ -810,6 +837,7 @@ class AgenticAnalyticsTeam:
                 "correction_rule_recall",
                 self.memory.get_matching_corrections,
                 effective_goal,
+                tenant_id=tenant_id,
             )
             self._blackboard_post(
                 blackboard,
@@ -994,6 +1022,178 @@ class AgenticAnalyticsTeam:
                     suggested_questions=overview.get("suggested_questions", []),
                 )
 
+            if intake.get("intent") == "document_qa" or intake.get("domain") == "documents":
+                doc_retrieval = self._run_agent(
+                    trace,
+                    "DocumentRetrievalAgent",
+                    "citation_retrieval",
+                    self._document_retrieval_agent,
+                    effective_goal,
+                    intake,
+                )
+                self._blackboard_post(
+                    blackboard,
+                    producer="DocumentRetrievalAgent",
+                    artifact_type="document_matches",
+                    payload={
+                        "match_count": int(doc_retrieval.get("match_count") or 0),
+                        "source_count": int(doc_retrieval.get("source_count") or 0),
+                        "citations": doc_retrieval.get("citations", [])[:6],
+                    },
+                    consumed_by=["NarrativeAgent", "ChiefAnalystAgent"],
+                )
+                doc_answer = self._run_agent(
+                    trace,
+                    "NarrativeAgent",
+                    "document_briefing",
+                    self._document_answer_agent,
+                    goal,
+                    doc_retrieval,
+                    runtime,
+                    storyteller_mode,
+                )
+                self._blackboard_post(
+                    blackboard,
+                    producer="NarrativeAgent",
+                    artifact_type="business_answer",
+                    payload=doc_answer,
+                    consumed_by=["ChiefAnalystAgent"],
+                )
+                match_count = int(doc_retrieval.get("match_count") or 0)
+                doc_ready = bool(doc_retrieval.get("document_table_ready", False))
+                doc_success = doc_ready
+                if not doc_ready:
+                    confidence_score = 0.12
+                else:
+                    confidence_score = (
+                        0.22 if match_count <= 0 else max(0.55, min(0.93, 0.58 + 0.07 * min(5, match_count)))
+                    )
+                confidence = self._to_confidence(confidence_score)
+                total_ms = (time.perf_counter() - started) * 1000
+                checks = [
+                    SanityCheck(
+                        check_name="document_table_available",
+                        passed=bool(doc_retrieval.get("document_table_ready", False)),
+                        message=(
+                            "Document chunks table is available."
+                            if doc_retrieval.get("document_table_ready", False)
+                            else "Document chunks table not found."
+                        ),
+                    ),
+                    SanityCheck(
+                        check_name="citation_matches",
+                        passed=match_count > 0,
+                        message=(
+                            f"Retrieved {match_count} citation snippets."
+                            if match_count > 0
+                            else "No citation snippets matched this question."
+                        ),
+                    ),
+                ]
+                trace.append(
+                    {
+                        "agent": "ChiefAnalystAgent",
+                        "role": "finalize_response",
+                        "status": "success",
+                        "duration_ms": round(total_ms, 2),
+                        "summary": "document response assembled",
+                    }
+                )
+                self._memory_write_turn(
+                    trace=trace,
+                    trace_id=trace_id,
+                    goal=goal,
+                    resolved_goal=effective_goal,
+                    tenant_id=tenant_id,
+                    runtime=runtime,
+                    success=doc_success,
+                    confidence_score=confidence_score,
+                    row_count=match_count,
+                    plan={
+                        "table": "datada_document_chunks",
+                        "metric": "document_match_count",
+                        "dimensions": ["source_path"],
+                        "time_filter": None,
+                        "value_filters": [],
+                    },
+                    sql=doc_retrieval.get("sql_used"),
+                    audit_warnings=[] if match_count > 0 else ["No document citations matched."],
+                    correction_applied=False,
+                    correction_reason="",
+                    metadata={
+                        "autonomy_mode": autonomy_cfg.mode,
+                        "document_citations": doc_retrieval.get("citations", []),
+                    },
+                )
+                return AssistantQueryResponse(
+                    success=doc_success,
+                    answer_markdown=doc_answer.get("answer_markdown", ""),
+                    confidence=confidence,
+                    confidence_score=confidence_score,
+                    definition_used="citation-backed document retrieval",
+                    evidence=[
+                        EvidenceItem(
+                            description="Matched document snippets",
+                            value=str(match_count),
+                            source="document_retrieval",
+                            sql_reference=doc_retrieval.get("sql_used"),
+                        ),
+                        EvidenceItem(
+                            description="Sources covered",
+                            value=str(doc_retrieval.get("source_count") or 0),
+                            source="document_retrieval",
+                            sql_reference=doc_retrieval.get("sql_used"),
+                        ),
+                    ],
+                    sanity_checks=checks,
+                    sql=doc_retrieval.get("sql_used"),
+                    row_count=match_count,
+                    columns=list(doc_retrieval.get("columns") or []),
+                    sample_rows=list(doc_retrieval.get("sample_rows") or []),
+                    execution_time_ms=float(doc_retrieval.get("execution_time_ms") or 0.0),
+                    trace_id=trace_id,
+                    runtime=self._runtime_payload(runtime, autonomy=autonomy_cfg)
+                    | {"blackboard_entries": len(blackboard)},
+                    agent_trace=trace,
+                    chart_spec={"type": "table", "columns": ["citation", "source", "snippet"]},
+                    evidence_packets=[
+                        {
+                            "agent": "DocumentRetrievalAgent",
+                            "citations": doc_retrieval.get("citations", []),
+                            "source_count": doc_retrieval.get("source_count", 0),
+                            "match_count": doc_retrieval.get("match_count", 0),
+                        },
+                        {
+                            "agent": "Blackboard",
+                            "artifact_count": len(blackboard),
+                            "artifacts": blackboard,
+                            "edges": self._blackboard_edges(blackboard),
+                        },
+                    ],
+                    data_quality={
+                        "audit_score": confidence_score,
+                        "grounding": {
+                            "table": "datada_document_chunks",
+                            "metric": "document_match_count",
+                            "goal_terms_detected": doc_retrieval.get("matched_terms", []),
+                            "goal_term_misses": doc_retrieval.get("missing_terms", []),
+                            "query_columns_used": ["source_path", "chunk_index", "content"],
+                            "replay_match": None,
+                            "intent": "document_qa",
+                            "dimensions": ["source_path"],
+                            "time_filter": None,
+                            "value_filters": [],
+                        },
+                        "document_retrieval": {
+                            "source_count": doc_retrieval.get("source_count", 0),
+                            "match_count": doc_retrieval.get("match_count", 0),
+                            "citations": doc_retrieval.get("citations", []),
+                        },
+                        "blackboard": {"artifact_count": len(blackboard), "edges": self._blackboard_edges(blackboard)},
+                    },
+                    suggested_questions=doc_answer.get("suggested_questions", []),
+                )
+
             retrieval = self._run_agent(
                 trace,
                 "SemanticRetrievalAgent",
@@ -1133,6 +1333,7 @@ class AgenticAnalyticsTeam:
                 memory_hints,
                 learned_corrections,
                 autonomy_cfg,
+                tenant_id,
             )
             self._blackboard_post(
                 blackboard,
@@ -1273,6 +1474,7 @@ class AgenticAnalyticsTeam:
                 trace_id=trace_id,
                 goal=goal,
                 resolved_goal=effective_goal,
+                tenant_id=tenant_id,
                 runtime=runtime,
                 success=execution["success"],
                 confidence_score=confidence_score,
@@ -1295,6 +1497,7 @@ class AgenticAnalyticsTeam:
             if autonomy_result.get("correction_applied") and confidence_score >= 0.78:
                 self._memory_learn_from_success(
                     trace,
+                    tenant_id=tenant_id,
                     goal=effective_goal,
                     plan=plan,
                     score=confidence_score,
@@ -1733,6 +1936,69 @@ class AgenticAnalyticsTeam:
             }
             profile["domains"]["bookings"] = bookings
 
+        has_docs_table = int(
+            self._profile_sql_value(
+                """
+                SELECT COUNT(*) AS metric_value
+                FROM information_schema.tables
+                WHERE table_schema = 'main' AND table_name = 'datada_documents'
+                """,
+                default=0,
+            )
+            or 0
+        ) > 0
+        has_doc_chunks_table = int(
+            self._profile_sql_value(
+                """
+                SELECT COUNT(*) AS metric_value
+                FROM information_schema.tables
+                WHERE table_schema = 'main' AND table_name = 'datada_document_chunks'
+                """,
+                default=0,
+            )
+            or 0
+        ) > 0
+        if has_docs_table:
+            documents = {
+                "document_count": int(
+                    self._profile_sql_value(
+                        "SELECT COUNT(DISTINCT doc_id) AS metric_value FROM datada_documents",
+                        default=0,
+                    )
+                    or 0
+                ),
+                "top_file_types": self._profile_sql_rows(
+                    """
+                    SELECT file_type AS dimension, COUNT(*) AS metric_value
+                    FROM datada_documents
+                    WHERE file_type IS NOT NULL AND TRIM(file_type) != ''
+                    GROUP BY 1
+                    ORDER BY 2 DESC NULLS LAST, 1 ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+                "top_titles": self._profile_sql_rows(
+                    """
+                    SELECT title AS dimension, token_count AS metric_value
+                    FROM datada_documents
+                    WHERE title IS NOT NULL AND TRIM(title) != ''
+                    ORDER BY token_count DESC NULLS LAST, title ASC
+                    LIMIT 6
+                    """,
+                    limit=6,
+                ),
+            }
+            if has_doc_chunks_table:
+                documents["chunk_count"] = int(
+                    self._profile_sql_value(
+                        "SELECT COUNT(*) AS metric_value FROM datada_document_chunks",
+                        default=0,
+                    )
+                    or 0
+                )
+            profile["domains"]["documents"] = documents
+
         if profile["marts"]:
             biggest = profile["marts"][0]
             profile["highlights"].append(
@@ -1744,6 +2010,11 @@ class AgenticAnalyticsTeam:
         if profile["domains"].get("transactions", {}).get("mt103_count", 0) > 0:
             mt103 = profile["domains"]["transactions"]["mt103_count"]
             profile["highlights"].append(f"MT103 activity detected: {_fmt_number(mt103)} transactions.")
+        if profile["domains"].get("documents", {}).get("document_count", 0) > 0:
+            doc_count = profile["domains"]["documents"]["document_count"]
+            profile["highlights"].append(
+                f"Document corpus available with {_fmt_number(doc_count)} files for citation-backed Q&A."
+            )
         return profile
 
     def _data_overview_agent(
@@ -1770,6 +2041,7 @@ class AgenticAnalyticsTeam:
         quotes = domains.get("quotes", {})
         customers = domains.get("customers", {})
         bookings = domains.get("bookings", {})
+        documents = domains.get("documents", {})
 
         insight_lines: list[str] = []
         if tx:
@@ -1801,6 +2073,18 @@ class AgenticAnalyticsTeam:
                 "Bookings: "
                 f"booked total `{_fmt_number(bookings.get('booked_total', 0.0))}`, "
                 f"top deal type `{top_type.get('dimension', 'n/a')}`."
+            )
+        if documents:
+            top_type = (documents.get("top_file_types") or [{}])[0]
+            insight_lines.append(
+                "Documents: "
+                f"{_fmt_number(documents.get('document_count', 0))} files"
+                + (
+                    f", {_fmt_number(documents.get('chunk_count', 0))} citation chunks"
+                    if documents.get("chunk_count") is not None
+                    else ""
+                )
+                + f", leading type `{top_type.get('dimension', 'n/a')}`."
             )
 
         intro = (
@@ -1944,6 +2228,21 @@ class AgenticAnalyticsTeam:
             ]
         ):
             intent = "data_overview"
+        elif any(
+            k in lower
+            for k in [
+                "document",
+                "pdf",
+                "docx",
+                "policy",
+                "contract",
+                "handbook",
+                "manual",
+                "what does this file say",
+                "from the docs",
+            ]
+        ):
+            intent = "document_qa"
         elif any(k in lower for k in [" vs ", " versus ", "compare", "compared"]):
             intent = "comparison"
         elif any(
@@ -1968,6 +2267,21 @@ class AgenticAnalyticsTeam:
         if any(
             k in lower
             for k in [
+                "document",
+                "pdf",
+                "docx",
+                "policy",
+                "contract",
+                "handbook",
+                "manual",
+                "from the docs",
+                "from documents",
+            ]
+        ):
+            domain = "documents"
+        elif any(
+            k in lower
+            for k in [
                 "quote",
                 "forex",
                 "exchange rate",
@@ -1990,7 +2304,9 @@ class AgenticAnalyticsTeam:
         has_amount_words = self._goal_has_amount_intent(lower)
         has_mt103 = "mt103" in lower
         has_refund = "refund" in lower
-        if domain == "transactions":
+        if domain == "documents":
+            metric = "document_relevance"
+        elif domain == "transactions":
             if "refund rate" in lower:
                 metric = "refund_rate"
             elif has_refund and has_count_words:
@@ -2086,7 +2402,7 @@ class AgenticAnalyticsTeam:
         }
 
         dimensions: list[str] = []
-        if re.search(r"\b(by month|monthly|month[\s-]?wise|trend)\b", lower):
+        if domain != "documents" and re.search(r"\b(by month|monthly|month[\s-]?wise|trend)\b", lower):
             dimensions.append("__month__")
 
         dim_signal = any(
@@ -2144,7 +2460,8 @@ class AgenticAnalyticsTeam:
             "quotes": "datada_mart_quotes",
             "customers": "datada_dim_customers",
             "bookings": "datada_mart_bookings",
-        }[domain]
+            "documents": "datada_document_chunks",
+        }.get(domain, "")
 
         for col, values in catalog.get("dimension_values", {}).get(domain_table, {}).items():
             for value in values:
@@ -2285,6 +2602,288 @@ class AgenticAnalyticsTeam:
             merged["value_filters"] = best["value_filters"][:4]
         return merged
 
+    def _document_query_terms(self, goal: str, *, limit: int = 10) -> list[str]:
+        stopwords = {
+            "what",
+            "which",
+            "where",
+            "when",
+            "from",
+            "with",
+            "that",
+            "this",
+            "have",
+            "does",
+            "says",
+            "about",
+            "into",
+            "for",
+            "the",
+            "and",
+            "are",
+            "you",
+            "data",
+            "document",
+            "documents",
+            "file",
+            "files",
+            "pdf",
+            "docx",
+            "show",
+            "tell",
+            "give",
+            "please",
+            "explain",
+            "summary",
+        }
+        terms: list[str] = []
+        for token in re.findall(r"[a-z0-9_]{3,}", goal.lower()):
+            if token in stopwords:
+                continue
+            if token not in terms:
+                terms.append(token)
+            if len(terms) >= max(1, min(20, int(limit))):
+                break
+        return terms
+
+    def _document_chunks_table_ready(self) -> bool:
+        check_sql = """
+        SELECT COUNT(*) AS metric_value
+        FROM information_schema.tables
+        WHERE table_schema='main' AND table_name='datada_document_chunks'
+        """
+        val = self._profile_sql_value(check_sql, default=0)
+        return int(val or 0) > 0
+
+    def _document_retrieval_agent(self, goal: str, intake: dict[str, Any]) -> dict[str, Any]:
+        del intake  # currently goal-driven retrieval with chunk-level lexical scoring.
+        if not self._document_chunks_table_ready():
+            return {
+                "success": False,
+                "document_table_ready": False,
+                "message": "Document index is not available. Run `haikugraph ingest-docs` first.",
+                "match_count": 0,
+                "source_count": 0,
+                "citations": [],
+                "sample_rows": [],
+                "columns": ["citation", "source", "snippet", "score"],
+                "matched_terms": [],
+                "missing_terms": [],
+                "sql_used": "",
+                "execution_time_ms": 0.0,
+            }
+
+        terms = self._document_query_terms(goal, limit=8)
+        if terms:
+            escaped_terms = [term.replace("'", "''") for term in terms]
+            score_expr = " + ".join(
+                [f"CASE WHEN LOWER(content) LIKE '%{term}%' THEN 1 ELSE 0 END" for term in escaped_terms]
+            )
+        else:
+            score_expr = "1"
+
+        sql = f"""
+        SELECT
+            source_path,
+            file_name,
+            title,
+            chunk_index,
+            char_start,
+            char_end,
+            content,
+            token_count,
+            ({score_expr}) AS term_score
+        FROM datada_document_chunks
+        WHERE content IS NOT NULL AND TRIM(content) != ''
+        ORDER BY term_score DESC, token_count DESC NULLS LAST, source_path ASC, chunk_index ASC
+        LIMIT 60
+        """
+        result = self.executor.execute(sql)
+        if not result.success:
+            return {
+                "success": False,
+                "document_table_ready": True,
+                "message": result.error or "Document query failed.",
+                "match_count": 0,
+                "source_count": 0,
+                "citations": [],
+                "sample_rows": [],
+                "columns": ["citation", "source", "snippet", "score"],
+                "matched_terms": [],
+                "missing_terms": terms,
+                "sql_used": sql.strip(),
+                "execution_time_ms": float(result.execution_time_ms or 0.0),
+            }
+
+        rows = list(result.rows or [])
+        filtered = [r for r in rows if int(r.get("term_score") or 0) > 0] if terms else rows
+        top = filtered[:8]
+        citation_rows: list[dict[str, Any]] = []
+        sample_rows: list[dict[str, Any]] = []
+        for idx, row in enumerate(top, start=1):
+            citation = f"[D{idx}]"
+            source = str(row.get("file_name") or row.get("source_path") or "unknown")
+            source_path = str(row.get("source_path") or "")
+            snippet = " ".join(str(row.get("content") or "").split())
+            if len(snippet) > 320:
+                snippet = snippet[:320].rsplit(" ", 1)[0] + "..."
+            chunk_index = int(row.get("chunk_index") or 0)
+            char_start = int(row.get("char_start") or 0)
+            char_end = int(row.get("char_end") or 0)
+            citation_rows.append(
+                {
+                    "citation": citation,
+                    "source": source,
+                    "source_path": source_path,
+                    "chunk_index": chunk_index,
+                    "char_span": f"{char_start}-{char_end}",
+                    "score": int(row.get("term_score") or 0),
+                    "snippet": snippet,
+                }
+            )
+            sample_rows.append(
+                {
+                    "citation": citation,
+                    "source": source,
+                    "snippet": snippet,
+                    "score": int(row.get("term_score") or 0),
+                }
+            )
+
+        combined = " ".join(str(row.get("content") or "").lower() for row in top)
+        matched_terms = [term for term in terms if term in combined]
+        missing_terms = [term for term in terms if term not in matched_terms]
+        source_count = len({str(row.get("source_path") or "") for row in top if str(row.get("source_path") or "")})
+        return {
+            "success": True,
+            "document_table_ready": True,
+            "message": "ok",
+            "match_count": len(citation_rows),
+            "source_count": source_count,
+            "citations": citation_rows,
+            "sample_rows": sample_rows,
+            "columns": ["citation", "source", "snippet", "score"],
+            "matched_terms": matched_terms,
+            "missing_terms": missing_terms,
+            "sql_used": result.sql_executed or sql.strip(),
+            "execution_time_ms": float(result.execution_time_ms or 0.0),
+        }
+
+    def _document_answer_agent(
+        self,
+        goal: str,
+        retrieval: dict[str, Any],
+        runtime: RuntimeSelection,
+        storyteller_mode: bool,
+    ) -> dict[str, Any]:
+        citations = list(retrieval.get("citations") or [])
+        match_count = int(retrieval.get("match_count") or 0)
+        if not retrieval.get("document_table_ready", False):
+            return {
+                "answer_markdown": (
+                    f"**{goal}**\n\n"
+                    "I do not have a document index yet. "
+                    "Run `haikugraph ingest-docs --docs-dir <path> --db-path <db>` and ask again."
+                ),
+                "suggested_questions": [
+                    "Which documents were ingested?",
+                    "Show top document types and titles",
+                    "Summarize key themes from the uploaded docs",
+                ],
+            }
+        if match_count <= 0:
+            return {
+                "answer_markdown": (
+                    f"**{goal}**\n\n"
+                    "I checked the indexed documents but found no citation-level matches for this phrasing. "
+                    "Try a specific keyword, clause, or file name."
+                ),
+                "suggested_questions": [
+                    "List all available document titles",
+                    "Search for 'markup' across documents",
+                    "Show snippets that mention policy or compliance",
+                ],
+            }
+
+        top = citations[:4]
+        fallback_lines = []
+        for item in top:
+            fallback_lines.append(
+                f"- {item['citation']} `{item['source']}`: {item['snippet']}"
+            )
+        intro = (
+            "Here are the strongest evidence snippets from your document set:"
+            if storyteller_mode
+            else "Top citation-backed snippets:"
+        )
+        fallback_answer = (
+            f"**{goal}**\n\n"
+            f"{intro}\n"
+            + "\n".join(fallback_lines)
+            + "\n\nSources are citation-anchored; ask a follow-up to drill into any citation."
+        )
+        fallback = {
+            "answer_markdown": fallback_answer,
+            "suggested_questions": [
+                "Show me more snippets from the top cited source",
+                "Summarize this in 3 bullet points for business stakeholders",
+                "What terms are missing from the current evidence?",
+            ],
+        }
+
+        if not runtime.use_llm or not runtime.provider:
+            return fallback
+        try:
+            payload = {
+                "question": goal,
+                "citations": [
+                    {
+                        "id": item.get("citation"),
+                        "source": item.get("source"),
+                        "snippet": item.get("snippet"),
+                    }
+                    for item in top
+                ],
+                "style": "storyteller" if storyteller_mode else "concise_professional",
+            }
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are NarrativeAgent. Create a concise answer from citations only. "
+                        "Do not invent facts. Keep <=120 words and include citation ids like [D1]. "
+                        "Return JSON with keys answer_markdown and suggested_questions."
+                    ),
+                },
+                {"role": "user", "content": json.dumps(payload, default=str)},
+            ]
+            raw = call_llm(
+                messages,
+                role="narrator",
+                provider=runtime.provider,
+                model=runtime.narrator_model,
+                timeout=40,
+            )
+            parsed = _extract_json_payload(raw)
+            if parsed and isinstance(parsed.get("answer_markdown"), str):
+                answer_text = self._compact_answer_markdown(
+                    self._clean_llm_answer_markdown(parsed["answer_markdown"]),
+                    max_lines=9,
+                    max_chars=850,
+                )
+                if not any(cit.get("citation") in answer_text for cit in top):
+                    answer_text += "\n\nCitations: " + ", ".join(str(cit.get("citation")) for cit in top)
+                return {
+                    "answer_markdown": answer_text,
+                    "suggested_questions": self._normalize_suggested_questions(
+                        parsed.get("suggested_questions"),
+                        {"table": "datada_document_chunks", "metric": "document_match_count"},
+                    ),
+                }
+        except Exception:
+            pass
+        return fallback
+
     def _semantic_retrieval_agent(
         self,
         intake: dict[str, Any],
@@ -2396,6 +2995,7 @@ class AgenticAnalyticsTeam:
         memory_hints: list[dict[str, Any]] | None,
         learned_corrections: list[dict[str, Any]] | None,
         autonomy: AutonomyConfig,
+        tenant_id: str,
     ) -> dict[str, Any]:
         """Evaluate candidate plans and autonomously switch when evidence improves."""
 
@@ -2516,6 +3116,7 @@ class AgenticAnalyticsTeam:
             goal=goal,
             plan=selected["plan"],
             probe_findings=probe_findings,
+            tenant_id=tenant_id,
         )
         return {
             "plan": selected["plan"],
@@ -2936,6 +3537,7 @@ class AgenticAnalyticsTeam:
         goal: str,
         plan: dict[str, Any],
         probe_findings: list[dict[str, Any]],
+        tenant_id: str,
     ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         for finding in probe_findings:
@@ -2946,6 +3548,7 @@ class AgenticAnalyticsTeam:
             if not sql:
                 continue
             tool_id = self.memory.register_tool_candidate(
+                tenant_id=tenant_id,
                 title=f"{probe_name} for {plan.get('metric', 'metric')}",
                 sql_text=sql,
                 source="autonomy_probe",
@@ -2958,7 +3561,7 @@ class AgenticAnalyticsTeam:
             )
             if not tool_id:
                 continue
-            stage = self.memory.stage_tool_candidate(tool_id, db_path=self.db_path)
+            stage = self.memory.stage_tool_candidate(tool_id, tenant_id=tenant_id, db_path=self.db_path)
             status = "staged" if stage.get("success") else "candidate"
             out.append(
                 {
@@ -3552,6 +4155,12 @@ class AgenticAnalyticsTeam:
                 "How many university payees are active?",
                 "Trend customer creation by month",
             ]
+        if table == "datada_document_chunks":
+            return [
+                "Show more snippets from the top matching source",
+                "List document titles related to this topic",
+                "Summarize key clauses with citations",
+            ]
         return [
             f"Show {metric} by status",
             "Compare this month vs last month",
@@ -3683,6 +4292,7 @@ class AgenticAnalyticsTeam:
         trace_id: str,
         goal: str,
         resolved_goal: str,
+        tenant_id: str,
         runtime: RuntimeSelection,
         success: bool,
         confidence_score: float,
@@ -3697,6 +4307,7 @@ class AgenticAnalyticsTeam:
         start = time.perf_counter()
         try:
             self.memory.store_turn(
+                tenant_id=tenant_id,
                 trace_id=trace_id,
                 goal=goal,
                 resolved_goal=resolved_goal,
@@ -3736,6 +4347,7 @@ class AgenticAnalyticsTeam:
         self,
         trace: list[dict[str, Any]],
         *,
+        tenant_id: str,
         goal: str,
         plan: dict[str, Any],
         score: float,
@@ -3743,6 +4355,7 @@ class AgenticAnalyticsTeam:
         start = time.perf_counter()
         try:
             correction_id = self.memory.learn_from_success(
+                tenant_id=tenant_id,
                 goal=goal,
                 plan=plan,
                 score=score,

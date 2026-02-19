@@ -98,7 +98,11 @@ Current bounded controls exposed in API:
 - connector capability registry for DuckDB/Postgres/Snowflake/BigQuery/Stream/Documents
 - startup self-healing for stale default connections (including orphaned pytest/temp paths)
 - memory sidecar initialization now auto-creates parent directories to prevent boot failures
-- full automated test suite passing (`236 passed`, `15 skipped`)
+- citation-backed document QA path over ingested chunks (`datada_document_chunks`) with source snippets
+- tenant-aware access context resolution (body + trusted headers + optional bearer claims + API-key policy enforcement)
+- runtime SLO evaluation + incident event APIs + optional webhook emission hooks
+- query timeout guardrails in UI to prevent stuck runs
+- full automated test suite passing (`245 passed`, `15 skipped`)
 
 ## Quick Start
 
@@ -201,19 +205,19 @@ Connection APIs:
 
 ## Progress Tracker
 
-Overall program completion toward target vision: **79%**
+Overall program completion toward target vision: **86%**
 
 ### Epic-level tracker
 
 | Epic | Status | Completion | Notes |
 |---|---|---:|---|
-| 1. Unified ingestion + direct DB attach | active | 92% | core done; multi-connection routing added |
-| 2. Semantic intelligence reliability | active | 75% | marts + mappings + generic schema typing hardening + source-truth endpoint; ontology/versioning pending |
-| 3. Agent autonomy core | active | 84% | memory + correction loop + blackboard + contradiction handling + toolsmith lifecycle APIs |
-| 4. Truth and verification engine | active | 86% | audit/replay/concept checks + hypothesis decomposition + source-truth parity checks + full green suite pass |
-| 5. Conversational UX and transparency | active | 82% | trace/details/story mode + blackboard flow graph + correction controls + trust panel |
-| 6. Enterprise platform readiness | active | 66% | tenant-aware sessions + API key role gates + async jobs + budgets + trust telemetry |
-| 7. Scale to billion-row enterprise workloads | active | 40% | async queue + connector capability model + DuckDB mirror architecture; warehouse pushdown pending |
+| 1. Unified ingestion + direct DB attach | active | 96% | unified ingest, direct attach, document mirror ingestion, startup default self-healing |
+| 2. Semantic intelligence reliability | active | 80% | marts + mappings + generic schema typing + concept detection + doc chunk retrieval; ontology/versioning pending |
+| 3. Agent autonomy core | active | 88% | memory + correction loop + blackboard + contradiction handling + toolsmith lifecycle APIs + tenant-scoped memory |
+| 4. Truth and verification engine | active | 90% | audit/replay/concept checks + hypothesis decomposition + source-truth parity + SLO/incidents |
+| 5. Conversational UX and transparency | active | 87% | session continuity + narrative/trace + mission flow view + timeout guardrails + advanced diagnostics drawer |
+| 6. Enterprise platform readiness | active | 78% | tenant-aware sessions + role gating + API key policy + identity claims path + async jobs + budgets + trust telemetry |
+| 7. Scale to billion-row enterprise workloads | active | 43% | async queue + connector capability model + DuckDB mirror architecture; warehouse pushdown/distributed execution pending |
 
 ### Detailed task list
 
@@ -238,7 +242,7 @@ Overall program completion toward target vision: **79%**
 - [x] Snowflake connector (registry + package validation + mirror-ingest readiness)
 - [x] BigQuery connector (registry + package validation + mirror-ingest readiness)
 - [x] Stream connector (Kafka/Kinesis URI registration + bounded snapshot readiness)
-- [ ] Document connector (PDF/DOCX/text) with citation-grade retrieval
+- [x] Document connector (PDF/DOCX/text) with citation-grade retrieval
 - [x] Document ingestion into semantic evidence table (`datada_documents`)
 
 #### C. Truth, quality, and explainability
@@ -266,18 +270,19 @@ Overall program completion toward target vision: **79%**
 #### E. Enterprise readiness
 
 - [x] Logical multi-connection routing with deterministic default selection
-- [ ] RBAC + SSO + tenant isolation
+- [x] API-level RBAC + tenant isolation + API-key policy enforcement
+- [ ] SSO/OIDC federation and external policy engine
 - [ ] Durable distributed session/memory backends
 - [x] Async job orchestration and queueing
 - [x] Cost controls and query budgets per tenant
-- [ ] SLA/SLO observability and incident hooks
+- [x] SLA/SLO observability and incident hooks
 
 ## What remains to reach full enterprise target
 
 - SSO/OIDC integration and formal tenant RBAC policy store
 - Distributed shared session/memory backend (Redis/Postgres) for multi-node horizontal scale
 - Native pushdown connectors (Snowflake/BigQuery/Postgres) without DuckDB mirror step
-- Citation-grade RAG retrieval over documents with source spans in final answers
+- Stronger document retrieval ranking (embeddings + reranker) beyond lexical chunk scoring
 - Incident hooks (PagerDuty/Slack/Webhook) and SLO burn-rate alerts
 
 ## Repo Documentation Policy

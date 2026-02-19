@@ -157,6 +157,12 @@ class TestUIEndpoint:
         assert "text/html" in resp.headers["content-type"]
         assert "dataDa" in resp.text
 
+    def test_ui_script_escapes_handoff_newline(self, client):
+        """UI script should keep escaped newline in handoff join to avoid JS parse errors."""
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "edgeRows.join('\\n')" in resp.text
+
 
 # =============================================================================
 # Test Sample Queries

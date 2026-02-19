@@ -34,6 +34,10 @@ def _similarity(a: str, b: str) -> float:
     return len(inter) / len(union)
 
 
+def _clean_tenant(tenant_id: str | None) -> str:
+    return (tenant_id or "public").strip() or "public"
+
+
 @dataclass
 class AutonomyConfig:
     """Runtime controls for bounded autonomy.
@@ -71,6 +75,7 @@ class AgentMemoryStore:
                     CREATE TABLE IF NOT EXISTS datada_agent_memory (
                         memory_id VARCHAR,
                         created_at TIMESTAMP,
+                        tenant_id VARCHAR,
                         trace_id VARCHAR,
                         goal VARCHAR,
                         resolved_goal VARCHAR,
@@ -97,6 +102,7 @@ class AgentMemoryStore:
                     CREATE TABLE IF NOT EXISTS datada_agent_feedback (
                         feedback_id VARCHAR,
                         created_at TIMESTAMP,
+                        tenant_id VARCHAR,
                         trace_id VARCHAR,
                         session_id VARCHAR,
                         goal VARCHAR,
@@ -112,6 +118,7 @@ class AgentMemoryStore:
                     CREATE TABLE IF NOT EXISTS datada_agent_corrections (
                         correction_id VARCHAR,
                         created_at TIMESTAMP,
+                        tenant_id VARCHAR,
                         source VARCHAR,
                         keyword VARCHAR,
                         target_table VARCHAR,
@@ -128,6 +135,7 @@ class AgentMemoryStore:
                     CREATE TABLE IF NOT EXISTS datada_agent_correction_events (
                         event_id VARCHAR,
                         created_at TIMESTAMP,
+                        tenant_id VARCHAR,
                         correction_id VARCHAR,
                         action VARCHAR,
                         enabled_before BOOLEAN,
@@ -142,6 +150,7 @@ class AgentMemoryStore:
                         tool_id VARCHAR,
                         created_at TIMESTAMP,
                         updated_at TIMESTAMP,
+                        tenant_id VARCHAR,
                         status VARCHAR,
                         source VARCHAR,
                         title VARCHAR,
@@ -153,12 +162,65 @@ class AgentMemoryStore:
                     )
                     """
                 )
+                self._ensure_column(conn, "datada_agent_memory", "tenant_id VARCHAR")
+                self._ensure_column(conn, "datada_agent_feedback", "tenant_id VARCHAR")
+                self._ensure_column(conn, "datada_agent_corrections", "tenant_id VARCHAR")
+                self._ensure_column(conn, "datada_agent_correction_events", "tenant_id VARCHAR")
+                self._ensure_column(conn, "datada_agent_toolsmith", "tenant_id VARCHAR")
+                conn.execute(
+                    """
+                    UPDATE datada_agent_memory SET tenant_id = 'public'
+                    WHERE tenant_id IS NULL OR TRIM(COALESCE(tenant_id, '')) = ''
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE datada_agent_feedback SET tenant_id = 'public'
+                    WHERE tenant_id IS NULL OR TRIM(COALESCE(tenant_id, '')) = ''
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE datada_agent_corrections SET tenant_id = 'public'
+                    WHERE tenant_id IS NULL OR TRIM(COALESCE(tenant_id, '')) = ''
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE datada_agent_correction_events SET tenant_id = 'public'
+                    WHERE tenant_id IS NULL OR TRIM(COALESCE(tenant_id, '')) = ''
+                    """
+                )
+                conn.execute(
+                    """
+                    UPDATE datada_agent_toolsmith SET tenant_id = 'public'
+                    WHERE tenant_id IS NULL OR TRIM(COALESCE(tenant_id, '')) = ''
+                    """
+                )
             finally:
                 conn.close()
+
+    def _has_column(self, conn: duckdb.DuckDBPyConnection, table: str, column: str) -> bool:
+        row = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_name = ? AND column_name = ?
+            """,
+            [table, column],
+        ).fetchone()
+        return bool(row and int(row[0] or 0) > 0)
+
+    def _ensure_column(self, conn: duckdb.DuckDBPyConnection, table: str, column_def: str) -> None:
+        col_name = column_def.split()[0].strip().lower()
+        if self._has_column(conn, table, col_name):
+            return
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
 
     def store_turn(
         self,
         *,
+        tenant_id: str | None,
         trace_id: str,
         goal: str,
         resolved_goal: str,
@@ -175,16 +237,18 @@ class AgentMemoryStore:
         metadata: dict[str, Any] | None = None,
     ) -> str:
         memory_id = str(uuid.uuid4())
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_memory VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_memory VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         memory_id,
                         datetime.utcnow(),
+                        tenant,
                         trace_id,
                         goal,
                         resolved_goal,
@@ -209,9 +273,17 @@ class AgentMemoryStore:
                 conn.close()
         return memory_id
 
-    def recall(self, goal: str, *, limit: int = 3, scan_limit: int = 400) -> list[dict[str, Any]]:
+    def recall(
+        self,
+        goal: str,
+        *,
+        tenant_id: str | None = None,
+        limit: int = 3,
+        scan_limit: int = 400,
+    ) -> list[dict[str, Any]]:
         """Return similar successful historical runs."""
 
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -222,10 +294,11 @@ class AgentMemoryStore:
                            runtime_mode, created_at
                     FROM datada_agent_memory
                     WHERE success = TRUE
+                      AND tenant_id = ?
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
-                    [scan_limit],
+                    [tenant, scan_limit],
                 ).fetchall()
             finally:
                 conn.close()
@@ -284,6 +357,7 @@ class AgentMemoryStore:
     def store_feedback(
         self,
         *,
+        tenant_id: str | None,
         trace_id: str | None,
         session_id: str | None,
         goal: str | None,
@@ -293,16 +367,18 @@ class AgentMemoryStore:
         metadata: dict[str, Any] | None = None,
     ) -> str:
         feedback_id = str(uuid.uuid4())
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_feedback VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_feedback VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         feedback_id,
                         datetime.utcnow(),
+                        tenant,
                         trace_id or "",
                         session_id or "",
                         goal or "",
@@ -319,6 +395,7 @@ class AgentMemoryStore:
     def upsert_correction(
         self,
         *,
+        tenant_id: str | None,
         keyword: str,
         target_table: str,
         target_metric: str,
@@ -332,6 +409,7 @@ class AgentMemoryStore:
         norm_keyword = keyword.strip().lower()
         if not norm_keyword:
             return ""
+        tenant = _clean_tenant(tenant_id)
 
         with self._lock:
             conn = self._connect()
@@ -341,12 +419,13 @@ class AgentMemoryStore:
                     SELECT correction_id
                     FROM datada_agent_corrections
                     WHERE enabled = TRUE
+                      AND tenant_id = ?
                       AND LOWER(keyword) = ?
                       AND target_table = ?
                       AND target_metric = ?
                     LIMIT 1
                     """,
-                    [norm_keyword, target_table, target_metric],
+                    [tenant, norm_keyword, target_table, target_metric],
                 ).fetchone()
                 if existing and existing[0]:
                     return str(existing[0])
@@ -354,11 +433,12 @@ class AgentMemoryStore:
                 correction_id = str(uuid.uuid4())
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_corrections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_corrections VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         correction_id,
                         datetime.utcnow(),
+                        tenant,
                         source,
                         norm_keyword,
                         target_table,
@@ -373,7 +453,14 @@ class AgentMemoryStore:
             finally:
                 conn.close()
 
-    def get_matching_corrections(self, goal: str, *, limit: int = 4) -> list[dict[str, Any]]:
+    def get_matching_corrections(
+        self,
+        goal: str,
+        *,
+        tenant_id: str | None = None,
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -382,9 +469,12 @@ class AgentMemoryStore:
                     SELECT correction_id, source, keyword, target_table, target_metric, target_dimensions_json, notes, weight
                     FROM datada_agent_corrections
                     WHERE enabled = TRUE
+                      AND tenant_id = ?
                     ORDER BY created_at DESC
                     LIMIT 250
                     """
+                    ,
+                    [tenant],
                 ).fetchall()
             finally:
                 conn.close()
@@ -421,8 +511,15 @@ class AgentMemoryStore:
         out.sort(key=lambda x: x["match_score"], reverse=True)
         return out[: max(1, min(10, int(limit)))]
 
-    def list_corrections(self, *, limit: int = 250, include_disabled: bool = True) -> list[dict[str, Any]]:
-        where_clause = "" if include_disabled else "WHERE enabled = TRUE"
+    def list_corrections(
+        self,
+        *,
+        tenant_id: str | None = None,
+        limit: int = 250,
+        include_disabled: bool = True,
+    ) -> list[dict[str, Any]]:
+        tenant = _clean_tenant(tenant_id)
+        where_clause = "WHERE tenant_id = ?" if include_disabled else "WHERE tenant_id = ? AND enabled = TRUE"
         with self._lock:
             conn = self._connect()
             try:
@@ -435,7 +532,7 @@ class AgentMemoryStore:
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
-                    [max(1, min(1000, int(limit)))],
+                    [tenant, max(1, min(1000, int(limit)))],
                 ).fetchall()
             finally:
                 conn.close()
@@ -463,10 +560,17 @@ class AgentMemoryStore:
             )
         return out
 
-    def set_correction_enabled(self, correction_id: str, enabled: bool) -> bool:
+    def set_correction_enabled(
+        self,
+        correction_id: str,
+        enabled: bool,
+        *,
+        tenant_id: str | None = None,
+    ) -> bool:
         cid = (correction_id or "").strip()
         if not cid:
             return False
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -474,9 +578,10 @@ class AgentMemoryStore:
                     """
                     SELECT correction_id, enabled FROM datada_agent_corrections
                     WHERE correction_id = ?
+                      AND tenant_id = ?
                     LIMIT 1
                     """,
-                    [cid],
+                    [cid, tenant],
                 ).fetchone()
                 if not existing:
                     return False
@@ -489,16 +594,18 @@ class AgentMemoryStore:
                     UPDATE datada_agent_corrections
                     SET enabled = ?
                     WHERE correction_id = ?
+                      AND tenant_id = ?
                     """,
-                    [bool(enabled), cid],
+                    [bool(enabled), cid, tenant],
                 )
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         str(uuid.uuid4()),
                         datetime.utcnow(),
+                        tenant,
                         cid,
                         "toggle",
                         before,
@@ -510,10 +617,11 @@ class AgentMemoryStore:
             finally:
                 conn.close()
 
-    def rollback_correction(self, correction_id: str) -> dict[str, Any]:
+    def rollback_correction(self, correction_id: str, *, tenant_id: str | None = None) -> dict[str, Any]:
         cid = (correction_id or "").strip()
         if not cid:
             return {"success": False, "message": "Missing correction_id."}
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -521,9 +629,10 @@ class AgentMemoryStore:
                     """
                     SELECT enabled FROM datada_agent_corrections
                     WHERE correction_id = ?
+                      AND tenant_id = ?
                     LIMIT 1
                     """,
-                    [cid],
+                    [cid, tenant],
                 ).fetchone()
                 if not current:
                     return {"success": False, "message": f"Unknown correction_id '{cid}'."}
@@ -532,10 +641,11 @@ class AgentMemoryStore:
                     SELECT enabled_before, enabled_after
                     FROM datada_agent_correction_events
                     WHERE correction_id = ?
+                      AND tenant_id = ?
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
-                    [cid],
+                    [cid, tenant],
                 ).fetchone()
                 if not last_change:
                     return {"success": False, "message": "No correction state changes to rollback."}
@@ -551,16 +661,18 @@ class AgentMemoryStore:
                     UPDATE datada_agent_corrections
                     SET enabled = ?
                     WHERE correction_id = ?
+                      AND tenant_id = ?
                     """,
-                    [previous_state, cid],
+                    [previous_state, cid, tenant],
                 )
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_correction_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         str(uuid.uuid4()),
                         datetime.utcnow(),
+                        tenant,
                         cid,
                         "rollback",
                         current_state,
@@ -579,6 +691,7 @@ class AgentMemoryStore:
     def register_tool_candidate(
         self,
         *,
+        tenant_id: str | None,
         title: str,
         sql_text: str,
         source: str,
@@ -588,6 +701,7 @@ class AgentMemoryStore:
         clean_title = (title or "candidate_tool").strip()[:180]
         if not clean_sql:
             return ""
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -596,10 +710,11 @@ class AgentMemoryStore:
                     SELECT tool_id
                     FROM datada_agent_toolsmith
                     WHERE sql_text = ? AND status IN ('candidate', 'staged', 'promoted')
+                      AND tenant_id = ?
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
-                    [clean_sql],
+                    [clean_sql, tenant],
                 ).fetchone()
                 if existing and existing[0]:
                     return str(existing[0])
@@ -607,12 +722,13 @@ class AgentMemoryStore:
                 tool_id = str(uuid.uuid4())
                 conn.execute(
                     """
-                    INSERT INTO datada_agent_toolsmith VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO datada_agent_toolsmith VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         tool_id,
                         datetime.utcnow(),
                         datetime.utcnow(),
+                        tenant,
                         "candidate",
                         source,
                         clean_title,
@@ -636,10 +752,17 @@ class AgentMemoryStore:
             return False
         return text.startswith("select") or text.startswith("with") or text.startswith("explain")
 
-    def stage_tool_candidate(self, tool_id: str, *, db_path: Path | str) -> dict[str, Any]:
+    def stage_tool_candidate(
+        self,
+        tool_id: str,
+        *,
+        tenant_id: str | None,
+        db_path: Path | str,
+    ) -> dict[str, Any]:
         tid = (tool_id or "").strip()
         if not tid:
             return {"success": False, "message": "Missing tool_id."}
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -648,9 +771,10 @@ class AgentMemoryStore:
                     SELECT tool_id, sql_text, status
                     FROM datada_agent_toolsmith
                     WHERE tool_id = ?
+                      AND tenant_id = ?
                     LIMIT 1
                     """,
-                    [tid],
+                    [tid, tenant],
                 ).fetchone()
                 if not row:
                     return {"success": False, "message": f"Unknown tool_id '{tid}'."}
@@ -661,8 +785,9 @@ class AgentMemoryStore:
                         UPDATE datada_agent_toolsmith
                         SET updated_at = ?, test_success = ?, test_message = ?
                         WHERE tool_id = ?
+                          AND tenant_id = ?
                         """,
-                        [datetime.utcnow(), False, "Blocked: SQL is not read-only SELECT/WITH.", tid],
+                        [datetime.utcnow(), False, "Blocked: SQL is not read-only SELECT/WITH.", tid, tenant],
                     )
                     return {"success": False, "message": "Candidate SQL failed safety checks."}
 
@@ -679,6 +804,7 @@ class AgentMemoryStore:
                         UPDATE datada_agent_toolsmith
                         SET updated_at = ?, test_success = ?, test_message = ?, test_sql_text = ?
                         WHERE tool_id = ?
+                          AND tenant_id = ?
                         """,
                         [
                             datetime.utcnow(),
@@ -686,6 +812,7 @@ class AgentMemoryStore:
                             f"Stage test failed: {exc}",
                             probe_sql,
                             tid,
+                            tenant,
                         ],
                     )
                     return {"success": False, "message": f"Stage test failed: {exc}"}
@@ -695,17 +822,19 @@ class AgentMemoryStore:
                     UPDATE datada_agent_toolsmith
                     SET updated_at = ?, status = ?, test_success = ?, test_message = ?, test_sql_text = ?
                     WHERE tool_id = ?
+                      AND tenant_id = ?
                     """,
-                    [datetime.utcnow(), "staged", True, "Stage test passed.", probe_sql, tid],
+                    [datetime.utcnow(), "staged", True, "Stage test passed.", probe_sql, tid, tenant],
                 )
                 return {"success": True, "message": f"Tool {tid} staged successfully."}
             finally:
                 conn.close()
 
-    def promote_tool_candidate(self, tool_id: str) -> dict[str, Any]:
+    def promote_tool_candidate(self, tool_id: str, *, tenant_id: str | None = None) -> dict[str, Any]:
         tid = (tool_id or "").strip()
         if not tid:
             return {"success": False, "message": "Missing tool_id."}
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -714,9 +843,10 @@ class AgentMemoryStore:
                     SELECT status, test_success
                     FROM datada_agent_toolsmith
                     WHERE tool_id = ?
+                      AND tenant_id = ?
                     LIMIT 1
                     """,
-                    [tid],
+                    [tid, tenant],
                 ).fetchone()
                 if not row:
                     return {"success": False, "message": f"Unknown tool_id '{tid}'."}
@@ -732,18 +862,26 @@ class AgentMemoryStore:
                     UPDATE datada_agent_toolsmith
                     SET updated_at = ?, status = ?, test_message = ?
                     WHERE tool_id = ?
+                      AND tenant_id = ?
                     """,
-                    [datetime.utcnow(), "promoted", "Promoted for autonomous reuse.", tid],
+                    [datetime.utcnow(), "promoted", "Promoted for autonomous reuse.", tid, tenant],
                 )
                 return {"success": True, "message": f"Tool {tid} promoted."}
             finally:
                 conn.close()
 
-    def rollback_tool_candidate(self, tool_id: str, *, reason: str = "") -> dict[str, Any]:
+    def rollback_tool_candidate(
+        self,
+        tool_id: str,
+        *,
+        tenant_id: str | None = None,
+        reason: str = "",
+    ) -> dict[str, Any]:
         tid = (tool_id or "").strip()
         if not tid:
             return {"success": False, "message": "Missing tool_id."}
         note = (reason or "manual rollback").strip()[:300]
+        tenant = _clean_tenant(tenant_id)
         with self._lock:
             conn = self._connect()
             try:
@@ -751,9 +889,10 @@ class AgentMemoryStore:
                     """
                     SELECT tool_id FROM datada_agent_toolsmith
                     WHERE tool_id = ?
+                      AND tenant_id = ?
                     LIMIT 1
                     """,
-                    [tid],
+                    [tid, tenant],
                 ).fetchone()
                 if not existing:
                     return {"success": False, "message": f"Unknown tool_id '{tid}'."}
@@ -762,8 +901,9 @@ class AgentMemoryStore:
                     UPDATE datada_agent_toolsmith
                     SET updated_at = ?, status = ?, test_message = ?
                     WHERE tool_id = ?
+                      AND tenant_id = ?
                     """,
-                    [datetime.utcnow(), "rolled_back", note, tid],
+                    [datetime.utcnow(), "rolled_back", note, tid, tenant],
                 )
                 return {"success": True, "message": f"Tool {tid} rolled back."}
             finally:
@@ -772,15 +912,17 @@ class AgentMemoryStore:
     def list_tool_candidates(
         self,
         *,
+        tenant_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         clean_status = (status or "").strip().lower()
-        where = ""
-        params: list[Any] = [max(1, min(500, int(limit)))]
+        tenant = _clean_tenant(tenant_id)
+        where = "WHERE tenant_id = ?"
+        params: list[Any] = [tenant, max(1, min(500, int(limit)))]
         if clean_status:
-            where = "WHERE LOWER(status) = ?"
-            params = [clean_status, params[0]]
+            where = "WHERE tenant_id = ? AND LOWER(status) = ?"
+            params = [tenant, clean_status, params[1]]
         with self._lock:
             conn = self._connect()
             try:
@@ -827,6 +969,7 @@ class AgentMemoryStore:
     def learn_from_success(
         self,
         *,
+        tenant_id: str | None,
         goal: str,
         plan: dict[str, Any],
         score: float,
@@ -861,6 +1004,7 @@ class AgentMemoryStore:
             return ""
 
         return self.upsert_correction(
+            tenant_id=tenant_id,
             keyword=keyword,
             target_table=str(plan.get("table") or ""),
             target_metric=str(plan.get("metric") or ""),

@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from haikugraph.api.server import create_app
+from haikugraph.io.document_ingest import ingest_documents_to_duckdb
 
 
 @pytest.fixture
@@ -220,3 +221,90 @@ def test_data_overview_uses_discovery_agents(client):
     agent_names = [step.get("agent") for step in payload.get("agent_trace", [])]
     assert "DiscoveryPlannerAgent" in agent_names
     assert "CatalogProfilerAgent" in agent_names
+
+
+def test_document_query_returns_citations(tmp_path: Path):
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    (docs_dir / "policy.txt").write_text(
+        "Forex markup policy: markup must be disclosed and capped at 2.5 percent for retail flows.",
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "docs.duckdb"
+    ingest_result = ingest_documents_to_duckdb(docs_dir=docs_dir, db_path=db_path, force=True)
+    assert ingest_result["success"] is True
+    assert ingest_result.get("chunks", 0) >= 1
+
+    app = create_app(db_path=db_path)
+    client = TestClient(app)
+    resp = client.post(
+        "/api/assistant/query",
+        json={"goal": "What does the policy say about forex markup?", "llm_mode": "deterministic"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    assert payload["row_count"] >= 1
+    assert "D1" in payload["answer_markdown"]
+    assert payload["runtime"]["db_kind"] in {"duckdb", "documents"}
+
+
+def test_tenant_isolation_for_corrections(client):
+    feedback = client.post(
+        "/api/assistant/feedback",
+        headers={"x-datada-tenant-id": "tenant-a", "x-datada-role": "analyst"},
+        json={
+            "issue": "tenant isolation correction",
+            "keyword": "forex",
+            "target_table": "datada_mart_quotes",
+            "target_metric": "forex_markup_revenue",
+        },
+    )
+    assert feedback.status_code == 200
+    correction_id = feedback.json().get("correction_id")
+    assert correction_id
+
+    listed_a = client.get(
+        "/api/assistant/corrections",
+        headers={"x-datada-tenant-id": "tenant-a", "x-datada-role": "viewer"},
+    )
+    assert listed_a.status_code == 200
+    ids_a = {row.get("correction_id") for row in listed_a.json().get("rules", [])}
+    assert correction_id in ids_a
+
+    listed_b = client.get(
+        "/api/assistant/corrections",
+        headers={"x-datada-tenant-id": "tenant-b", "x-datada-role": "viewer"},
+    )
+    assert listed_b.status_code == 200
+    ids_b = {row.get("correction_id") for row in listed_b.json().get("rules", [])}
+    assert correction_id not in ids_b
+
+
+def test_slo_and_incident_endpoints(client):
+    bad = client.post(
+        "/api/assistant/query",
+        json={"goal": "DROP TABLE test_1_1_merged", "llm_mode": "deterministic"},
+    )
+    assert bad.status_code == 200
+    assert bad.json()["success"] is False
+
+    slo = client.get(
+        "/api/assistant/slo/evaluate",
+        params={"tenant_id": "public", "hours": 24},
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+    )
+    assert slo.status_code == 200
+    slo_payload = slo.json()
+    assert "status" in slo_payload
+    assert "targets" in slo_payload
+
+    incidents = client.get(
+        "/api/assistant/incidents",
+        params={"tenant_id": "public", "limit": 10},
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+    )
+    assert incidents.status_code == 200
+    incident_rows = incidents.json().get("incidents", [])
+    assert isinstance(incident_rows, list)
+    assert any(str(row.get("source", "")) == "query_failure" for row in incident_rows)
