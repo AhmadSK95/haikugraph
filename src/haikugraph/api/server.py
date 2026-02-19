@@ -703,14 +703,41 @@ def _find_working_duckdb_connection(app: FastAPI) -> dict[str, Any] | None:
     return None
 
 
+def _is_ephemeral_test_db_path(path: Path) -> bool:
+    text = str(path).replace("\\", "/").lower()
+    return "pytest-of-" in text or "/pytest-" in text
+
+
 def _self_heal_default_connection(app: FastAPI) -> dict[str, Any] | None:
     default_entry = app.state.connection_registry.resolve("default")
+    explicit_override = bool(getattr(app.state, "explicit_db_override", False))
+    default_path = Path(str((default_entry or {}).get("path") or "")).expanduser()
     if (
         default_entry
         and bool(default_entry.get("enabled", True))
         and str(default_entry.get("kind") or "").lower() == "duckdb"
-        and Path(str(default_entry.get("path") or "")).expanduser().exists()
+        and default_path.exists()
     ):
+        if (
+            not explicit_override
+            and _is_ephemeral_test_db_path(default_path)
+        ):
+            stable_candidate = _get_db_path().expanduser()
+            if stable_candidate.exists() and stable_candidate != default_path:
+                try:
+                    app.state.connection_registry.upsert(
+                        connection_id="default",
+                        kind="duckdb",
+                        path=str(stable_candidate),
+                        description="Primary local DuckDB connection",
+                        enabled=True,
+                        set_default=True,
+                    )
+                except Exception:
+                    pass
+                healed = app.state.connection_registry.resolve("default")
+                if healed is not None:
+                    return healed
         return default_entry
 
     fallback = _find_working_duckdb_connection(app)
@@ -1107,9 +1134,14 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    initial_db_path = db_path or _get_db_path()
+    initial_db_path = (db_path or _get_db_path()).expanduser()
     registry_path = _get_connection_registry_path()
+    if db_path is not None and not os.environ.get("HG_CONNECTION_REGISTRY_PATH"):
+        # Isolate one-off/test app instances from mutating the canonical project
+        # registry unless an explicit registry path is requested.
+        registry_path = initial_db_path.with_name(f"{initial_db_path.stem}_connections.json")
     app.state.connection_registry = ConnectionRegistry(registry_path, initial_db_path)
+    app.state.explicit_db_override = db_path is not None
     if db_path is not None:
         # Explicit db_path should deterministically become the default connection
         # for this app instance (important for tests and one-off runs).
@@ -1133,7 +1165,38 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 set_default=True,
             )
 
-    app.state.db_path = Path(str(default_entry.get("path") or initial_db_path))
+    if db_path is None:
+        healed = _self_heal_default_connection(app)
+        if healed is not None:
+            default_entry = healed
+
+    if default_entry is None:
+        default_entry = app.state.connection_registry.upsert(
+            connection_id="default",
+            kind="duckdb",
+            path=str(initial_db_path),
+            description="Primary local DuckDB connection",
+            enabled=True,
+            set_default=True,
+        )
+
+    resolved_db_path = Path(str(default_entry.get("path") or initial_db_path)).expanduser()
+    if not resolved_db_path.parent.exists():
+        # Stale temp paths (for example from /tmp test runs) can break app boot.
+        # Re-anchor default routing to a stable path so startup remains resilient.
+        fallback_path = initial_db_path
+        fallback_path.parent.mkdir(parents=True, exist_ok=True)
+        default_entry = app.state.connection_registry.upsert(
+            connection_id="default",
+            kind="duckdb",
+            path=str(fallback_path),
+            description="Primary local DuckDB connection",
+            enabled=True,
+            set_default=True,
+        )
+        resolved_db_path = Path(str(default_entry.get("path") or fallback_path)).expanduser()
+
+    app.state.db_path = resolved_db_path
     app.state.team = AgenticAnalyticsTeam(app.state.db_path)
     app.state.teams: dict[str, dict[str, Any]] = {
         str(default_entry.get("id", "default")): {

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import shutil
 
@@ -77,3 +78,37 @@ def test_feedback_uses_connection_scope(tmp_path: Path) -> None:
     assert payload["feedback_id"]
 
     _close_app_teams(app)
+
+
+def test_create_app_self_heals_pytest_default_path(tmp_path: Path, monkeypatch) -> None:
+    stable_db = tmp_path / "stable.db"
+    shutil.copyfile("data/haikugraph.db", stable_db)
+    stale_default = tmp_path / "pytest-of-user" / "pytest-11" / "dead-default.db"
+    registry_path = tmp_path / "connections.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "default_connection_id": "default",
+                "connections": [
+                    {
+                        "id": "default",
+                        "kind": "duckdb",
+                        "path": str(stale_default),
+                        "description": "stale pytest default",
+                        "enabled": True,
+                    }
+                ],
+            }
+        )
+    )
+    monkeypatch.setenv("HG_CONNECTION_REGISTRY_PATH", str(registry_path))
+    monkeypatch.setenv("HG_DB_PATH", str(stable_db))
+
+    app = create_app()
+    try:
+        resolved = app.state.connection_registry.resolve("default")
+        assert resolved is not None
+        assert Path(str(resolved["path"])).resolve() == stable_db.resolve()
+        assert app.state.db_path.resolve() == stable_db.resolve()
+    finally:
+        _close_app_teams(app)

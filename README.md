@@ -96,6 +96,8 @@ Current bounded controls exposed in API:
 - source-truth parity endpoint for canonical SQL comparison over active connection
 - document ingestion command for text-heavy sources (`haikugraph ingest-docs`)
 - connector capability registry for DuckDB/Postgres/Snowflake/BigQuery/Stream/Documents
+- startup self-healing for stale default connections (including orphaned pytest/temp paths)
+- memory sidecar initialization now auto-creates parent directories to prevent boot failures
 - full automated test suite passing (`236 passed`, `15 skipped`)
 
 ## Quick Start
@@ -181,6 +183,7 @@ curl -s -X POST http://localhost:8000/api/assistant/feedback \
 - per-connection team runtime is cached and reused
 - sessions are scoped by `connection_id:session_id` to prevent cross-source context bleed
 - UI now includes a connection selector + refresh action
+- `create_app(db_path=...)` uses a sidecar registry by default, so test/one-off app instances do not overwrite the canonical `data/connections.json` (unless `HG_CONNECTION_REGISTRY_PATH` is explicitly set)
 
 Connection APIs:
 

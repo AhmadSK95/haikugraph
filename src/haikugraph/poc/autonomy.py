@@ -59,6 +59,7 @@ class AgentMemoryStore:
         self._ensure_tables()
 
     def _connect(self) -> duckdb.DuckDBPyConnection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         return duckdb.connect(str(self.db_path), read_only=False)
 
     def _ensure_tables(self) -> None:
