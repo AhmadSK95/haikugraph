@@ -103,3 +103,131 @@ def test_agent_memory_store_handles_legacy_column_order(tmp_path: Path) -> None:
         score=0.91,
     )
     assert correction_id
+
+
+def test_agent_memory_store_rebuilds_incompatible_legacy_types(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-types" / "memory.duckdb"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    conn = duckdb.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE datada_agent_memory (
+            memory_id VARCHAR,
+            created_at TIMESTAMP,
+            trace_id VARCHAR,
+            goal VARCHAR,
+            resolved_goal VARCHAR,
+            runtime_mode BOOLEAN,
+            provider BOOLEAN,
+            success VARCHAR,
+            confidence_score VARCHAR,
+            row_count VARCHAR,
+            table_name VARCHAR,
+            metric VARCHAR,
+            dimensions_json VARCHAR,
+            time_filter_json VARCHAR,
+            value_filters_json VARCHAR,
+            sql_text VARCHAR,
+            audit_warnings_json VARCHAR,
+            correction_applied VARCHAR,
+            correction_reason DOUBLE,
+            metadata_json VARCHAR,
+            tenant_id VARCHAR
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO datada_agent_memory VALUES (
+            'old-id', NOW(), 'old-trace', 'old goal', 'old goal', TRUE, FALSE, 'true', '0.7', '4',
+            't', 'm', '[]', 'null', '[]', 'SELECT 1', '[]', 'false', 0.0, '{}', 'public'
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE datada_agent_corrections (
+            correction_id VARCHAR,
+            created_at TIMESTAMP,
+            source VARCHAR,
+            keyword VARCHAR,
+            target_table VARCHAR,
+            target_metric VARCHAR,
+            target_dimensions_json VARCHAR,
+            notes DOUBLE,
+            weight VARCHAR,
+            enabled VARCHAR,
+            tenant_id VARCHAR
+        )
+        """
+    )
+    conn.close()
+
+    store = AgentMemoryStore(db_path)
+    memory_id = store.store_turn(
+        tenant_id="public",
+        trace_id="type-fix",
+        goal="What is forex markup revenue?",
+        resolved_goal="What is forex markup revenue?",
+        runtime_mode="openai",
+        provider="openai",
+        success=True,
+        confidence_score=0.9,
+        row_count=3,
+        plan={
+            "table": "datada_mart_quotes",
+            "metric": "forex_markup_revenue",
+            "dimensions": ["__month__"],
+            "time_filter": {"kind": "month_year", "month": 12, "year": 2025},
+            "value_filters": [],
+        },
+        sql="SELECT 1",
+        audit_warnings=[],
+        correction_applied=False,
+        correction_reason="",
+        metadata={"runtime": "openai"},
+    )
+    assert memory_id
+
+    correction_id = store.learn_from_success(
+        tenant_id="public",
+        goal="forex markup by month",
+        plan={
+            "table": "datada_mart_quotes",
+            "metric": "forex_markup_revenue",
+            "dimensions": ["__month__"],
+        },
+        score=0.91,
+    )
+    assert correction_id
+
+    verify = duckdb.connect(str(db_path))
+    try:
+        row = verify.execute(
+            """
+            SELECT runtime_mode, provider, success
+            FROM datada_agent_memory
+            WHERE trace_id = 'type-fix'
+            LIMIT 1
+            """
+        ).fetchone()
+        assert row is not None
+        assert row[0] == "openai"
+        assert row[1] == "openai"
+        assert bool(row[2]) is True
+
+        correction_row = verify.execute(
+            """
+            SELECT notes, weight
+            FROM datada_agent_corrections
+            WHERE correction_id = ?
+            LIMIT 1
+            """,
+            [correction_id],
+        ).fetchone()
+        assert correction_row is not None
+        assert "Auto-learned from successful run" in str(correction_row[0] or "")
+        assert float(correction_row[1]) >= 1.0
+    finally:
+        verify.close()

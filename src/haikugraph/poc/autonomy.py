@@ -57,6 +57,81 @@ class AutonomyConfig:
 class AgentMemoryStore:
     """Persistent memory + correction registry in DuckDB."""
 
+    _EXPECTED_SCHEMAS: dict[str, list[tuple[str, str]]] = {
+        "datada_agent_memory": [
+            ("memory_id", "VARCHAR"),
+            ("created_at", "TIMESTAMP"),
+            ("tenant_id", "VARCHAR"),
+            ("trace_id", "VARCHAR"),
+            ("goal", "VARCHAR"),
+            ("resolved_goal", "VARCHAR"),
+            ("runtime_mode", "VARCHAR"),
+            ("provider", "VARCHAR"),
+            ("success", "BOOLEAN"),
+            ("confidence_score", "DOUBLE"),
+            ("row_count", "BIGINT"),
+            ("table_name", "VARCHAR"),
+            ("metric", "VARCHAR"),
+            ("dimensions_json", "VARCHAR"),
+            ("time_filter_json", "VARCHAR"),
+            ("value_filters_json", "VARCHAR"),
+            ("sql_text", "VARCHAR"),
+            ("audit_warnings_json", "VARCHAR"),
+            ("correction_applied", "BOOLEAN"),
+            ("correction_reason", "VARCHAR"),
+            ("metadata_json", "VARCHAR"),
+        ],
+        "datada_agent_feedback": [
+            ("feedback_id", "VARCHAR"),
+            ("created_at", "TIMESTAMP"),
+            ("tenant_id", "VARCHAR"),
+            ("trace_id", "VARCHAR"),
+            ("session_id", "VARCHAR"),
+            ("goal", "VARCHAR"),
+            ("issue", "VARCHAR"),
+            ("suggested_fix", "VARCHAR"),
+            ("severity", "VARCHAR"),
+            ("metadata_json", "VARCHAR"),
+        ],
+        "datada_agent_corrections": [
+            ("correction_id", "VARCHAR"),
+            ("created_at", "TIMESTAMP"),
+            ("tenant_id", "VARCHAR"),
+            ("source", "VARCHAR"),
+            ("keyword", "VARCHAR"),
+            ("target_table", "VARCHAR"),
+            ("target_metric", "VARCHAR"),
+            ("target_dimensions_json", "VARCHAR"),
+            ("notes", "VARCHAR"),
+            ("weight", "DOUBLE"),
+            ("enabled", "BOOLEAN"),
+        ],
+        "datada_agent_correction_events": [
+            ("event_id", "VARCHAR"),
+            ("created_at", "TIMESTAMP"),
+            ("tenant_id", "VARCHAR"),
+            ("correction_id", "VARCHAR"),
+            ("action", "VARCHAR"),
+            ("enabled_before", "BOOLEAN"),
+            ("enabled_after", "BOOLEAN"),
+            ("note", "VARCHAR"),
+        ],
+        "datada_agent_toolsmith": [
+            ("tool_id", "VARCHAR"),
+            ("created_at", "TIMESTAMP"),
+            ("updated_at", "TIMESTAMP"),
+            ("tenant_id", "VARCHAR"),
+            ("status", "VARCHAR"),
+            ("source", "VARCHAR"),
+            ("title", "VARCHAR"),
+            ("sql_text", "VARCHAR"),
+            ("test_sql_text", "VARCHAR"),
+            ("test_success", "BOOLEAN"),
+            ("test_message", "VARCHAR"),
+            ("metadata_json", "VARCHAR"),
+        ],
+    }
+
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
         self._lock = threading.RLock()
@@ -167,6 +242,7 @@ class AgentMemoryStore:
                 self._ensure_column(conn, "datada_agent_corrections", "tenant_id VARCHAR")
                 self._ensure_column(conn, "datada_agent_correction_events", "tenant_id VARCHAR")
                 self._ensure_column(conn, "datada_agent_toolsmith", "tenant_id VARCHAR")
+                self._ensure_schema_compatibility(conn)
                 conn.execute(
                     """
                     UPDATE datada_agent_memory SET tenant_id = 'public'
@@ -216,6 +292,114 @@ class AgentMemoryStore:
         if self._has_column(conn, table, col_name):
             return
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+
+    def _normalize_type(self, sql_type: str) -> str:
+        text = str(sql_type or "").strip().upper()
+        aliases = {
+            "BOOL": "BOOLEAN",
+            "INTEGER": "BIGINT",
+            "INT64": "BIGINT",
+            "DOUBLE PRECISION": "DOUBLE",
+            "STRING": "VARCHAR",
+        }
+        return aliases.get(text, text)
+
+    def _current_schema(self, conn: duckdb.DuckDBPyConnection, table: str) -> dict[str, str]:
+        rows = conn.execute(
+            """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = ?
+            """,
+            [table],
+        ).fetchall()
+        return {str(name).lower(): self._normalize_type(dtype) for name, dtype in rows}
+
+    def _cast_expr(self, column: str, target_type: str) -> str:
+        quoted = f'"{column}"'
+        t = self._normalize_type(target_type)
+        if t == "VARCHAR":
+            return f"CAST({quoted} AS VARCHAR)"
+        if t == "BOOLEAN":
+            return f"COALESCE(TRY_CAST({quoted} AS BOOLEAN), FALSE)"
+        if t == "DOUBLE":
+            return f"COALESCE(TRY_CAST({quoted} AS DOUBLE), 0.0)"
+        if t == "BIGINT":
+            return f"COALESCE(TRY_CAST({quoted} AS BIGINT), 0)"
+        if t == "TIMESTAMP":
+            return f"COALESCE(TRY_CAST({quoted} AS TIMESTAMP), CURRENT_TIMESTAMP)"
+        return f"CAST({quoted} AS {target_type})"
+
+    def _default_expr(self, column: str, target_type: str) -> str:
+        col = column.lower()
+        t = self._normalize_type(target_type)
+        if col == "tenant_id":
+            return "'public'"
+        if col.endswith("_id"):
+            return "''"
+        if t == "VARCHAR":
+            return "''"
+        if t == "BOOLEAN":
+            return "FALSE"
+        if t == "DOUBLE":
+            return "0.0"
+        if t == "BIGINT":
+            return "0"
+        if t == "TIMESTAMP":
+            return "CURRENT_TIMESTAMP"
+        return "NULL"
+
+    def _rebuild_table(
+        self,
+        conn: duckdb.DuckDBPyConnection,
+        table: str,
+        expected_cols: list[tuple[str, str]],
+    ) -> None:
+        current = self._current_schema(conn, table)
+        temp_table = f"{table}__schema_fix"
+        column_defs = ",\n                        ".join(f"{name} {dtype}" for name, dtype in expected_cols)
+        conn.execute(
+            f"""
+            CREATE TABLE {temp_table} (
+                {column_defs}
+            )
+            """
+        )
+
+        select_exprs: list[str] = []
+        for name, dtype in expected_cols:
+            if name.lower() in current:
+                select_exprs.append(f"{self._cast_expr(name, dtype)} AS \"{name}\"")
+            else:
+                select_exprs.append(f"{self._default_expr(name, dtype)} AS \"{name}\"")
+
+        select_sql = ", ".join(select_exprs)
+        conn.execute(
+            f"""
+            INSERT INTO {temp_table}
+            SELECT {select_sql}
+            FROM {table}
+            """
+        )
+        conn.execute(f"DROP TABLE {table}")
+        conn.execute(f"ALTER TABLE {temp_table} RENAME TO {table}")
+
+    def _ensure_schema_compatibility(self, conn: duckdb.DuckDBPyConnection) -> None:
+        for table, expected_cols in self._EXPECTED_SCHEMAS.items():
+            current = self._current_schema(conn, table)
+            if not current:
+                continue
+            mismatch = False
+            for col_name, expected_type in expected_cols:
+                cur_type = current.get(col_name.lower())
+                if not cur_type:
+                    mismatch = True
+                    break
+                if cur_type != self._normalize_type(expected_type):
+                    mismatch = True
+                    break
+            if mismatch:
+                self._rebuild_table(conn, table, expected_cols)
 
     def store_turn(
         self,

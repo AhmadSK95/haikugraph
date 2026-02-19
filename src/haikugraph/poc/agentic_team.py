@@ -952,6 +952,114 @@ class AgenticAnalyticsTeam:
                 payload=intake,
                 consumed_by=["SemanticRetrievalAgent", "GovernanceAgent"],
             )
+            clarification = self._run_agent(
+                trace,
+                "ClarificationAgent",
+                "ambiguity_gate",
+                self._clarification_agent,
+                effective_goal,
+                intake,
+                history,
+                memory_hints,
+            )
+            self._blackboard_post(
+                blackboard,
+                producer="ClarificationAgent",
+                artifact_type="ambiguity_gate",
+                payload=clarification,
+                consumed_by=["ChiefAnalystAgent", "PlanningAgent"],
+            )
+            if clarification.get("needs_clarification"):
+                total_ms = (time.perf_counter() - started) * 1000
+                trace.append(
+                    {
+                        "agent": "ChiefAnalystAgent",
+                        "role": "finalize_response",
+                        "status": "success",
+                        "duration_ms": round(total_ms, 2),
+                        "summary": "clarification requested",
+                    }
+                )
+                questions = list(clarification.get("questions") or [])
+                suggested = list(clarification.get("suggested_questions") or [])
+                self._memory_write_turn(
+                    trace=trace,
+                    trace_id=trace_id,
+                    goal=goal,
+                    resolved_goal=effective_goal,
+                    tenant_id=tenant_id,
+                    runtime=runtime,
+                    success=False,
+                    confidence_score=0.18,
+                    row_count=0,
+                    plan={
+                        "table": "",
+                        "metric": "",
+                        "dimensions": [],
+                        "time_filter": intake.get("time_filter"),
+                        "value_filters": [],
+                    },
+                    sql=None,
+                    audit_warnings=[f"clarification_required: {clarification.get('reason', '')}"],
+                    correction_applied=False,
+                    correction_reason="",
+                    metadata={
+                        "autonomy_mode": autonomy_cfg.mode,
+                        "clarification_required": True,
+                        "clarification_reason": clarification.get("reason", ""),
+                    },
+                )
+                return AssistantQueryResponse(
+                    success=False,
+                    answer_markdown=(
+                        f"**I need one quick clarification before I run this query.**\n\n"
+                        + "\n".join(f"- {q}" for q in questions[:3])
+                    ),
+                    confidence=ConfidenceLevel.UNCERTAIN,
+                    confidence_score=0.18,
+                    definition_used="clarification_required",
+                    evidence=[],
+                    sanity_checks=[
+                        SanityCheck(
+                            check_name="clarification_required",
+                            passed=False,
+                            message=str(clarification.get("reason") or "Question is ambiguous."),
+                        )
+                    ],
+                    sql=None,
+                    row_count=0,
+                    columns=[],
+                    sample_rows=[],
+                    execution_time_ms=0.0,
+                    trace_id=trace_id,
+                    runtime=self._runtime_payload(
+                        runtime,
+                        llm_intake_used=bool(intake.get("_llm_intake_used", False)),
+                        autonomy=autonomy_cfg,
+                    )
+                    | {"blackboard_entries": len(blackboard)},
+                    agent_trace=trace,
+                    chart_spec=None,
+                    evidence_packets=[
+                        {
+                            "agent": "ClarificationAgent",
+                            "result": clarification,
+                        },
+                        {
+                            "agent": "Blackboard",
+                            "artifact_count": len(blackboard),
+                            "artifacts": blackboard,
+                            "edges": self._blackboard_edges(blackboard),
+                        },
+                    ],
+                    data_quality={
+                        **catalog.get("quality", {}),
+                        "clarification": clarification,
+                        "blackboard": {"artifact_count": len(blackboard), "edges": self._blackboard_edges(blackboard)},
+                    },
+                    suggested_questions=suggested[:6],
+                    error="clarification_required",
+                )
 
             pre_gov = self._run_agent(
                 trace,
@@ -2413,6 +2521,136 @@ class AgenticAnalyticsTeam:
         if memory_hints:
             parsed = self._apply_memory_hints(goal, parsed, memory_hints)
         return parsed
+
+    def _clarification_agent(
+        self,
+        goal: str,
+        intake: dict[str, Any],
+        conversation_context: list[dict[str, Any]],
+        memory_hints: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Detect ambiguous goals and request clarification before execution."""
+
+        lower = goal.lower().strip()
+        tokens = re.findall(r"[a-z0-9_]+", lower)
+        grouped_signal = any(
+            marker in lower for marker in [" by ", "split", "breakdown", "wise", "trend", "per "]
+        )
+        followup_signal = any(
+            marker in lower
+            for marker in [
+                "what about",
+                "show me",
+                "same",
+                "that one",
+                "for that",
+                "now ",
+                "only ",
+                "this month",
+                "last month",
+            ]
+        )
+        domain_terms = [
+            "transaction",
+            "quote",
+            "booking",
+            "customer",
+            "order",
+            "product",
+            "region",
+            "refund",
+            "mt103",
+            "markup",
+            "forex",
+            "charge",
+            "payee",
+            "university",
+            "document",
+            "pdf",
+        ]
+        metric_terms = [
+            "count",
+            "how many",
+            "amount",
+            "sum",
+            "total",
+            "average",
+            "avg",
+            "rate",
+            "revenue",
+            "value",
+            "volume",
+        ]
+        has_domain_term = any(t in lower for t in domain_terms)
+        has_metric_term = any(t in lower for t in metric_terms)
+        explicit_time = bool(intake.get("time_filter"))
+        intent = str(intake.get("intent") or "")
+        metric = str(intake.get("metric") or "")
+
+        reasons: list[str] = []
+        if intent in {"data_overview", "document_qa"}:
+            return {
+                "needs_clarification": False,
+                "reason": "",
+                "questions": [],
+                "suggested_questions": [],
+                "ambiguity_score": 0.0,
+            }
+
+        if followup_signal and not conversation_context and not (has_domain_term or has_metric_term):
+            reasons.append("follow_up_without_history")
+        if (
+            grouped_signal
+            and not has_metric_term
+            and not has_domain_term
+            and metric in {"transaction_count", "quote_count", "booking_count"}
+        ):
+            reasons.append("grouping_without_metric_choice")
+        if len(tokens) <= 7 and not has_domain_term and not has_metric_term:
+            reasons.append("goal_too_brief_without_scope")
+        if lower in {"only december", "this month", "last month", "what about this month"}:
+            reasons.append("time_reference_without_business_scope")
+        if not has_domain_term and metric == "transaction_count" and len(tokens) <= 9:
+            reasons.append("default_metric_fallback_without_explicit_domain")
+
+        needs_clarification = bool(reasons)
+        questions: list[str] = []
+        if needs_clarification:
+            if not has_domain_term:
+                questions.append(
+                    "Which domain should I analyze: transactions, quotes, customers, bookings, or documents?"
+                )
+            if grouped_signal:
+                questions.append(
+                    "Which metric should I split (for example transaction count, total amount, MT103 count, refunds, or markup revenue)?"
+                )
+            if not explicit_time:
+                questions.append("What time window should I use (all time, this month, or a specific month/year)?")
+            questions = questions[:3]
+
+        suggestions: list[str] = []
+        if questions:
+            suggestions.extend(
+                [
+                    "Transaction count split by month and platform for December 2025",
+                    "Forex markup revenue by month from quotes",
+                    "Booking amount trend by month for this year",
+                ]
+            )
+        if memory_hints:
+            top = memory_hints[0] if memory_hints else {}
+            hinted_goal = str(top.get("goal") or "").strip()
+            if hinted_goal:
+                suggestions.insert(0, hinted_goal)
+        suggestions = list(dict.fromkeys(suggestions))[:6]
+
+        return {
+            "needs_clarification": needs_clarification,
+            "reason": ", ".join(reasons),
+            "questions": questions,
+            "suggested_questions": suggestions,
+            "ambiguity_score": round(min(1.0, len(reasons) * 0.25), 2),
+        }
 
     def _intake_with_llm(
         self,

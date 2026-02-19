@@ -3733,17 +3733,129 @@ def get_ui_html() -> str:
       font-size: 0.78rem;
     }
 
-    .trust-kpis {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 6px;
-      margin-top: 6px;
-    }
+	    .trust-kpis {
+	      display: grid;
+	      grid-template-columns: repeat(2, minmax(0, 1fr));
+	      gap: 6px;
+	      margin-top: 6px;
+	    }
 
-    @media (max-width: 1020px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
+	    .assistant-meta {
+	      display: flex;
+	      flex-wrap: wrap;
+	      gap: 8px;
+	      margin-top: 6px;
+	      color: var(--subtle);
+	      font-size: 0.78rem;
+	    }
+
+	    .assistant-actions {
+	      margin-top: 8px;
+	      display: flex;
+	      justify-content: flex-end;
+	    }
+
+	    .explain-modal[hidden] {
+	      display: none;
+	    }
+
+	    .explain-modal {
+	      position: fixed;
+	      inset: 0;
+	      background: rgba(5, 10, 20, 0.72);
+	      display: flex;
+	      align-items: center;
+	      justify-content: center;
+	      z-index: 999;
+	      padding: 18px;
+	    }
+
+	    .explain-dialog {
+	      width: min(1120px, 96vw);
+	      max-height: 88vh;
+	      overflow: hidden;
+	      border: 1px solid #2b3c58;
+	      border-radius: 14px;
+	      background: #0f1725;
+	      box-shadow: 0 22px 52px rgba(0, 0, 0, 0.55);
+	      display: flex;
+	      flex-direction: column;
+	    }
+
+	    .explain-head {
+	      display: flex;
+	      align-items: center;
+	      justify-content: space-between;
+	      gap: 10px;
+	      padding: 10px 12px;
+	      border-bottom: 1px solid #2a3c57;
+	      background: #132036;
+	      color: #d9ebff;
+	    }
+
+	    .explain-body {
+	      overflow: auto;
+	      padding: 12px;
+	      display: grid;
+	      gap: 10px;
+	    }
+
+	    .explain-summary {
+	      border: 1px solid #2a3f60;
+	      border-radius: 10px;
+	      padding: 10px;
+	      background: #101a2d;
+	      color: #d4e8ff;
+	      font-size: 0.86rem;
+	    }
+
+	    .explain-flow {
+	      border: 1px solid #2a3f60;
+	      border-radius: 10px;
+	      padding: 10px;
+	      background: #0f192b;
+	    }
+
+	    .explain-cards {
+	      display: grid;
+	      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	      gap: 8px;
+	    }
+
+	    .explain-card {
+	      border: 1px solid #2a3b58;
+	      border-radius: 10px;
+	      padding: 9px;
+	      background: #111d31;
+	    }
+
+	    .explain-card .title {
+	      font-size: 0.83rem;
+	      color: #bfe1ff;
+	      font-weight: 700;
+	      margin-bottom: 5px;
+	    }
+
+	    .explain-card .line {
+	      font-size: 0.77rem;
+	      color: #d0e3ff;
+	      line-height: 1.4;
+	      margin-bottom: 4px;
+	      word-break: break-word;
+	    }
+
+	    .flow-line {
+	      display: flex;
+	      flex-wrap: wrap;
+	      gap: 5px;
+	      align-items: center;
+	      margin-top: 6px;
+	    }
+
+	    @media (max-width: 1020px) {
+	      .layout {
+	        grid-template-columns: 1fr;
+	      }
       .chat-shell {
         min-height: 420px;
       }
@@ -3768,25 +3880,28 @@ def get_ui_html() -> str:
       </div>
     </section>
 
-    <section class="layout">
-      <aside>
-        <section class="panel">
-          <h3>Ask dataDa</h3>
-          <div class="hint">Try a business question, a vague exploration prompt, or a follow-up from the previous answer.</div>
-          <textarea id="queryInput" placeholder="Example: Total MT103 transaction count split month wise and platform wise"></textarea>
-          <div class="composer-actions">
-            <button class="btn primary" id="runBtn" type="button">Run Query</button>
-            <button class="btn ghost" id="newSessionBtn" type="button">New Session</button>
-            <button class="btn warn" id="clearThreadBtn" type="button">Clear Thread</button>
-          </div>
+	    <section class="layout">
+	      <aside>
+	        <section class="panel">
+	          <h3>Ask dataDa</h3>
+	          <div class="hint">Ask one question at a time. Keep it natural; follow-ups stay in the same session.</div>
+	          <textarea id="queryInput" placeholder="Example: Total MT103 transaction count split month wise and platform wise"></textarea>
+	          <div class="composer-actions">
+	            <button class="btn primary" id="runBtn" type="button">Run Query</button>
+	            <button class="btn ghost" id="newSessionBtn" type="button">New Session</button>
+	          </div>
 
-          <details class="control-section" open>
-            <summary>Runtime + Connection</summary>
-            <div class="row">
-              <label>
-                <div class="hint">LLM Mode</div>
-                <select id="llmMode">
-                  <option value="auto">Auto</option>
+	          <details class="control-section">
+	            <summary>Session + Settings</summary>
+	            <div class="composer-actions">
+	              <button class="btn warn" id="clearThreadBtn" type="button">Clear Thread</button>
+	              <button class="btn ghost" id="toggleArchBtn" type="button">View Agent Team Map</button>
+	            </div>
+	            <div class="row">
+	              <label>
+	                <div class="hint">LLM Mode</div>
+	                <select id="llmMode">
+	                  <option value="auto">Auto</option>
                   <option value="local">Local Ollama</option>
                   <option value="openai">OpenAI</option>
                   <option value="deterministic">Deterministic</option>
@@ -3800,48 +3915,30 @@ def get_ui_html() -> str:
               </label>
             </div>
             <div class="row">
-              <label>
-                <div class="hint">Data Connection</div>
-                <select id="connectionSelect">
-                  <option value="default">default</option>
-                </select>
-              </label>
-              <label>
-                <div class="hint">Connections</div>
-                <button class="btn ghost" id="refreshConnectionsBtn" type="button" style="margin-top:3px;">Refresh Connections</button>
-              </label>
-            </div>
-            <div class="composer-actions">
-              <button class="btn ghost" id="refreshModelsBtn" type="button">Refresh Models</button>
-            </div>
-            <div class="model-catalog" id="modelCatalog"></div>
-          </details>
+	              <label>
+	                <div class="hint">Data Connection</div>
+	                <select id="connectionSelect">
+	                  <option value="default">default</option>
+	                </select>
+	              </label>
+	              <label>
+	                <div class="hint">Connection List</div>
+	                <button class="btn ghost" id="refreshConnectionsBtn" type="button" style="margin-top:3px;">Refresh</button>
+	              </label>
+	            </div>
+	            <div class="toggle-row">
+	              <label for="storyMode"><strong>Storyteller mode</strong> (friendlier narration)</label>
+	              <input type="checkbox" id="storyMode" />
+	            </div>
+	            <div class="composer-actions">
+	              <button class="btn ghost" id="refreshModelsBtn" type="button">Refresh Models</button>
+	            </div>
+	            <div class="model-catalog" id="modelCatalog"></div>
+	          </details>
 
-          <details class="control-section">
-            <summary>Agent Controls</summary>
-            <div class="toggle-row">
-              <label for="storyMode"><strong>Storyteller mode</strong> (friendlier narration)</label>
-              <input type="checkbox" id="storyMode" />
-            </div>
-            <div class="composer-actions">
-              <button class="btn ghost" id="toggleArchBtn" type="button">View Agent Team Map</button>
-            </div>
-          </details>
-
-          <details class="control-section">
-            <summary>Trust + Corrections</summary>
-            <div class="composer-actions">
-              <button class="btn ghost" id="refreshCorrectionsBtn" type="button">Review Corrections</button>
-              <button class="btn ghost" id="refreshTrustBtn" type="button">Trust Dashboard</button>
-              <button class="btn ghost" id="runTruthCheckBtn" type="button">Run Source Truth Check</button>
-            </div>
-            <div class="correction-list" id="correctionsList"></div>
-            <div class="correction-list" id="trustPanel"></div>
-          </details>
-
-          <div class="examples" id="examples"></div>
-          <div class="hint" id="statusText" style="margin-top:9px;">Ready.</div>
-        </section>
+	          <div class="examples" id="examples"></div>
+	          <div class="hint" id="statusText" style="margin-top:9px;">Ready.</div>
+	        </section>
 
         <section class="panel architecture" id="architecturePanel">
           <h3>Agent Team Map</h3>
@@ -3850,13 +3947,22 @@ def get_ui_html() -> str:
         </section>
       </aside>
 
-      <section class="chat-shell">
-        <div class="thread" id="thread"></div>
-      </section>
-    </section>
-  </main>
+	      <section class="chat-shell">
+	        <div class="thread" id="thread"></div>
+	      </section>
+	    </section>
+	  </main>
+	  <div class="explain-modal" id="explainModal" hidden>
+	    <div class="explain-dialog">
+	      <div class="explain-head">
+	        <strong>Explain Yourself</strong>
+	        <button class="btn ghost" id="explainCloseBtn" type="button">Close</button>
+	      </div>
+	      <div class="explain-body" id="explainBody"></div>
+	    </div>
+	  </div>
 
-  <script>
+	  <script>
     const EXAMPLES = [
       'What kind of data do I have?',
       'Total MT103 transactions count split by month wise and platform wise',
@@ -3871,35 +3977,35 @@ def get_ui_html() -> str:
     const STORAGE_CONN_KEY = 'datada_connection_id';
     const STORAGE_TENANT_KEY = 'datada_tenant_id';
 
-    const els = {
-      queryInput: document.getElementById('queryInput'),
-      runBtn: document.getElementById('runBtn'),
-      newSessionBtn: document.getElementById('newSessionBtn'),
-      clearThreadBtn: document.getElementById('clearThreadBtn'),
-      modeSelect: document.getElementById('llmMode'),
-      localModelSelect: document.getElementById('localModel'),
-      connectionSelect: document.getElementById('connectionSelect'),
-      refreshConnectionsBtn: document.getElementById('refreshConnectionsBtn'),
-      refreshModelsBtn: document.getElementById('refreshModelsBtn'),
-      refreshCorrectionsBtn: document.getElementById('refreshCorrectionsBtn'),
-      refreshTrustBtn: document.getElementById('refreshTrustBtn'),
-      runTruthCheckBtn: document.getElementById('runTruthCheckBtn'),
-      modelCatalog: document.getElementById('modelCatalog'),
-      correctionsList: document.getElementById('correctionsList'),
-      trustPanel: document.getElementById('trustPanel'),
-      examples: document.getElementById('examples'),
-      statusText: document.getElementById('statusText'),
-      thread: document.getElementById('thread'),
-      storyMode: document.getElementById('storyMode'),
-      sessionChip: document.getElementById('sessionChip'),
-      architecturePanel: document.getElementById('architecturePanel'),
-      toggleArchBtn: document.getElementById('toggleArchBtn'),
-      archContent: document.getElementById('archContent'),
-      dbPath: document.getElementById('dbPath'),
-      healthState: document.getElementById('healthState'),
-      semanticState: document.getElementById('semanticState'),
-      recommendedMode: document.getElementById('recommendedMode')
-    };
+	    const els = {
+	      queryInput: document.getElementById('queryInput'),
+	      runBtn: document.getElementById('runBtn'),
+	      newSessionBtn: document.getElementById('newSessionBtn'),
+	      clearThreadBtn: document.getElementById('clearThreadBtn'),
+	      modeSelect: document.getElementById('llmMode'),
+	      localModelSelect: document.getElementById('localModel'),
+	      connectionSelect: document.getElementById('connectionSelect'),
+	      refreshConnectionsBtn: document.getElementById('refreshConnectionsBtn'),
+	      refreshModelsBtn: document.getElementById('refreshModelsBtn'),
+	      modelCatalog: document.getElementById('modelCatalog'),
+	      correctionsList: document.getElementById('correctionsList'),
+	      trustPanel: document.getElementById('trustPanel'),
+	      examples: document.getElementById('examples'),
+	      statusText: document.getElementById('statusText'),
+	      thread: document.getElementById('thread'),
+	      storyMode: document.getElementById('storyMode'),
+	      sessionChip: document.getElementById('sessionChip'),
+	      architecturePanel: document.getElementById('architecturePanel'),
+	      toggleArchBtn: document.getElementById('toggleArchBtn'),
+	      archContent: document.getElementById('archContent'),
+	      explainModal: document.getElementById('explainModal'),
+	      explainBody: document.getElementById('explainBody'),
+	      explainCloseBtn: document.getElementById('explainCloseBtn'),
+	      dbPath: document.getElementById('dbPath'),
+	      healthState: document.getElementById('healthState'),
+	      semanticState: document.getElementById('semanticState'),
+	      recommendedMode: document.getElementById('recommendedMode')
+	    };
 
     const state = {
       sessionId: null,
@@ -4037,12 +4143,12 @@ def get_ui_html() -> str:
       }
     }
 
-    function saveState() {
-      safeStorageSet(STORAGE_SESSION_KEY, state.sessionId);
-      safeStorageSet(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(0, 30)));
-      safeStorageSet(STORAGE_CONN_KEY, state.connectionId || 'default');
-      safeStorageSet(STORAGE_TENANT_KEY, state.tenantId || 'public');
-    }
+	    function saveState() {
+	      safeStorageSet(STORAGE_SESSION_KEY, state.sessionId);
+	      safeStorageSet(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(-30)));
+	      safeStorageSet(STORAGE_CONN_KEY, state.connectionId || 'default');
+	      safeStorageSet(STORAGE_TENANT_KEY, state.tenantId || 'public');
+	    }
 
     function loadState() {
       const existingSession = safeStorageGet(STORAGE_SESSION_KEY);
@@ -4179,11 +4285,12 @@ def get_ui_html() -> str:
       }
     }
 
-    async function loadCorrections() {
-      try {
-        const q = new URLSearchParams({
-          db_connection_id: state.connectionId || 'default',
-          include_disabled: 'true',
+	    async function loadCorrections() {
+	      if (!els.correctionsList) return;
+	      try {
+	        const q = new URLSearchParams({
+	          db_connection_id: state.connectionId || 'default',
+	          include_disabled: 'true',
           limit: '60'
         });
         const data = await fetch(`/api/assistant/corrections?${q}`).then((r) => r.json());
@@ -4223,8 +4330,9 @@ def get_ui_html() -> str:
       }
     }
 
-    function renderTrustDashboard(data, slo, incidents) {
-      const modes = Array.isArray(data.by_mode) ? data.by_mode : [];
+	    function renderTrustDashboard(data, slo, incidents) {
+	      if (!els.trustPanel) return;
+	      const modes = Array.isArray(data.by_mode) ? data.by_mode : [];
       const modeRows = modes.length
         ? modes.map((m) => (
             `<div class="hint">${esc(m.mode)} • runs=${esc(fmt(m.runs))} • success=${esc(fmt(Math.round((m.success_rate || 0) * 100)))}% • avg=${esc(fmt(m.avg_execution_ms || 0))} ms</div>`
@@ -4264,8 +4372,9 @@ def get_ui_html() -> str:
       `;
     }
 
-    async function loadTrustDashboard() {
-      try {
+	    async function loadTrustDashboard() {
+	      if (!els.trustPanel) return;
+	      try {
         const q = new URLSearchParams({
           tenant_id: state.tenantId || 'public',
           hours: '168'
@@ -4281,8 +4390,9 @@ def get_ui_html() -> str:
       }
     }
 
-    async function runSourceTruthCheck() {
-      setStatus('Running source-truth parity checks...');
+	    async function runSourceTruthCheck() {
+	      if (!els.trustPanel) return;
+	      setStatus('Running source-truth parity checks...');
       try {
         const q = new URLSearchParams({
           db_connection_id: state.connectionId || 'default',
@@ -4463,33 +4573,48 @@ def get_ui_html() -> str:
       return shortText(fmt(payloadPreview), 120);
     }
 
-    function buildBlackboardMaps(evidencePackets) {
-      const packet = Array.isArray(evidencePackets)
-        ? evidencePackets.find((p) => p && p.agent === 'Blackboard')
-        : null;
-      const artifacts = packet && Array.isArray(packet.artifacts) ? packet.artifacts : [];
-      const edges = packet && Array.isArray(packet.edges) ? packet.edges : [];
-      const artifactsByProducer = new Map();
-      artifacts.forEach((artifact) => {
-        const producer = String((artifact && artifact.producer) || 'UnknownAgent');
-        const bucket = artifactsByProducer.get(producer) || [];
-        bucket.push(artifact);
-        artifactsByProducer.set(producer, bucket);
-      });
-      const handoffsByFrom = new Map();
-      edges.forEach((edge) => {
-        const from = String((edge && edge.from) || '');
-        const to = String((edge && edge.to) || '');
-        if (!from || !to) return;
-        const artifactType = String((edge && edge.artifact_type) || '');
-        const bucket = handoffsByFrom.get(from) || [];
-        if (!bucket.some((handoff) => handoff.to === to && handoff.artifactType === artifactType)) {
-          bucket.push({ to, artifactType });
-        }
-        handoffsByFrom.set(from, bucket);
-      });
-      return { artifacts, edges, artifactsByProducer, handoffsByFrom };
-    }
+	    function buildBlackboardMaps(evidencePackets) {
+	      const packet = Array.isArray(evidencePackets)
+	        ? evidencePackets.find((p) => p && p.agent === 'Blackboard')
+	        : null;
+	      const artifacts = packet && Array.isArray(packet.artifacts) ? packet.artifacts : [];
+	      const edges = packet && Array.isArray(packet.edges) ? packet.edges : [];
+	      const artifactsByProducer = new Map();
+	      const artifactsByConsumer = new Map();
+	      artifacts.forEach((artifact) => {
+	        const producer = String((artifact && artifact.producer) || 'UnknownAgent');
+	        const bucket = artifactsByProducer.get(producer) || [];
+	        bucket.push(artifact);
+	        artifactsByProducer.set(producer, bucket);
+	        const consumers = Array.isArray(artifact && artifact.consumed_by) ? artifact.consumed_by : [];
+	        consumers.forEach((consumer) => {
+	          const c = String(consumer || '');
+	          if (!c) return;
+	          const incoming = artifactsByConsumer.get(c) || [];
+	          incoming.push(artifact);
+	          artifactsByConsumer.set(c, incoming);
+	        });
+	      });
+	      const handoffsByFrom = new Map();
+	      const handoffsByTo = new Map();
+	      edges.forEach((edge) => {
+	        const from = String((edge && edge.from) || '');
+	        const to = String((edge && edge.to) || '');
+	        if (!from || !to) return;
+	        const artifactType = String((edge && edge.artifact_type) || '');
+	        const bucket = handoffsByFrom.get(from) || [];
+	        if (!bucket.some((handoff) => handoff.to === to && handoff.artifactType === artifactType)) {
+	          bucket.push({ to, artifactType });
+	        }
+	        handoffsByFrom.set(from, bucket);
+	        const reverseBucket = handoffsByTo.get(to) || [];
+	        if (!reverseBucket.some((handoff) => handoff.from === from && handoff.artifactType === artifactType)) {
+	          reverseBucket.push({ from, artifactType });
+	        }
+	        handoffsByTo.set(to, reverseBucket);
+	      });
+	      return { artifacts, edges, artifactsByProducer, artifactsByConsumer, handoffsByFrom, handoffsByTo };
+	    }
 
     function renderAgentMission(trace, evidencePackets) {
       const steps = Array.isArray(trace) ? trace : [];
@@ -4618,147 +4743,137 @@ def get_ui_html() -> str:
       }).join(' ');
     }
 
-    function pickHeadlineValue(data) {
-      if (!data || !Array.isArray(data.sample_rows) || data.sample_rows.length === 0) return null;
-      const row0 = data.sample_rows[0] || {};
-      if (Object.prototype.hasOwnProperty.call(row0, 'metric_value')) {
-        return row0.metric_value;
+	    function pickHeadlineValue(data) {
+	      if (!data || !Array.isArray(data.sample_rows) || data.sample_rows.length === 0) return null;
+	      const row0 = data.sample_rows[0] || {};
+	      if (Object.prototype.hasOwnProperty.call(row0, 'metric_value')) {
+	        return row0.metric_value;
       }
       const cols = Array.isArray(data.columns) ? data.columns : [];
       if (cols.length === 1) return row0[cols[0]];
-      const numericCandidate = Object.entries(row0).find(([, v]) => typeof v === 'number');
-      return numericCandidate ? numericCandidate[1] : null;
-    }
+	      const numericCandidate = Object.entries(row0).find(([, v]) => typeof v === 'number');
+	      return numericCandidate ? numericCandidate[1] : null;
+	    }
 
-    function responseCard(turn) {
-      const data = turn.response;
-      if (!data) return `<div class="bubble assistant">Thinking...</div>`;
-      const runtime = data.runtime || {};
-      const quality = data.data_quality || {};
-      const chartSpec = data.chart_spec || {};
-      const grounding = quality.grounding || {};
-      const confidencePct = Math.round((data.confidence_score || 0) * 100);
-      const headline = pickHeadlineValue(data);
-      const checks = Array.isArray(data.sanity_checks) ? data.sanity_checks : [];
-      const passedChecks = checks.filter((c) => !!c.passed).length;
-      const totalChecks = checks.length;
-      const checksSummary = totalChecks ? `${passedChecks}/${totalChecks} checks passed` : 'No checks yet';
-      const understoodIntent = humanizeToken(grounding.intent || 'metric');
-      const understoodMetric = humanizeToken(grounding.metric || 'metric');
-      const scopeLabel = friendlyTableName(grounding.table || '');
+	    function renderExplainView(turnIndex) {
+	      const turn = state.turns[turnIndex];
+	      if (!turn || !turn.response) {
+	        return '<div class="hint">No trace available for this turn.</div>';
+	      }
+	      const data = turn.response;
+	      const trace = Array.isArray(data.agent_trace) ? data.agent_trace : [];
+	      const maps = buildBlackboardMaps(data.evidence_packets || []);
+	      const autonomy = ((data.data_quality || {}).autonomy || {});
+	      const path = [];
+	      trace.forEach((step) => {
+	        const agent = String((step && step.agent) || 'Agent');
+	        if (!path.length || path[path.length - 1] !== agent) path.push(agent);
+	      });
+	      const flow = path.map((agent, idx) => (
+	        `${idx ? '<span class="path-arrow">→</span>' : ''}<span class="path-node">${esc(agent)}</span>`
+	      )).join('');
+	      const cards = trace.map((step, idx) => {
+	        const agent = String(step.agent || 'Agent');
+	        const role = humanizeToken(step.role || 'step');
+	        const status = String(step.status || 'unknown');
+	        const incoming = (maps.handoffsByTo.get(agent) || []).slice(0, 3);
+	        const incomingArtifacts = (maps.artifactsByConsumer.get(agent) || []).slice(-2);
+	        const outgoing = (maps.handoffsByFrom.get(agent) || []).slice(0, 4);
+	        const incomingText = incoming.length
+	          ? incoming.map((h) => `${h.from} (${humanizeToken(h.artifactType || 'artifact')})`).join(' • ')
+	          : 'No direct handoff inputs.';
+	        const artifactText = incomingArtifacts.length
+	          ? incomingArtifacts.map((a) => `${a.producer}: ${summarizePreview(a.payload_preview || a.summary || '')}`).join(' • ')
+	          : 'No blackboard artifact preview.';
+	        const outgoingText = outgoing.length
+	          ? outgoing.map((h) => `${agent} → ${h.to} (${humanizeToken(h.artifactType || 'artifact')})`).join(' • ')
+	          : 'No downstream handoff.';
+	        return `
+	          <div class="explain-card">
+	            <div class="title">Step ${idx + 1}: ${esc(agent)} • ${esc(role)}</div>
+	            <div class="line"><strong>Status:</strong> ${esc(status)} • ${esc(fmt(step.duration_ms || 0))} ms</div>
+	            <div class="line"><strong>Input received:</strong> ${esc(incomingText)}</div>
+	            <div class="line"><strong>Input context:</strong> ${esc(artifactText)}</div>
+	            <div class="line"><strong>Decision:</strong> ${esc(friendlySummary(step.summary || ''))}</div>
+	            <div class="line"><strong>Output shared:</strong> ${esc(outgoingText)}</div>
+	          </div>
+	        `;
+	      }).join('');
+	      const sqlRationale = autonomy.correction_applied
+	        ? String(autonomy.correction_reason || 'Autonomy selected a better candidate plan.')
+	        : 'Base plan remained selected after audit and autonomy scoring.';
+	      return `
+	        <div class="explain-summary">
+	          <div><strong>Question:</strong> ${esc(turn.goal || '')}</div>
+	          <div style="margin-top:4px;"><strong>Run:</strong> ${esc((data.trace_id || '').slice(0, 12))} • ${esc((data.runtime || {}).mode || 'unknown')} engine • confidence ${esc(fmt(Math.round((data.confidence_score || 0) * 100)))}%</div>
+	        </div>
+	        <div class="explain-flow">
+	          <strong>Decision flow</strong>
+	          <div class="flow-line">${flow || '<span class="hint">No agent path available.</span>'}</div>
+	        </div>
+	        <div class="explain-cards">
+	          ${cards || '<div class="hint">No trace steps were captured.</div>'}
+	        </div>
+	        <div class="explain-summary">
+	          <strong>How final SQL was chosen</strong>
+	          <div style="margin-top:5px;" class="line">${esc(sqlRationale)}</div>
+	          <div class="mono">${esc(data.sql || 'No SQL generated')}</div>
+	        </div>
+	        <div class="explain-summary md-block">
+	          <strong>How final narration was produced</strong>
+	          <div style="margin-top:6px;">${md(data.answer_markdown || '')}</div>
+	        </div>
+	        <details>
+	          <summary>Advanced diagnostics JSON</summary>
+	          <div class="mono json-view">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</div>
+	        </details>
+	      `;
+	    }
 
-      const suggestions = (data.suggested_questions || []).slice(0, 4);
-      const suggestionHtml = suggestions.length
-        ? `<div class="suggestions">${suggestions.map((q) => `<button class="pill suggest" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
-        : '';
+	    function openExplainModal(turnIndex) {
+	      if (!els.explainModal || !els.explainBody) return;
+	      els.explainBody.innerHTML = renderExplainView(turnIndex);
+	      els.explainModal.hidden = false;
+	      document.body.style.overflow = 'hidden';
+	    }
 
-      const termMisses = Array.isArray(grounding.goal_term_misses) ? grounding.goal_term_misses : [];
-      const dims = Array.isArray(grounding.dimensions) ? grounding.dimensions : [];
-      const dimsLabel = dims.length
-        ? dims.map((d) => (d === '__month__' ? 'month' : d)).join(', ')
-        : 'none';
-      const filtersLabel = fmtFilters(grounding.value_filters || []);
-      const conceptTagClass = termMisses.length ? 'warn' : 'ok';
-      const replayText = grounding.replay_match === null || grounding.replay_match === undefined
-        ? 'n/a'
-        : (grounding.replay_match ? 'pass' : 'fail');
-      const conceptCoverage = grounding.concept_coverage_pct === null || grounding.concept_coverage_pct === undefined
-        ? 'n/a'
-        : `${fmt(grounding.concept_coverage_pct)}%`;
-      const semanticVersion = quality.semantic_version || 'n/a';
-      const snapshotLabel = semanticVersion === 'n/a' ? 'n/a' : `version ${semanticVersion}`;
-      const failedChecks = checks.filter((c) => !c.passed).map((c) => c.check_name || 'check');
-      const outcomeMessages = [];
-      if (termMisses.length) outcomeMessages.push(`Missing goal concepts: ${termMisses.join(', ')}`);
-      if (grounding.replay_match === false) outcomeMessages.push('Replay check failed: deterministic replay did not match.');
-      if (failedChecks.length) outcomeMessages.push(`Checks flagged: ${failedChecks.join(', ')}`);
+	    function closeExplainModal() {
+	      if (!els.explainModal || !els.explainBody) return;
+	      els.explainModal.hidden = true;
+	      els.explainBody.innerHTML = '';
+	      document.body.style.overflow = '';
+	    }
 
-      const diagOutcome = outcomeMessages.length
-        ? `<div class="diag-outcome warn"><strong>Where to improve:</strong> ${esc(outcomeMessages.join(' | '))}</div>`
-        : `<div class="diag-outcome ok"><strong>Validation:</strong> your question, data scope, and checks are aligned.</div>`;
+	    function responseCard(turn, turnIndex) {
+	      const data = turn.response;
+	      if (!data) return `<div class="bubble assistant">Thinking...</div>`;
+	      const runtime = data.runtime || {};
+	      const confidencePct = Math.round((data.confidence_score || 0) * 100);
+	      const headline = pickHeadlineValue(data);
+	      const suggestions = (data.suggested_questions || []).slice(0, 4);
+	      const suggestionHtml = suggestions.length
+	        ? `<div class="suggestions">${suggestions.map((q) => `<button class="pill suggest" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
+	        : '';
+	      return `
+	        <div class="bubble assistant md-block">${md(data.answer_markdown || '')}</div>
+	        <div class="assistant-meta">
+	          <span>confidence: ${esc(data.confidence || 'unknown')} (${confidencePct}%)</span>
+	          <span>engine: ${esc((runtime.mode || 'unknown').toUpperCase())}</span>
+	          <span>rows: ${esc(fmt(data.row_count || 0))}</span>
+	          <span>time: ${esc(fmt(data.execution_time_ms || 0))} ms</span>
+	          ${headline === null || headline === undefined ? '' : `<span>key result: ${esc(fmt(headline))}</span>`}
+	        </div>
+	        ${suggestionHtml}
+	        <div class="assistant-actions">
+	          <button class="btn ghost explain-btn" type="button" data-turn-index="${esc(turnIndex)}">Explain Yourself</button>
+	        </div>
+	      `;
+	    }
 
-      const diagHtml = `
-        <div class="diag-grid">
-          <div class="diag-card">
-            <div class="k">What I Understood</div>
-            <div class="v">Question type: <strong>${esc(understoodIntent)}</strong><br/>Metric: <strong>${esc(understoodMetric)}</strong></div>
-          </div>
-          <div class="diag-card">
-            <div class="k">Data Used</div>
-            <div class="v">${esc(scopeLabel)} (<code>${esc(grounding.table || 'unknown')}</code>)<br/>Grouped by: <strong>${esc(dimsLabel)}</strong></div>
-          </div>
-          <div class="diag-card">
-            <div class="k">Time Period</div>
-            <div class="v">${esc(fmtTimeFilter(grounding.time_filter))}</div>
-          </div>
-          <div class="diag-card">
-            <div class="k">Applied Filters</div>
-            <div class="v">${esc(filtersLabel)}</div>
-          </div>
-          <div class="diag-card">
-            <div class="k">Reliability</div>
-            <div class="v">${esc(checksSummary)}<br/>Concept coverage: <strong>${esc(conceptCoverage)}</strong><br/>Replay: <strong>${esc(replayText)}</strong></div>
-          </div>
-          <div class="diag-card">
-            <div class="k">Engine</div>
-            <div class="v">${esc((runtime.mode || 'unknown').toUpperCase())} on connection <code>${esc(runtime.db_connection_id || 'default')}</code></div>
-          </div>
-          <div class="diag-card">
-            <div class="k">Dataset Snapshot</div>
-            <div class="v">${esc(snapshotLabel)}</div>
-          </div>
-        </div>
-      `;
-      const missionHtml = renderAgentMission(data.agent_trace || [], data.evidence_packets || []);
-
-      return `
-        <div class="bubble assistant md-block">${md(data.answer_markdown || '')}</div>
-        <div class="kpi-grid">
-          <div class="kpi label">
-            <div class="k">Key result</div>
-            <div class="v">${headline === null || headline === undefined ? 'n/a' : esc(fmt(headline))}</div>
-          </div>
-          <div class="kpi">
-            <div class="k">Confidence</div>
-            <div class="v">${esc(data.confidence || 'unknown')} (${confidencePct}%)</div>
-          </div>
-          <div class="kpi">
-            <div class="k">Execution</div>
-            <div class="v">${esc(fmt(data.execution_time_ms || 0))} ms</div>
-          </div>
-        </div>
-        <div style="margin-bottom:6px;">
-          <span class="tag ${data.success ? 'ok' : 'warn'}">${data.success ? 'SUCCESS' : 'DEGRADED'}</span>
-          <span class="tag ${data.success ? 'ok' : 'warn'}">${esc((runtime.mode || 'unknown').toUpperCase())} ENGINE</span>
-          <span class="hint">rows: ${esc(fmt(data.row_count || 0))}</span>
-        </div>
-        <div style="margin-bottom:6px;">
-          <span class="tag ${conceptTagClass}">${termMisses.length ? 'Question match needs review' : 'Question match looks good'}</span>
-          <span class="tag ${grounding.replay_match === false ? 'warn' : 'ok'}">${grounding.replay_match === false ? 'Replay mismatch' : 'Replay check passed'}</span>
-        </div>
-        ${diagHtml}
-        ${diagOutcome}
-        ${checksHtml(checks)}
-        ${suggestionHtml}
-        ${renderMiniChart(chartSpec, data.columns || [], data.sample_rows || [])}
-        ${renderTable(data.columns || [], data.sample_rows || [])}
-        <details>
-          <summary>Technical details (SQL + agent mission)</summary>
-          <div class="mono">${esc(data.sql || 'No SQL generated')}</div>
-          ${missionHtml}
-          ${renderQualityOverview(data.data_quality || {})}
-          <details>
-            <summary>Raw diagnostics JSON (advanced)</summary>
-            <div class="mono json-view">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</div>
-          </details>
-        </details>
-      `;
-    }
-
-    function renderThread() {
-      if (!state.turns.length) {
-        els.thread.innerHTML = `
-          <div class="empty-state">
+	    function renderThread() {
+	      if (!state.turns.length) {
+	        els.thread.innerHTML = `
+	          <div class="empty-state">
             Ask a question to start. Try:
             <br/>• "What kind of data do I have?"
             <br/>• "Total MT103 transactions count split by month wise and platform wise"
@@ -4766,29 +4881,38 @@ def get_ui_html() -> str:
           </div>
         `;
         return;
-      }
+	      }
 
-      els.thread.innerHTML = state.turns.map((turn, idx) => `
-        <article class="turn">
-          <div class="turn-head">
-            <span>Turn ${state.turns.length - idx}</span>
-            <span>${turn.response && turn.response.trace_id ? esc(turn.response.trace_id.slice(0, 12)) : 'pending'}</span>
-          </div>
-          <div class="turn-body">
-            <div class="bubble user">${esc(turn.goal)}</div>
-            ${responseCard(turn)}
-          </div>
-        </article>
-      `).join('');
+	      els.thread.innerHTML = state.turns.map((turn, idx) => `
+	        <article class="turn">
+	          <div class="turn-head">
+	            <span>Turn ${idx + 1}</span>
+	            <span>${turn.response && turn.response.trace_id ? esc(turn.response.trace_id.slice(0, 12)) : 'pending'}</span>
+	          </div>
+	          <div class="turn-body">
+	            <div class="bubble user">${esc(turn.goal)}</div>
+	            ${responseCard(turn, idx)}
+	          </div>
+	        </article>
+	      `).join('');
 
-      Array.from(els.thread.querySelectorAll('button.suggest')).forEach((btn) => {
+	      Array.from(els.thread.querySelectorAll('button.suggest')).forEach((btn) => {
         btn.addEventListener('click', () => {
           const q = btn.getAttribute('data-q');
-          els.queryInput.value = q || '';
-          els.queryInput.focus();
-        });
-      });
-    }
+	          els.queryInput.value = q || '';
+	          els.queryInput.focus();
+	        });
+	      });
+	      Array.from(els.thread.querySelectorAll('button.explain-btn')).forEach((btn) => {
+	        btn.addEventListener('click', () => {
+	          const idxRaw = btn.getAttribute('data-turn-index');
+	          const turnIndex = Number(idxRaw);
+	          if (!Number.isFinite(turnIndex)) return;
+	          openExplainModal(turnIndex);
+	        });
+	      });
+	      els.thread.scrollTop = els.thread.scrollHeight;
+	    }
 
     async function loadArchitecture() {
       try {
@@ -4842,10 +4966,10 @@ def get_ui_html() -> str:
         return;
       }
 
-      const turn = { goal, response: null };
-      state.turns.unshift(turn);
-      saveState();
-      renderThread();
+	      const turn = { goal, response: null };
+	      state.turns.push(turn);
+	      saveState();
+	      renderThread();
 
       els.runBtn.disabled = true;
       setStatus('Running agent team...');
@@ -4904,29 +5028,25 @@ def get_ui_html() -> str:
       }
     }
 
-    function wireEvents() {
-      els.runBtn.addEventListener('click', runQuery);
-      els.refreshModelsBtn.addEventListener('click', loadLocalModels);
-      els.refreshCorrectionsBtn.addEventListener('click', loadCorrections);
-      els.refreshTrustBtn.addEventListener('click', loadTrustDashboard);
-      els.runTruthCheckBtn.addEventListener('click', runSourceTruthCheck);
-      els.refreshConnectionsBtn.addEventListener('click', loadConnections);
-      els.connectionSelect.addEventListener('change', () => {
-        state.connectionId = els.connectionSelect.value || 'default';
-        saveState();
-        setStatus(`Using connection: ${state.connectionId}`);
-        loadCorrections();
-      });
-      els.localModelSelect.addEventListener('change', async () => {
-        const model = els.localModelSelect.value;
-        if (!model) return;
-        await selectLocalModel(model);
-      });
-      els.newSessionBtn.addEventListener('click', () => resetSession(true));
-      els.clearThreadBtn.addEventListener('click', async () => {
-        state.turns = [];
-        saveState();
-        renderThread();
+	    function wireEvents() {
+	      if (els.runBtn) els.runBtn.addEventListener('click', runQuery);
+	      if (els.refreshModelsBtn) els.refreshModelsBtn.addEventListener('click', loadLocalModels);
+	      if (els.refreshConnectionsBtn) els.refreshConnectionsBtn.addEventListener('click', loadConnections);
+	      if (els.connectionSelect) els.connectionSelect.addEventListener('change', () => {
+	        state.connectionId = els.connectionSelect.value || 'default';
+	        saveState();
+	        setStatus(`Using connection: ${state.connectionId}`);
+	      });
+	      if (els.localModelSelect) els.localModelSelect.addEventListener('change', async () => {
+	        const model = els.localModelSelect.value;
+	        if (!model) return;
+	        await selectLocalModel(model);
+	      });
+	      if (els.newSessionBtn) els.newSessionBtn.addEventListener('click', () => resetSession(true));
+	      if (els.clearThreadBtn) els.clearThreadBtn.addEventListener('click', async () => {
+	        state.turns = [];
+	        saveState();
+	        renderThread();
         try {
           await fetch('/api/assistant/session/clear', {
             method: 'POST',
@@ -4939,24 +5059,31 @@ def get_ui_html() -> str:
           });
         } catch (err) {
           // local clear already completed
-        }
-        setStatus('Thread cleared in this session.');
-      });
-      els.toggleArchBtn.addEventListener('click', async () => {
-        const visible = els.architecturePanel.classList.contains('visible');
-        if (visible) {
-          els.architecturePanel.classList.remove('visible');
+	        }
+	        setStatus('Thread cleared in this session.');
+	      });
+	      if (els.toggleArchBtn) els.toggleArchBtn.addEventListener('click', async () => {
+	        const visible = els.architecturePanel.classList.contains('visible');
+	        if (visible) {
+	          els.architecturePanel.classList.remove('visible');
           els.toggleArchBtn.textContent = 'View Agent Team Map';
           return;
         }
-        if (!state.architectureLoaded) await loadArchitecture();
-        els.architecturePanel.classList.add('visible');
-        els.toggleArchBtn.textContent = 'Hide Agent Team Map';
-      });
-      els.queryInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runQuery();
-      });
-    }
+	        if (!state.architectureLoaded) await loadArchitecture();
+	        els.architecturePanel.classList.add('visible');
+	        els.toggleArchBtn.textContent = 'Hide Agent Team Map';
+	      });
+	      if (els.queryInput) els.queryInput.addEventListener('keydown', (e) => {
+	        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runQuery();
+	      });
+	      if (els.explainCloseBtn) els.explainCloseBtn.addEventListener('click', closeExplainModal);
+	      if (els.explainModal) els.explainModal.addEventListener('click', (e) => {
+	        if (e.target === els.explainModal) closeExplainModal();
+	      });
+	      document.addEventListener('keydown', (e) => {
+	        if (e.key === 'Escape') closeExplainModal();
+	      });
+	    }
 
     async function init() {
       loadState();
