@@ -34,7 +34,7 @@ class BaseAgent(ABC, Generic[T]):
     """Abstract base class for all agents.
     
     Each agent:
-    1. Receives input from the orchestrator
+    1. Receives input from the agentic runtime
     2. Performs its task (possibly calling LLM)
     3. Returns a structured output conforming to its contract
     
