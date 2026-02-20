@@ -1,11 +1,11 @@
 """Multi-agent data assistant module.
 
-This module provides the agent implementations for the analyst loop:
+This module provides the agent implementations and contracts for the analyst loop:
 - IntakeAgent: Goal clarification and extraction
 - SchemaAgent: Schema introspection and catalog building
 - QueryAgent: SQL plan generation and execution
 - AuditAgent: Result validation and sanity checks
-- NarratorAgent: Answer formatting with evidence
+- Narrator: Answer formatting with evidence (explain/narrator.py)
 """
 
 from haikugraph.agents.contracts import (
