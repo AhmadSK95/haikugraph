@@ -49,6 +49,14 @@ MONTH_MAP = {
 
 MAX_DIMENSIONS = 3
 
+DOMAIN_TO_MART: dict[str, str] = {
+    "transactions": "datada_mart_transactions",
+    "quotes": "datada_mart_quotes",
+    "customers": "datada_dim_customers",
+    "bookings": "datada_mart_bookings",
+    "documents": "datada_document_chunks",
+}
+
 
 def _q(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
@@ -1257,6 +1265,79 @@ class AgenticAnalyticsTeam:
                     sample_rows=overview.get("sample_rows", []),
                     columns=overview.get("columns", ["mart", "row_count"]),
                     suggested_questions=overview.get("suggested_questions", []),
+                    warnings=self._pipeline_warnings,
+                )
+
+            if intake.get("intent") == "schema_exploration":
+                schema_domain = intake.get("domain", "transactions")
+                schema_result = self._run_agent(
+                    trace,
+                    "SchemaExplorationAgent",
+                    "schema_exploration",
+                    self._schema_exploration_agent,
+                    effective_goal,
+                    schema_domain,
+                    catalog,
+                )
+                self._blackboard_post(
+                    blackboard,
+                    producer="SchemaExplorationAgent",
+                    artifact_type="schema_description",
+                    payload=schema_result,
+                    consumed_by=["ChiefAnalystAgent"],
+                )
+                total_ms = (time.perf_counter() - started) * 1000
+                trace.append(
+                    {
+                        "agent": "ChiefAnalystAgent",
+                        "role": "finalize_response",
+                        "status": "success",
+                        "duration_ms": round(total_ms, 2),
+                        "summary": "schema exploration response assembled",
+                    }
+                )
+                return AssistantQueryResponse(
+                    success=True,
+                    answer_markdown=schema_result["answer_markdown"],
+                    confidence=ConfidenceLevel.HIGH,
+                    confidence_score=0.92,
+                    definition_used=f"schema exploration for {schema_domain}",
+                    evidence=[
+                        EvidenceItem(
+                            description=f"Schema for {schema_result.get('table', '')}",
+                            value=f"{schema_result.get('row_count', 0):,} rows, {len(schema_result.get('columns', []))} columns",
+                            source="semantic catalog",
+                            sql_reference=None,
+                        )
+                    ],
+                    sanity_checks=[
+                        SanityCheck(
+                            check_name="catalog_ready",
+                            passed=True,
+                            message="Schema derived from semantic catalog.",
+                        ),
+                    ],
+                    trace_id=trace_id,
+                    runtime={
+                        **self._runtime_payload(runtime, autonomy=autonomy_cfg),
+                        "blackboard_entries": len(blackboard),
+                    },
+                    agent_trace=trace,
+                    chart_spec=None,
+                    evidence_packets=[
+                        {
+                            "agent": "SchemaExplorationAgent",
+                            "result": schema_result,
+                        },
+                        {
+                            "agent": "Blackboard",
+                            "artifact_count": len(blackboard),
+                            "artifacts": blackboard,
+                            "edges": self._blackboard_edges(blackboard),
+                        },
+                    ],
+                    data_quality=catalog.get("quality", {}),
+                    suggested_questions=schema_result.get("suggested_questions", []),
                     warnings=self._pipeline_warnings,
                 )
 
@@ -2846,7 +2927,7 @@ class AgenticAnalyticsTeam:
         metric = str(intake.get("metric") or "")
 
         reasons: list[str] = []
-        if intent in {"data_overview", "document_qa"}:
+        if intent in {"data_overview", "document_qa", "schema_exploration"}:
             return {
                 "needs_clarification": False,
                 "reason": "",
@@ -2966,23 +3047,230 @@ class AgenticAnalyticsTeam:
             ]
         )
 
+    def _build_dim_candidates_from_catalog(
+        self,
+        domain: str,
+        catalog: dict[str, Any],
+    ) -> dict[str, str]:
+        """Dynamically build keyword→column dimension mapping from catalog."""
+        mart = DOMAIN_TO_MART.get(domain, "")
+        dim_value_cols = set(catalog.get("dimension_values", {}).get(mart, {}).keys())
+        all_columns = set(catalog.get("marts", {}).get(mart, {}).get("columns", []))
+
+        # Candidate columns: dimension value columns + columns with dimension-like suffixes
+        dim_suffixes = ("_name", "_type", "_status", "_code", "_country", "_state", "_flow")
+        exclude_suffixes = ("_key", "_id", "_ts")
+
+        candidate_cols: set[str] = set(dim_value_cols)
+        for col in all_columns:
+            if any(col.endswith(s) for s in dim_suffixes):
+                candidate_cols.add(col)
+            if any(col.endswith(s) for s in exclude_suffixes):
+                candidate_cols.discard(col)
+
+        # Remove key/id/ts columns from candidates
+        candidate_cols = {
+            c for c in candidate_cols
+            if not any(c.endswith(s) for s in exclude_suffixes)
+        }
+
+        mapping: dict[str, str] = {}
+        for col in sorted(candidate_cols):
+            # Exact column name
+            mapping[col] = col
+
+            # Prefix-stripped alias: address_country -> country, txn_flow -> flow
+            parts = col.split("_")
+            if len(parts) > 1:
+                suffix = parts[-1]
+                if suffix not in mapping:
+                    mapping[suffix] = col
+
+            # Split tokens: platform_name -> platform
+            for part in parts:
+                if len(part) >= 3 and part not in mapping:
+                    mapping[part] = col
+
+        # Always add month
+        mapping["month"] = "__month__"
+
+        return mapping
+
+    def _resolve_metric_from_catalog(
+        self,
+        lower: str,
+        domain: str,
+        catalog: dict[str, Any],
+    ) -> str:
+        """Score candidate metrics from the catalog against goal tokens."""
+        mart = DOMAIN_TO_MART.get(domain, "")
+        metrics = catalog.get("metrics_by_table", {}).get(mart, {})
+        if not metrics:
+            return "transaction_count"
+
+        domain_defaults = {
+            "transactions": "transaction_count",
+            "quotes": "quote_count",
+            "customers": "customer_count",
+            "bookings": "booking_count",
+        }
+
+        high_affinity: dict[str, list[str]] = {
+            "refund": ["refund_count", "refund_rate"],
+            "mt103": ["mt103_count", "mt103_rate"],
+            "markup": ["forex_markup_revenue", "avg_forex_markup"],
+            "payee": ["payee_count"],
+            "university": ["university_count"],
+            "charge": ["total_charges"],
+            "fee": ["total_charges"],
+        }
+
+        has_count_words = self._goal_has_count_intent(lower)
+        has_amount_words = self._goal_has_amount_intent(lower)
+        has_avg = any(k in lower for k in ["avg", "average", "mean"])
+
+        best_metric = domain_defaults.get(domain, "transaction_count")
+        best_score = 0
+
+        for metric_name in metrics:
+            score = 0
+            name_tokens = re.split(r"[_\s]+", metric_name)
+
+            # Token overlap: each metric name token found in goal gets +2
+            for token in name_tokens:
+                if token and token in lower:
+                    score += 2
+
+            # High-affinity keywords
+            for keyword, affinity_metrics in high_affinity.items():
+                if keyword in lower and metric_name in affinity_metrics:
+                    score += 3
+
+            # Aggregation affinity
+            if has_count_words and metric_name.endswith("_count"):
+                score += 1
+            if has_amount_words and any(
+                t in metric_name for t in ["amount", "value", "revenue", "charges", "booked"]
+            ):
+                score += 1
+            if has_avg and metric_name.startswith("avg_"):
+                score += 2
+
+            if score > best_score:
+                best_score = score
+                best_metric = metric_name
+
+        return best_metric
+
+    def _detect_schema_exploration(self, lower: str, catalog: dict[str, Any]) -> str | None:
+        """Return domain string if the goal is a schema exploration question, else None."""
+        schema_signals = [
+            r"\bwhat\s+(?:do\s+we|does\s+it|do\s+i)\s+(?:capture|track|store|have|record)\b",
+            r"\bwhat\s+(?:fields?|columns?|attributes?|demographics?|properties|info|information)\b",
+            r"\bdescribe\s+the\b",
+            r"\bwhat\s+are\s+the\b.*\b(?:fields?|columns?|attributes?|demographics?)\b",
+            r"\bwhat\s+information\b",
+            r"\bschema\b",
+            r"\bstructure\s+of\b",
+            r"\bwhat\s+(?:does|is\s+in)\s+the\s+\w+\s+table\b",
+            r"\bwhat\s+(?:data|details?)\s+(?:do|does|is)\b.*\b(?:have|contain|include|store)\b",
+        ]
+        if not any(re.search(p, lower) for p in schema_signals):
+            return None
+        domain_keywords = {
+            "customer": "customers",
+            "transaction": "transactions",
+            "quote": "quotes",
+            "booking": "bookings",
+        }
+        for keyword, domain in domain_keywords.items():
+            if keyword in lower:
+                return domain
+        return None
+
+    def _schema_exploration_agent(
+        self,
+        goal: str,
+        domain: str,
+        catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return a rich markdown description of a domain's schema from the catalog."""
+        mart = DOMAIN_TO_MART.get(domain, "")
+        mart_meta = catalog.get("marts", {}).get(mart, {})
+        columns = mart_meta.get("columns", [])
+        row_count = mart_meta.get("row_count", 0)
+        metrics = catalog.get("metrics_by_table", {}).get(mart, {})
+        dim_values = catalog.get("dimension_values", {}).get(mart, {})
+        time_col = catalog.get("preferred_time_column", {}).get(mart, "")
+
+        lines: list[str] = []
+        lines.append(f"## {domain.title()} Schema (`{mart}`)")
+        lines.append(f"**Rows:** {row_count:,}  |  **Columns:** {len(columns)}")
+        lines.append("")
+
+        lines.append("### Columns")
+        for col in columns:
+            annotations: list[str] = []
+            if col == time_col:
+                annotations.append("time column")
+            if col in dim_values:
+                top_vals = dim_values[col][:5]
+                annotations.append(f"values: {', '.join(top_vals)}")
+            if col.endswith(("_key", "_id")):
+                annotations.append("identifier")
+            suffix = f"  _({'; '.join(annotations)})_" if annotations else ""
+            lines.append(f"- `{col}`{suffix}")
+        lines.append("")
+
+        if metrics:
+            lines.append("### Available Metrics")
+            for name, expr in metrics.items():
+                lines.append(f"- **{name}**: `{expr}`")
+            lines.append("")
+
+        suggested: list[str] = []
+        if metrics:
+            first_metric = next(iter(metrics))
+            suggested.append(f"How many {domain} do we have?")
+            suggested.append(f"Show me {first_metric} by month")
+        if dim_values:
+            first_dim = next(iter(dim_values))
+            suggested.append(f"What is the breakdown of {domain} by {first_dim}?")
+        suggested.append(f"What is the total {domain} count this year?")
+
+        lines.append("### Suggested Follow-Up Queries")
+        for q in suggested[:4]:
+            lines.append(f"- {q}")
+
+        return {
+            "answer_markdown": "\n".join(lines),
+            "domain": domain,
+            "table": mart,
+            "columns": columns,
+            "row_count": row_count,
+            "suggested_questions": suggested[:4],
+        }
+
     def _intake_deterministic(self, goal: str, catalog: dict[str, Any]) -> dict[str, Any]:
         g = goal.strip()
         lower = g.lower()
 
+        data_overview_patterns = [
+            r"\bwhat\s+(kind\s+of\s+)?data\b",
+            r"\bwhat\s+can\s+i\s+ask\b",
+            r"\bshow\s+available\s+data\b",
+            r"\bdescribe\s+(my\s+)?data\b",
+            r"\bwhat\s+tables?\b",
+            r"\bdata\s+overview\b",
+            r"\bwhat\s+do\s+we\s+have\b",
+            r"\bwhat\s+is\s+available\b",
+        ]
+
         intent = "metric"
-        if any(
-            k in lower
-            for k in [
-                "what kind of data",
-                "what kinda data",
-                "what data do i have",
-                "what can i ask",
-                "show available data",
-                "describe my data",
-                "what tables do i have",
-            ]
-        ):
+        schema_domain = self._detect_schema_exploration(lower, catalog)
+        if schema_domain is not None:
+            intent = "schema_exploration"
+        elif any(re.search(p, lower) for p in data_overview_patterns):
             intent = "data_overview"
         elif any(
             k in lower
@@ -3057,109 +3345,31 @@ class AgenticAnalyticsTeam:
         elif "customer" in lower and "transaction" not in lower and "amount" not in lower:
             domain = "customers"
 
-        metric = "transaction_count"
+        if intent == "schema_exploration" and schema_domain:
+            domain = schema_domain
+
         has_count_words = self._goal_has_count_intent(lower)
         has_amount_words = self._goal_has_amount_intent(lower)
         has_mt103 = "mt103" in lower
         has_refund = "refund" in lower
+
         if domain == "documents":
             metric = "document_relevance"
-        elif domain == "transactions":
-            if "refund rate" in lower:
-                metric = "refund_rate"
-            elif has_refund and has_count_words:
-                metric = "refund_count"
-            elif has_refund and has_amount_words:
-                metric = "total_amount"
-            elif has_refund:
-                metric = "refund_count"
-            elif "mt103" in lower and any(k in lower for k in ["rate", "coverage", "%"]):
-                metric = "mt103_rate"
-            elif has_mt103 and has_count_words:
-                metric = "mt103_count"
-            elif has_mt103 and has_amount_words:
-                metric = "total_amount"
-            elif has_mt103:
-                metric = "mt103_count"
-            elif any(k in lower for k in ["unique customer", "distinct customer"]):
-                metric = "unique_customers"
-            elif any(k in lower for k in ["average", "avg"]) and any(
-                k in lower for k in ["amount", "revenue", "payment"]
-            ):
-                metric = "avg_amount"
-            elif has_count_words:
-                metric = "transaction_count"
-            elif has_amount_words:
-                metric = "total_amount"
-            else:
-                metric = "transaction_count"
-        elif domain == "quotes":
-            if "markup" in lower and any(k in lower for k in ["average", "avg", "mean"]):
-                metric = "avg_forex_markup"
-            elif "markup" in lower and any(k in lower for k in ["revenue", "amount", "sum", "value"]):
-                metric = "forex_markup_revenue"
-            elif any(k in lower for k in ["charge", "charges", "fee", "fees"]):
-                metric = "total_charges"
-            elif any(k in lower for k in ["average", "avg"]):
-                metric = "avg_quote_value"
-            elif has_count_words:
-                metric = "quote_count"
-            elif any(k in lower for k in ["amount", "value", "sum"]):
-                metric = "total_quote_value"
-            else:
-                metric = "quote_count"
-        elif domain == "bookings":
-            if any(k in lower for k in ["rate", "fx rate", "exchange rate"]):
-                metric = "avg_rate"
-            elif has_count_words:
-                metric = "booking_count"
-            elif any(k in lower for k in ["amount", "sum", "booked"]):
-                metric = "total_booked_amount"
-            else:
-                metric = "booking_count"
-        elif domain == "customers":
-            if "payee" in lower:
-                metric = "payee_count"
-            elif "university" in lower:
-                metric = "university_count"
-            else:
-                metric = "customer_count"
+        else:
+            metric = self._resolve_metric_from_catalog(lower, domain, catalog)
 
-        dim_candidates = {
-            "transactions": {
-                "platform": "platform_name",
-                "state": "state",
-                "status": "payment_status",
-                "flow": "txn_flow",
-                "customer": "customer_id",
-                "region": "address_country",
-                "country": "address_country",
-                "month": "__month__",
-            },
-            "quotes": {
-                "from currency": "from_currency",
-                "to currency": "to_currency",
-                "currency": "from_currency",
-                "status": "status",
-                "purpose": "purpose_code",
-                "month": "__month__",
-            },
-            "customers": {
-                "country": "address_country",
-                "state": "address_state",
-                "status": "status",
-                "type": "type",
-                "university": "is_university",
-                "month": "__month__",
-            },
-            "bookings": {
-                "currency": "currency",
-                "status": "status",
-                "deal": "deal_type",
-                "linked": "linked_txn_status",
-                "month": "__month__",
-            },
-        }
+            # Targeted post-resolution overrides for composite boolean cases
+            if domain == "transactions":
+                if "refund rate" in lower:
+                    metric = "refund_rate"
+                elif has_mt103 and any(k in lower for k in ["rate", "coverage", "%"]):
+                    metric = "mt103_rate"
+                elif has_refund and has_amount_words and not has_count_words:
+                    metric = "total_amount"
+                elif has_mt103 and has_amount_words and not has_count_words:
+                    metric = "total_amount"
+
+        dim_candidates = self._build_dim_candidates_from_catalog(domain, catalog)
 
         dimensions: list[str] = []
         dim_signal = any(
@@ -3176,7 +3386,7 @@ class AgenticAnalyticsTeam:
             dimensions.append("__month__")
 
         matched_dim_keys: set[str] = set()
-        for key, col in dim_candidates.get(domain, {}).items():
+        for key, col in dim_candidates.items():
             if key == "month":
                 continue
             if key in lower and dim_signal and col not in dimensions:
@@ -3192,14 +3402,8 @@ class AgenticAnalyticsTeam:
             noise = {"the", "a", "an", "and", "or", "each", "every", "month", "monthly"}
             candidate_words -= noise
             candidate_words -= matched_dim_keys
-            known_keys = set(dim_candidates.get(domain, {}).keys())
-            _domain_to_mart = {
-                "transactions": "datada_mart_transactions",
-                "quotes": "datada_mart_quotes",
-                "customers": "datada_dim_customers",
-                "bookings": "datada_mart_bookings",
-            }
-            mart_name = _domain_to_mart.get(domain, "")
+            known_keys = set(dim_candidates.keys())
+            mart_name = DOMAIN_TO_MART.get(domain, "")
             dim_value_cols = set(catalog.get("dimension_values", {}).get(mart_name, {}).keys())
             mart_cols = set(catalog.get("marts", {}).get(mart_name, {}).get("columns", []))
             available_dim_cols = dim_value_cols | mart_cols
@@ -3231,9 +3435,9 @@ class AgenticAnalyticsTeam:
         if has_trend_signal and domain != "documents" and "__month__" not in dimensions:
             dimensions.append("__month__")
 
-        if intent == "grouped_metric" and not dimensions and domain in dim_candidates:
+        if intent == "grouped_metric" and not dimensions and dim_candidates:
             # Fallback grouped intent: prefer first stable dimension for readable grouping.
-            default_col = next(iter(dim_candidates[domain].values()))
+            default_col = next(iter(dim_candidates.values()))
             if default_col != "__month__":
                 dimensions.append(default_col)
 
@@ -3277,13 +3481,7 @@ class AgenticAnalyticsTeam:
             time_filter = {"kind": "year_only", "year": year}
 
         value_filters: list[dict[str, str]] = []
-        domain_table = {
-            "transactions": "datada_mart_transactions",
-            "quotes": "datada_mart_quotes",
-            "customers": "datada_dim_customers",
-            "bookings": "datada_mart_bookings",
-            "documents": "datada_document_chunks",
-        }.get(domain, "")
+        domain_table = DOMAIN_TO_MART.get(domain, "")
 
         for col, values in catalog.get("dimension_values", {}).get(domain_table, {}).items():
             for value in values:
@@ -3386,13 +3584,7 @@ class AgenticAnalyticsTeam:
             raw_dims = [dim0.strip()]
 
         # Validate LLM-provided dims against catalog columns (preserve valid ones).
-        _domain_to_mart = {
-            "transactions": "datada_mart_transactions",
-            "quotes": "datada_mart_quotes",
-            "customers": "datada_dim_customers",
-            "bookings": "datada_mart_bookings",
-        }
-        mart_name = _domain_to_mart.get(out.get("domain", ""), "")
+        mart_name = DOMAIN_TO_MART.get(out.get("domain", ""), "")
         available_cols: set[str] = set()
         if catalog:
             available_cols = set(
@@ -3770,13 +3962,7 @@ class AgenticAnalyticsTeam:
         intake: dict[str, Any],
         catalog: dict[str, Any],
     ) -> dict[str, Any]:
-        domain_to_table = {
-            "transactions": "datada_mart_transactions",
-            "quotes": "datada_mart_quotes",
-            "customers": "datada_dim_customers",
-            "bookings": "datada_mart_bookings",
-        }
-        table = domain_to_table.get(intake["domain"], "datada_mart_transactions")
+        table = DOMAIN_TO_MART.get(intake["domain"], "datada_mart_transactions")
         table_meta = catalog["marts"][table]
         return {
             "table": table,
