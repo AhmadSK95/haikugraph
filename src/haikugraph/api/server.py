@@ -2774,6 +2774,8 @@ def _register_routes(app: FastAPI) -> None:
         )
 
 
+
+
 def get_ui_html() -> str:
     return '''
 <!DOCTYPE html>
@@ -2782,2317 +2784,586 @@ def get_ui_html() -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>dataDa</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <style>
     :root {
-      --canvas: #f1f7f8;
-      --panel: #ffffff;
-      --ink: #092532;
-      --subtle: #617784;
-      --line: #d6e4e8;
-      --brand: #0ca57d;
-      --brand-dark: #0e5677;
-      --ok-bg: #e8f8ef;
-      --ok-ink: #217a4d;
-      --warn-bg: #fff4e7;
-      --warn-ink: #9f5d1d;
-      --chip: #f7fbfd;
-      --mono: "IBM Plex Mono", Menlo, Consolas, monospace;
-      --sans: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
-      --soft-shadow: 0 10px 26px rgba(5, 44, 63, 0.08);
-    }
-
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: var(--sans);
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 0% 0%, #d8ecff 0%, transparent 34%),
-        radial-gradient(circle at 100% 0%, #c9f7eb 0%, transparent 32%),
-        var(--canvas);
-    }
-
-    .app {
-      max-width: 1460px;
-      margin: 0 auto;
-      padding: 20px 18px 34px;
-    }
-
-    .hero {
-      border: 1px solid var(--line);
-      background: linear-gradient(180deg, #ffffff 0%, #fdfefe 100%);
-      border-radius: 16px;
-      box-shadow: var(--soft-shadow);
-      padding: 16px;
-      margin-bottom: 12px;
-    }
-
-    .hero-top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .title {
-      margin: 0;
-      font-size: clamp(1.7rem, 2.8vw, 2.4rem);
-      color: var(--brand-dark);
-      letter-spacing: -0.02em;
-    }
-
-    .subtitle {
-      margin: 4px 0 0;
-      color: var(--subtle);
-      max-width: 780px;
-    }
-
-    .session-chip {
-      background: #ecf8f3;
-      color: #236845;
-      border: 1px solid #badfcc;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-size: 0.78rem;
-      font-weight: 700;
-    }
-
-    .status-grid {
-      margin-top: 12px;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 8px;
-    }
-
-    .status-card {
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      padding: 9px 10px;
-      background: #fcffff;
-    }
-
-    .status-card label {
-      display: block;
-      margin-bottom: 4px;
-      font-size: 11px;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--subtle);
-    }
-
-    .status-card .value {
-      font-size: 0.92rem;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-    }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(330px, 410px) minmax(0, 1fr);
-      gap: 16px;
-      align-items: start;
-    }
-
-    .panel {
-      border: 1px solid var(--line);
-      background: var(--panel);
-      border-radius: 14px;
-      box-shadow: var(--soft-shadow);
-      padding: 14px;
-      margin-bottom: 12px;
-    }
-
-    .panel h3 {
-      margin: 0 0 6px;
-      font-size: 1.02rem;
-      color: var(--brand-dark);
-    }
-
-    .hint {
-      color: var(--subtle);
-      font-size: 0.86rem;
-    }
-
-    textarea,
-    select,
-    button,
-    input[type="checkbox"] {
-      font-family: var(--sans);
-    }
-
-    textarea,
-    select,
-    button {
-      border: 1px solid var(--line);
-      border-radius: 11px;
-    }
-
-    textarea {
-      width: 100%;
-      min-height: 94px;
-      resize: vertical;
-      padding: 10px 11px;
-      font-size: 0.95rem;
-      color: var(--ink);
-      background: #fbfefe;
-    }
-
-    .composer-actions {
-      margin-top: 9px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    .control-section {
-      margin-top: 10px;
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      background: #101a29;
-      padding: 8px 10px;
-    }
-
-    .control-section > summary {
-      list-style: none;
-      cursor: pointer;
-      font-size: 0.83rem;
-      color: #9ed4ff;
-      user-select: none;
-    }
-
-    .control-section > summary::-webkit-details-marker { display: none; }
-    .control-section[open] > summary { margin-bottom: 7px; }
-
-    .row {
-      margin-top: 8px;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 8px;
-      align-items: end;
-    }
-
-    select {
-      width: 100%;
-      padding: 9px;
-      font-size: 0.9rem;
-      background: #fff;
-    }
-
-    .btn {
-      padding: 9px 12px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: transform 120ms ease;
-      font-size: 0.86rem;
-      background: #fff;
-      color: var(--ink);
-    }
-
-    .btn:hover { transform: translateY(-1px); }
-    .btn:disabled { opacity: 0.62; cursor: not-allowed; transform: none; }
-
-    .btn.primary {
-      background: linear-gradient(120deg, var(--brand), #2bbb95);
-      border: none;
-      color: #fff;
-      box-shadow: 0 8px 20px rgba(12, 165, 125, 0.26);
-    }
-
-    .btn.ghost {
-      color: var(--brand-dark);
-      background: #fff;
-    }
-
-    .btn.warn {
-      color: var(--warn-ink);
-      border-color: #efd6b3;
-      background: #fffdfa;
-    }
-
-    .examples,
-    .model-catalog,
-    .suggestions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 7px;
-      margin-top: 8px;
-    }
-
-    .pill,
-    .model-pill {
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      padding: 5px 10px;
-      background: var(--chip);
-      color: #325463;
-      font-size: 0.78rem;
-      cursor: pointer;
-    }
-
-    .model-pill.install {
-      border-style: dashed;
-      color: var(--warn-ink);
-      background: #fffaf5;
-    }
-
-    .model-pill.active {
-      border-color: #95dcbc;
-      color: var(--ok-ink);
-      background: #ebfaf1;
-      font-weight: 700;
-    }
-
-    .toggle-row {
-      margin-top: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      padding: 8px 10px;
-      background: #f8fcfe;
-      font-size: 0.85rem;
-    }
-
-    .toggle-row input { transform: scale(1.12); }
-
-    .chat-shell {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: #fff;
-      box-shadow: var(--soft-shadow);
-      min-height: 360px;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .thread {
-      display: grid;
-      gap: 12px;
-    }
-
-    .empty-state {
-      border: 1px dashed #bfd4dc;
-      border-radius: 12px;
-      padding: 18px;
-      color: var(--subtle);
-      background: #fbfeff;
-    }
-
-    .turn {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #fff;
-      overflow: hidden;
-    }
-
-    .turn-head {
-      padding: 8px 10px;
-      border-bottom: 1px solid #edf4f7;
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      align-items: center;
-      background: #fcfefe;
-      font-size: 0.8rem;
-      color: var(--subtle);
-    }
-
-    .turn-body { padding: 10px; }
-
-    .bubble {
-      border-radius: 10px;
-      padding: 10px 11px;
-      margin-bottom: 8px;
-      line-height: 1.45;
-      font-size: 0.92rem;
-    }
-
-    .bubble.user {
-      background: #ecf5ff;
-      border: 1px solid #c8def6;
-      color: #17415f;
-    }
-
-    .bubble.assistant {
-      background: #f9fffc;
-      border: 1px solid #cae8d8;
-      color: #184a39;
-    }
-
-    .kpi-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-      gap: 8px;
-      margin: 8px 0;
-    }
-
-    .kpi {
-      border-radius: 10px;
-      padding: 9px;
-      border: 1px solid var(--line);
-      background: #fafefe;
-    }
-
-    .kpi.label {
-      background: linear-gradient(135deg, #e7fbf3, #f8fffd);
-      border-color: #bce5d1;
-    }
-
-    .kpi .k {
-      font-size: 0.72rem;
-      color: var(--subtle);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .kpi .v {
-      margin-top: 3px;
-      font-size: 1.16rem;
-      font-weight: 700;
-      color: #124f39;
-      overflow-wrap: anywhere;
-    }
-
-    .tag {
-      display: inline-block;
-      border-radius: 999px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      padding: 3px 8px;
-      margin-right: 5px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
-    .tag.ok { background: var(--ok-bg); color: var(--ok-ink); }
-    .tag.warn { background: var(--warn-bg); color: var(--warn-ink); }
-
-    .table-wrap {
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      margin-top: 8px;
-    }
-
-    .mini-chart {
-      margin-top: 8px;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 8px;
-      background: #101a29;
-    }
-
-    .mini-chart .row-item {
-      display: grid;
-      grid-template-columns: minmax(90px, 160px) 1fr auto;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 6px;
-      font-size: 0.78rem;
-      color: #d3e5ff;
-    }
-
-    .mini-chart .bar {
-      height: 8px;
-      border-radius: 999px;
-      background: #1c2d47;
-      overflow: hidden;
-    }
-
-    .mini-chart .bar i {
-      display: block;
-      height: 100%;
-      background: linear-gradient(90deg, #24d6a2, #79c9ff);
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.8rem;
-    }
-
-    th, td {
-      border-bottom: 1px solid #edf4f7;
-      text-align: left;
-      padding: 7px;
-      white-space: nowrap;
-    }
-
-    th {
-      background: #f7fcff;
-      color: #1a516e;
-      position: sticky;
-      top: 0;
-    }
-
-    details {
-      margin-top: 8px;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      background: #fcfeff;
-      padding: 6px 8px;
-    }
-
-    summary {
-      cursor: pointer;
-      font-weight: 700;
-      color: #194a63;
-      font-size: 0.84rem;
-    }
-
-    .mono {
-      margin-top: 6px;
-      font-family: var(--mono);
-      font-size: 0.77rem;
-      white-space: pre-wrap;
-      line-height: 1.35;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 7px;
-      background: #f6fbfd;
-      color: #143546;
-    }
-
-    .trace {
-      display: grid;
-      gap: 6px;
-      margin-top: 6px;
-    }
-
-    .trace-step {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 7px;
-      background: #fff;
-      font-size: 0.79rem;
-    }
-
-    .trace-step .head {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      color: #1a516e;
-      font-weight: 700;
-      margin-bottom: 3px;
-    }
-
-    .architecture {
-      margin-top: 8px;
-      display: none;
-    }
-
-    .architecture.visible { display: block; }
-
-    .arch-flow {
-      display: grid;
-      gap: 6px;
-      margin-bottom: 8px;
-    }
-
-    .arch-step {
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 7px;
-      background: #fbfeff;
-      font-size: 0.83rem;
-    }
-
-    .arch-agents {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-      gap: 7px;
-    }
-
-    .arch-agent {
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 8px;
-      background: #fff;
-    }
-
-    .arch-agent h4 {
-      margin: 0 0 4px;
-      font-size: 0.9rem;
-      color: var(--brand-dark);
-    }
-
-    .arch-agent .role {
-      color: #2f657f;
-      font-size: 0.76rem;
-      margin-bottom: 5px;
-    }
-
-    /* Retro dark theme override */
-    :root {
-      --canvas: #0b1018;
-      --panel: #111827;
-      --ink: #e9f0ff;
-      --subtle: #8aa0c2;
-      --line: #24344c;
-      --brand: #24d6a2;
-      --brand-dark: #84d0ff;
-      --ok-bg: #153327;
-      --ok-ink: #9df5c9;
-      --warn-bg: #3a2c19;
-      --warn-ink: #ffcf8c;
-      --chip: #1a2536;
-      --soft-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-    }
-
-    body {
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 14% 4%, rgba(39, 84, 167, 0.35) 0%, transparent 33%),
-        radial-gradient(circle at 88% 0%, rgba(16, 163, 126, 0.28) 0%, transparent 35%),
-        linear-gradient(160deg, #090d14 0%, #111b29 46%, #0e1520 100%);
-    }
-
-    .hero,
-    .panel,
-    .chat-shell,
-    .turn,
-    .status-card,
-    .arch-agent,
-    .arch-step {
-      background: linear-gradient(180deg, rgba(18, 28, 44, 0.96), rgba(14, 22, 34, 0.96));
-      border-color: var(--line);
-      box-shadow: var(--soft-shadow);
-    }
-
-    .subtitle,
-    .hint,
-    .status-card label,
-    .turn-head {
-      color: var(--subtle);
-    }
-
-    textarea,
-    select {
-      background: #0f1928;
-      color: var(--ink);
-      border-color: var(--line);
-    }
-
-    .btn,
-    .pill,
-    .model-pill {
-      background: #152235;
-      color: #b6d3f0;
-      border-color: #2a3a56;
-    }
-
-    .btn.ghost {
-      color: #99d7ff;
-      background: #132033;
-    }
-
-    .btn.warn {
-      color: var(--warn-ink);
-      border-color: #6f5a34;
-      background: #241c12;
-    }
-
-    .session-chip {
-      background: #14312a;
-      color: #9df5c9;
-      border-color: #2a644f;
-    }
-
-    .toggle-row,
-    .empty-state,
-    .kpi,
-    .kpi.label,
-    details,
-    .mono,
-    .trace-step {
-      background: #101a29;
-      border-color: #2a3b58;
-      color: #dceaff;
-    }
-
-    .kpi.label {
-      background: linear-gradient(135deg, #173123, #11283a);
-      border-color: #2f6f58;
-    }
-
-    .kpi .v {
-      color: #9ff2ca;
-    }
-
-    .bubble.user {
-      background: #182942;
-      border-color: #2e4f7a;
-      color: #cfe5ff;
-    }
-
-    .bubble.assistant {
-      background: #122739;
-      border-color: #1f4d63;
-      color: #d6f7ff;
-    }
-
-    th {
-      background: #152438;
-      color: #a8d8ff;
-    }
-
-    td {
-      color: #d3e1f4;
-      border-bottom-color: #253750;
-    }
-
-    .table-wrap {
-      border-color: #2a3b58;
-      background: #101a29;
-    }
-
-    summary {
-      color: #98d3ff;
-    }
-
-    .trace-bar {
-      margin: 6px 0 4px;
-      height: 6px;
-      border-radius: 999px;
-      background: #1a2a3f;
-      overflow: hidden;
-    }
-
-    .trace-bar i {
-      display: block;
-      height: 100%;
-      border-radius: inherit;
-      background: linear-gradient(90deg, #20d39f, #79c9ff);
-    }
-
-    .diag-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 8px;
-      margin: 8px 0;
-    }
-
-    .diag-card {
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 8px;
-      background: #122034;
-    }
-
-    .diag-card .k {
-      font-size: 0.72rem;
-      color: var(--subtle);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-
-    .diag-card .v {
-      margin-top: 3px;
-      font-size: 0.86rem;
-      color: #def0ff;
-      word-break: break-word;
-    }
-
-    .trace-wrap {
-      max-height: 320px;
-      overflow: auto;
-      padding-right: 4px;
-    }
-
-    .md-block p {
-      margin: 0 0 8px;
-    }
-
-    .md-block h4,
-    .md-block h5 {
-      margin: 0 0 8px;
-      color: #9bd5ff;
-      letter-spacing: 0.01em;
-    }
-
-    .md-block ul,
-    .md-block ol {
-      margin: 0 0 8px 18px;
-      padding: 0;
-    }
-
-    .md-block li {
-      margin-bottom: 4px;
-    }
-
-    .md-block code,
-    .diag-card code {
-      font-family: var(--mono);
-      font-size: 0.78rem;
-      color: #aee2ff;
-      background: #0f1a2a;
-      border: 1px solid #27374f;
-      border-radius: 6px;
-      padding: 1px 4px;
-    }
-
-    .diag-outcome {
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      padding: 8px;
-      margin: 8px 0;
-      font-size: 0.84rem;
-      line-height: 1.42;
-    }
-
-    .diag-outcome.ok {
-      background: #12281f;
-      border-color: #295743;
-      color: #b8f7d5;
-    }
-
-    .diag-outcome.warn {
-      background: #2a2116;
-      border-color: #5f4a2d;
-      color: #ffd8a3;
-    }
-
-    .trace-step.ok {
-      border-color: #325f4e;
-    }
-
-    .trace-step.warn {
-      border-color: #6d5532;
-    }
-
-    .trace-step .meta {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px;
-      font-size: 0.74rem;
-      color: var(--subtle);
-      margin-top: 5px;
-    }
-
-    .mission-control {
-      margin: 8px 0;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #0e1524;
-      padding: 9px;
-    }
-
-    .mission-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 6px;
-    }
-
-    .mission-head strong {
-      color: #d8ebff;
-      font-size: 0.84rem;
-    }
-
-    .mission-path {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 8px;
-      font-size: 0.74rem;
-    }
-
-    .path-node {
-      border: 1px solid #2c3d57;
-      border-radius: 999px;
-      padding: 2px 8px;
-      background: #101a2c;
-      color: #d7e9ff;
-    }
-
-    .path-arrow {
-      color: #7cb6ff;
-      font-weight: 700;
-    }
-
-    .mission-list {
-      max-height: 360px;
-      overflow: auto;
-      padding-right: 4px;
-    }
-
-    .mission-insight {
-      margin-top: 6px;
-      font-size: 0.78rem;
-      color: #c9def7;
-      line-height: 1.42;
-    }
-
-    .handoff-row {
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-    }
-
-    .handoff-pill {
-      border: 1px solid #2f6f58;
-      border-radius: 999px;
-      padding: 2px 8px;
-      background: #102823;
-      color: #bff6dc;
-      font-size: 0.72rem;
-      white-space: nowrap;
-    }
-
-    .artifact-row {
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
-    }
-
-    .artifact-pill {
-      border: 1px solid #2a3f63;
-      border-radius: 999px;
-      padding: 2px 8px;
-      background: #112037;
-      color: #9ec9f5;
-      font-size: 0.72rem;
-      white-space: nowrap;
-    }
-
-    .quality-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 7px;
-      margin-top: 8px;
-    }
-
-    .quality-card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 7px;
-      background: #101a2a;
-      font-size: 0.76rem;
-      color: #cde4ff;
-    }
-
-    .quality-card .k {
-      color: var(--subtle);
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      font-size: 0.7rem;
-    }
-
-    .quality-card .v {
-      margin-top: 3px;
-      color: #e6f2ff;
-      overflow-wrap: anywhere;
-    }
-
-    .json-view {
-      max-height: 280px;
-      overflow: auto;
-      margin-top: 7px;
-    }
-
-    .correction-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-top: 8px;
-      max-height: 180px;
-      overflow: auto;
-      padding-right: 4px;
-    }
-
-    .correction-item {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 7px 8px;
-      background: #0e1524;
-    }
-
-    .correction-item .top {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      margin-bottom: 4px;
-    }
-
-    .trust-card {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 7px 8px;
-      background: #0e1524;
-      color: #dceaff;
-      font-size: 0.78rem;
-    }
-
-	    .trust-kpis {
-	      display: grid;
-	      grid-template-columns: repeat(2, minmax(0, 1fr));
-	      gap: 6px;
-	      margin-top: 6px;
-	    }
-
-	    .assistant-meta {
-	      display: flex;
-	      flex-wrap: wrap;
-	      gap: 8px;
-	      margin-top: 6px;
-	      color: var(--subtle);
-	      font-size: 0.78rem;
-	    }
-
-	    .assistant-actions {
-	      margin-top: 8px;
-	      display: flex;
-	      justify-content: flex-end;
-	    }
-
-	    .explain-modal[hidden] {
-	      display: none;
-	    }
-
-	    .explain-modal {
-	      position: fixed;
-	      inset: 0;
-	      background: rgba(5, 10, 20, 0.72);
-	      display: flex;
-	      align-items: center;
-	      justify-content: center;
-	      z-index: 999;
-	      padding: 18px;
-	    }
-
-	    .explain-dialog {
-	      width: min(1120px, 96vw);
-	      max-height: 88vh;
-	      overflow: hidden;
-	      border: 1px solid #2b3c58;
-	      border-radius: 14px;
-	      background: #0f1725;
-	      box-shadow: 0 22px 52px rgba(0, 0, 0, 0.55);
-	      display: flex;
-	      flex-direction: column;
-	    }
-
-	    .explain-head {
-	      display: flex;
-	      align-items: center;
-	      justify-content: space-between;
-	      gap: 10px;
-	      padding: 10px 12px;
-	      border-bottom: 1px solid #2a3c57;
-	      background: #132036;
-	      color: #d9ebff;
-	    }
-
-	    .explain-body {
-	      overflow: auto;
-	      padding: 12px;
-	      display: grid;
-	      gap: 10px;
-	    }
-
-	    .explain-summary {
-	      border: 1px solid #2a3f60;
-	      border-radius: 10px;
-	      padding: 10px;
-	      background: #101a2d;
-	      color: #d4e8ff;
-	      font-size: 0.86rem;
-	    }
-
-	    .explain-flow {
-	      border: 1px solid #2a3f60;
-	      border-radius: 10px;
-	      padding: 10px;
-	      background: #0f192b;
-	    }
-
-	    .explain-cards {
-	      display: grid;
-	      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-	      gap: 8px;
-	    }
-
-	    .explain-card {
-	      border: 1px solid #2a3b58;
-	      border-radius: 10px;
-	      padding: 9px;
-	      background: #111d31;
-	    }
-
-	    .explain-card .title {
-	      font-size: 0.83rem;
-	      color: #bfe1ff;
-	      font-weight: 700;
-	      margin-bottom: 5px;
-	    }
-
-	    .explain-card .line {
-	      font-size: 0.77rem;
-	      color: #d0e3ff;
-	      line-height: 1.4;
-	      margin-bottom: 4px;
-	      word-break: break-word;
-	    }
-
-	    .flow-line {
-	      display: flex;
-	      flex-wrap: wrap;
-	      gap: 5px;
-	      align-items: center;
-	      margin-top: 6px;
-	    }
-
-	    @media (max-width: 1020px) {
-	      .layout {
-	        grid-template-columns: 1fr;
-	      }
-      .chat-shell {
-        min-height: 420px;
-      }
+      --bg: #0f0f0f;
+      --surface: #161616;
+      --surface-2: #1e1e1e;
+      --surface-3: #282828;
+      --gold: #c4a35a;
+      --gold-dim: rgba(196,163,90,0.12);
+      --gold-mid: rgba(196,163,90,0.25);
+      --brick: #8b3a3a;
+      --brick-dim: rgba(139,58,58,0.12);
+      --text: #f0ece4;
+      --text-muted: #8a8478;
+      --text-dim: #5a5549;
+      --success: #5a9e6f;
+      --success-dim: rgba(90,158,111,0.12);
+      --border: #262626;
+      --mono: "SF Mono","Fira Code",Menlo,Consolas,monospace;
+      --sans: -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    }
+
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{min-height:100vh;font-family:var(--sans);color:var(--text);background:var(--bg);-webkit-font-smoothing:antialiased}
+    button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+    input,textarea,select{font-family:inherit;color:inherit;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;outline:none}
+    input:focus,textarea:focus,select:focus{border-color:var(--gold)}
+
+    /* ---- layout ---- */
+    .app{display:flex;flex-direction:column;height:100vh;max-width:920px;margin:0 auto;padding:0 20px}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 0;flex-shrink:0}
+    .logo{font-size:20px;font-weight:700;letter-spacing:-0.5px;color:var(--gold)}
+    .logo span{color:var(--text-muted);font-weight:400;font-size:13px;margin-left:8px}
+    .topbar-actions{display:flex;gap:8px;align-items:center}
+    .icon-btn{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:background .15s}
+    .icon-btn:hover{background:var(--surface-2)}
+    .icon-btn svg{width:18px;height:18px;stroke:var(--text-muted);fill:none;stroke-width:1.8}
+    .status-dot{width:7px;height:7px;border-radius:50%;background:var(--success);display:inline-block;margin-right:6px}
+    .status-dot.offline{background:var(--brick)}
+
+    /* ---- thread ---- */
+    .thread{flex:1;overflow-y:auto;padding:8px 0 24px;display:flex;flex-direction:column;gap:24px;scrollbar-width:thin;scrollbar-color:var(--surface-3) transparent}
+    .thread::-webkit-scrollbar{width:6px}
+    .thread::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:3px}
+
+    /* ---- empty state ---- */
+    .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px 0}
+    .empty h2{font-size:22px;font-weight:600;color:var(--text)}
+    .empty p{color:var(--text-muted);font-size:14px;max-width:400px;text-align:center;line-height:1.5}
+    .pills{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:520px}
+    .pill{padding:8px 16px;border:1px solid var(--gold-mid);border-radius:20px;font-size:13px;color:var(--gold);transition:all .15s;cursor:pointer}
+    .pill:hover{background:var(--gold-dim);border-color:var(--gold)}
+
+    /* ---- user turn ---- */
+    .turn-user{font-size:14px;color:var(--text-muted);padding-left:2px}
+    .turn-user q{color:var(--text);font-style:normal;quotes:none}
+
+    /* ---- answer card ---- */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+    .card-body{padding:20px 22px}
+    .card-answer{font-size:15px;line-height:1.65;color:var(--text)}
+    .card-answer p{margin-bottom:10px}
+    .card-answer strong{color:var(--gold);font-weight:600}
+    .card-answer code{font-family:var(--mono);font-size:12px;background:var(--surface-2);padding:2px 6px;border-radius:4px}
+    .card-answer ul,.card-answer ol{padding-left:18px;margin-bottom:10px}
+    .card-answer li{margin-bottom:4px}
+    .card-answer h2,.card-answer h3{font-size:15px;font-weight:600;color:var(--gold);margin:14px 0 6px}
+
+    /* ---- confidence badge ---- */
+    .badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;letter-spacing:0.3px;text-transform:uppercase}
+    .badge-high{background:var(--success-dim);color:var(--success)}
+    .badge-medium{background:var(--gold-dim);color:var(--gold)}
+    .badge-low{background:var(--brick-dim);color:var(--brick)}
+
+    /* ---- card meta row ---- */
+    .card-meta{display:flex;align-items:center;gap:12px;padding:12px 22px;border-top:1px solid var(--border);flex-wrap:wrap}
+    .meta-chip{font-size:11px;color:var(--text-dim);font-family:var(--mono)}
+    .meta-sep{width:1px;height:12px;background:var(--border)}
+
+    /* ---- data table ---- */
+    .table-wrap{overflow-x:auto;margin:14px 0 4px}
+    table{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)}
+    thead th{text-align:left;padding:8px 12px;color:var(--text-muted);border-bottom:1px solid var(--border);font-weight:500;white-space:nowrap}
+    tbody td{padding:7px 12px;border-bottom:1px solid var(--border);white-space:nowrap;color:var(--text)}
+    tbody tr:last-child td{border-bottom:none}
+    tbody tr:hover td{background:var(--surface-2)}
+
+    /* ---- chart container ---- */
+    .chart-wrap{position:relative;height:220px;margin:14px 0 4px}
+    .chart-wrap canvas{border-radius:8px}
+
+    /* ---- inspect panel (progressive disclosure) ---- */
+    .inspect-toggle{display:flex;align-items:center;gap:6px;padding:10px 22px;border-top:1px solid var(--border);font-size:12px;color:var(--text-dim);cursor:pointer;transition:color .15s;user-select:none}
+    .inspect-toggle:hover{color:var(--text-muted)}
+    .inspect-toggle svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;transition:transform .2s}
+    .inspect-toggle.open svg{transform:rotate(90deg)}
+    .inspect-content{display:none;padding:16px 22px;border-top:1px solid var(--border);font-size:12px;line-height:1.6}
+    .inspect-content.open{display:block}
+
+    .inspect-section{margin-bottom:16px}
+    .inspect-section:last-child{margin-bottom:0}
+    .inspect-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-dim);margin-bottom:6px}
+    .inspect-sql{font-family:var(--mono);font-size:11px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:12px;white-space:pre-wrap;word-break:break-all;color:var(--text-muted);max-height:200px;overflow-y:auto}
+
+    /* ---- agent trace ---- */
+    .trace-list{display:flex;flex-direction:column;gap:6px}
+    .trace-item{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:6px;background:var(--surface-2)}
+    .trace-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+    .trace-dot.ok{background:var(--success)}
+    .trace-dot.warn{background:var(--gold)}
+    .trace-dot.fail{background:var(--brick)}
+    .trace-name{font-size:11px;font-weight:500;color:var(--text-muted);min-width:120px}
+    .trace-summary{font-size:11px;color:var(--text-dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .trace-time{font-size:10px;color:var(--text-dim);font-family:var(--mono);white-space:nowrap}
+
+    /* ---- audit checks ---- */
+    .audit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:6px}
+    .audit-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:5px;font-size:11px}
+    .audit-item.pass{background:var(--success-dim);color:var(--success)}
+    .audit-item.warn{background:var(--gold-dim);color:var(--gold)}
+    .audit-item.fail{background:var(--brick-dim);color:var(--brick)}
+    .audit-icon{font-size:12px}
+
+    /* ---- suggested questions ---- */
+    .suggestions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+    .suggestion{padding:6px 12px;border:1px solid var(--border);border-radius:16px;font-size:12px;color:var(--text-muted);cursor:pointer;transition:all .15s}
+    .suggestion:hover{border-color:var(--gold-mid);color:var(--gold);background:var(--gold-dim)}
+
+    /* ---- input area ---- */
+    .input-area{flex-shrink:0;padding:16px 0 20px;border-top:1px solid var(--border)}
+    .input-row{display:flex;gap:10px;align-items:flex-end}
+    .input-row textarea{flex:1;resize:none;padding:12px 16px;font-size:14px;line-height:1.4;border-radius:12px;min-height:48px;max-height:150px;transition:border-color .15s}
+    .run-btn{height:48px;padding:0 24px;border-radius:12px;background:var(--gold);color:var(--bg);font-size:14px;font-weight:600;letter-spacing:0.2px;transition:opacity .15s;flex-shrink:0}
+    .run-btn:hover{opacity:0.88}
+    .run-btn:disabled{opacity:0.4;cursor:not-allowed}
+
+    /* ---- settings panel (slide-over) ---- */
+    .settings-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+    .settings-overlay.open{opacity:1;pointer-events:all}
+    .settings-panel{position:fixed;top:0;right:0;bottom:0;width:340px;background:var(--surface);border-left:1px solid var(--border);z-index:101;transform:translateX(100%);transition:transform .25s ease;padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
+    .settings-panel.open{transform:translateX(0)}
+    .settings-panel h3{font-size:15px;font-weight:600;color:var(--gold)}
+    .settings-panel label{display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px}
+    .settings-panel select,.settings-panel input[type="text"]{width:100%;padding:8px 12px;font-size:13px;border-radius:8px}
+    .settings-panel .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0}
+    .settings-panel .toggle-label{font-size:13px;color:var(--text)}
+    .settings-close{align-self:flex-end}
+    .sep{height:1px;background:var(--border)}
+
+    /* ---- toggle switch ---- */
+    .toggle{position:relative;width:36px;height:20px;border-radius:10px;background:var(--surface-3);cursor:pointer;transition:background .2s;flex-shrink:0}
+    .toggle.on{background:var(--gold)}
+    .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--text);transition:transform .2s}
+    .toggle.on::after{transform:translateX(16px)}
+
+    /* ---- spinner ---- */
+    .spinner{width:20px;height:20px;border:2px solid var(--surface-3);border-top-color:var(--gold);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .loading-card{display:flex;align-items:center;gap:12px;padding:20px 22px;font-size:13px;color:var(--text-muted)}
+
+    /* ---- error card ---- */
+    .error-card{background:var(--brick-dim);border:1px solid var(--brick);border-radius:12px;padding:16px 20px;font-size:13px;color:var(--brick)}
+
+    /* ---- responsive ---- */
+    @media(max-width:640px){
+      .app{padding:0 12px}
+      .card-body{padding:16px}
+      .card-meta{padding:10px 16px}
+      .inspect-toggle,.inspect-content{padding-left:16px;padding-right:16px}
+      .settings-panel{width:100%}
     }
   </style>
 </head>
 <body>
-  <main class="app">
-    <section class="hero">
-      <div class="hero-top">
-        <div>
-          <h1 class="title">dataDa</h1>
-          <p class="subtitle">A conversational, agentic data analytics teammate. Ask broad questions, ask follow-ups, and the system keeps context in your active session.</p>
-        </div>
-        <div class="session-chip" id="sessionChip">session: initializing...</div>
+  <div class="app">
+    <!-- top bar -->
+    <div class="topbar">
+      <div class="logo">dataDa<span id="statusLine"></span></div>
+      <div class="topbar-actions">
+        <span id="healthDot" class="status-dot" title="Checking..."></span>
+        <button class="icon-btn" id="settingsBtn" title="Settings">
+          <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+        </button>
       </div>
-      <div class="status-grid">
-        <div class="status-card"><label>Database</label><div class="value" id="dbPath">checking...</div></div>
-        <div class="status-card"><label>Health</label><div class="value" id="healthState">checking...</div></div>
-        <div class="status-card"><label>Semantic Layer</label><div class="value" id="semanticState">checking...</div></div>
-        <div class="status-card"><label>Recommended Runtime</label><div class="value" id="recommendedMode">checking...</div></div>
+    </div>
+
+    <!-- conversation thread -->
+    <div class="thread" id="thread"></div>
+
+    <!-- input area -->
+    <div class="input-area">
+      <div class="input-row">
+        <textarea id="goalInput" rows="1" placeholder="Ask your data anything..." autofocus></textarea>
+        <button class="run-btn" id="runBtn" onclick="runQuery()">Run</button>
       </div>
-    </section>
+    </div>
+  </div>
 
-	    <section class="layout">
-	      <aside>
-	        <section class="panel">
-	          <h3>Ask dataDa</h3>
-	          <div class="hint">Ask one question at a time. Keep it natural; follow-ups stay in the same session.</div>
-	          <textarea id="queryInput" placeholder="Example: Total MT103 transaction count split month wise and platform wise"></textarea>
-	          <div class="composer-actions">
-	            <button class="btn primary" id="runBtn" type="button">Run Query</button>
-	            <button class="btn ghost" id="newSessionBtn" type="button">New Session</button>
-	          </div>
+  <!-- settings slide-over -->
+  <div class="settings-overlay" id="settingsOverlay"></div>
+  <div class="settings-panel" id="settingsPanel">
+    <button class="icon-btn settings-close" id="settingsClose">
+      <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <h3>Settings</h3>
+    <div>
+      <label>Connection</label>
+      <select id="connSelect"><option value="">default</option></select>
+    </div>
+    <div>
+      <label>LLM Mode</label>
+      <select id="modeSelect">
+        <option value="auto">Auto</option>
+        <option value="local">Local (Ollama)</option>
+        <option value="openai">Cloud (OpenAI)</option>
+        <option value="deterministic">Deterministic</option>
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="toggle-row">
+      <span class="toggle-label">Storyteller mode</span>
+      <div class="toggle" id="storytellerToggle" onclick="this.classList.toggle('on')"></div>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">Auto-correction</span>
+      <div class="toggle on" id="correctionToggle" onclick="this.classList.toggle('on')"></div>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">Strict truth</span>
+      <div class="toggle on" id="truthToggle" onclick="this.classList.toggle('on')"></div>
+    </div>
+    <div class="sep"></div>
+    <div>
+      <label>Max refinement rounds</label>
+      <select id="refinementSelect">
+        <option value="0">0</option><option value="1">1</option><option value="2" selected>2</option>
+        <option value="3">3</option><option value="4">4</option>
+      </select>
+    </div>
+    <div>
+      <label>Candidate plans</label>
+      <select id="candidateSelect">
+        <option value="1">1</option><option value="3">3</option><option value="5" selected>5</option>
+        <option value="8">8</option><option value="12">12</option>
+      </select>
+    </div>
+  </div>
 
-	          <details class="control-section">
-	            <summary>Session + Settings</summary>
-	            <div class="composer-actions">
-	              <button class="btn warn" id="clearThreadBtn" type="button">Clear Thread</button>
-	              <button class="btn ghost" id="toggleArchBtn" type="button">View Agent Team Map</button>
-	            </div>
-	            <div class="row">
-	              <label>
-	                <div class="hint">LLM Mode</div>
-	                <select id="llmMode">
-	                  <option value="auto">Auto</option>
-                  <option value="local">Local Ollama</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="deterministic">Deterministic</option>
-                </select>
-              </label>
-              <label>
-                <div class="hint">Local Model</div>
-                <select id="localModel">
-                  <option value="">Auto-select</option>
-                </select>
-              </label>
-            </div>
-            <div class="row">
-	              <label>
-	                <div class="hint">Data Connection</div>
-	                <select id="connectionSelect">
-	                  <option value="default">default</option>
-	                </select>
-	              </label>
-	              <label>
-	                <div class="hint">Connection List</div>
-	                <button class="btn ghost" id="refreshConnectionsBtn" type="button" style="margin-top:3px;">Refresh</button>
-	              </label>
-	            </div>
-	            <div class="toggle-row">
-	              <label for="storyMode"><strong>Storyteller mode</strong> (friendlier narration)</label>
-	              <input type="checkbox" id="storyMode" />
-	            </div>
-	            <div class="composer-actions">
-	              <button class="btn ghost" id="refreshModelsBtn" type="button">Refresh Models</button>
-	            </div>
-	            <div class="model-catalog" id="modelCatalog"></div>
-	          </details>
+  <script>
+    /* =========================================================
+       dataDa — frontend runtime
+       ========================================================= */
 
-	          <div class="examples" id="examples"></div>
-	          <div class="hint" id="statusText" style="margin-top:9px;">Ready.</div>
-	        </section>
-
-        <section class="panel architecture" id="architecturePanel">
-          <h3>Agent Team Map</h3>
-          <div class="hint">Each agent owns one responsibility. Together they act like a compact analytics + data engineering pod.</div>
-          <div id="archContent" style="margin-top:8px;"></div>
-        </section>
-      </aside>
-
-	      <section class="chat-shell">
-	        <div class="thread" id="thread"></div>
-	      </section>
-	    </section>
-	  </main>
-	  <div class="explain-modal" id="explainModal" hidden>
-	    <div class="explain-dialog">
-	      <div class="explain-head">
-	        <strong>Explain Yourself</strong>
-	        <button class="btn ghost" id="explainCloseBtn" type="button">Close</button>
-	      </div>
-	      <div class="explain-body" id="explainBody"></div>
-	    </div>
-	  </div>
-
-	  <script>
-    const EXAMPLES = [
-      'What kind of data do I have?',
-      'Total MT103 transactions count split by month wise and platform wise',
-      'Top 5 platforms by total transaction amount in December 2025',
-      'Compare this month vs last month transaction count',
-      'Now show that by state',
-      'Explain like I am new: what changed in bookings this year?'
-    ];
-
-    const STORAGE_SESSION_KEY = 'datada_session_id';
-    const STORAGE_THREAD_KEY = 'datada_thread';
-    const STORAGE_CONN_KEY = 'datada_connection_id';
-    const STORAGE_TENANT_KEY = 'datada_tenant_id';
-
-	    const els = {
-	      queryInput: document.getElementById('queryInput'),
-	      runBtn: document.getElementById('runBtn'),
-	      newSessionBtn: document.getElementById('newSessionBtn'),
-	      clearThreadBtn: document.getElementById('clearThreadBtn'),
-	      modeSelect: document.getElementById('llmMode'),
-	      localModelSelect: document.getElementById('localModel'),
-	      connectionSelect: document.getElementById('connectionSelect'),
-	      refreshConnectionsBtn: document.getElementById('refreshConnectionsBtn'),
-	      refreshModelsBtn: document.getElementById('refreshModelsBtn'),
-	      modelCatalog: document.getElementById('modelCatalog'),
-	      correctionsList: document.getElementById('correctionsList'),
-	      trustPanel: document.getElementById('trustPanel'),
-	      examples: document.getElementById('examples'),
-	      statusText: document.getElementById('statusText'),
-	      thread: document.getElementById('thread'),
-	      storyMode: document.getElementById('storyMode'),
-	      sessionChip: document.getElementById('sessionChip'),
-	      architecturePanel: document.getElementById('architecturePanel'),
-	      toggleArchBtn: document.getElementById('toggleArchBtn'),
-	      archContent: document.getElementById('archContent'),
-	      explainModal: document.getElementById('explainModal'),
-	      explainBody: document.getElementById('explainBody'),
-	      explainCloseBtn: document.getElementById('explainCloseBtn'),
-	      dbPath: document.getElementById('dbPath'),
-	      healthState: document.getElementById('healthState'),
-	      semanticState: document.getElementById('semanticState'),
-	      recommendedMode: document.getElementById('recommendedMode')
-	    };
+    const STORAGE_SESSION = 'datada_session_id';
+    const STORAGE_THREAD = 'datada_thread';
+    const STORAGE_CONN = 'datada_conn';
 
     const state = {
-      sessionId: null,
-      turns: [],
-      architectureLoaded: false,
-      connectionId: 'default',
-      tenantId: 'public'
+      sessionId: localStorage.getItem(STORAGE_SESSION) || crypto.randomUUID(),
+      turns: JSON.parse(localStorage.getItem(STORAGE_THREAD) || '[]'),
+      connectionId: localStorage.getItem(STORAGE_CONN) || ''
     };
+    localStorage.setItem(STORAGE_SESSION, state.sessionId);
 
-    function esc(value) {
-      return String(value ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-    }
+    /* ---- helpers ---- */
+    const $ = id => document.getElementById(id);
+    const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+    const fmt = n => n == null ? '—' : typeof n === 'number' ? n.toLocaleString() : String(n);
 
-    function mdInline(text) {
-      return esc(text)
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    }
-
-    function md(text) {
-      if (!text) return '';
-      const lines = String(text).replace(/\\r\\n/g, '\\n').split('\\n');
-      const html = [];
-      let listMode = null; // "ul" | "ol" | null
-
-      const closeList = () => {
-        if (listMode) {
-          html.push(`</${listMode}>`);
-          listMode = null;
-        }
-      };
-
-      for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line) {
-          closeList();
-          continue;
-        }
-
-        if (line.startsWith('### ')) {
-          closeList();
-          html.push(`<h5>${mdInline(line.slice(4))}</h5>`);
-          continue;
-        }
-        if (line.startsWith('## ')) {
-          closeList();
-          html.push(`<h4>${mdInline(line.slice(3))}</h4>`);
-          continue;
-        }
-        if (line.startsWith('- ') || line.startsWith('* ')) {
-          if (listMode !== 'ul') {
-            closeList();
-            html.push('<ul>');
-            listMode = 'ul';
-          }
-          html.push(`<li>${mdInline(line.slice(2))}</li>`);
-          continue;
-        }
-
-        const ordered = line.match(/^\d+\.\s+(.*)$/);
-        if (ordered) {
-          if (listMode !== 'ol') {
-            closeList();
-            html.push('<ol>');
-            listMode = 'ol';
-          }
-          html.push(`<li>${mdInline(ordered[1])}</li>`);
-          continue;
-        }
-
-        closeList();
-        html.push(`<p>${mdInline(line)}</p>`);
-      }
-
-      closeList();
-      return html.join('');
-    }
-
-    function fmt(v) {
-      if (typeof v === 'number') {
-        return Number.isInteger(v)
-          ? v.toLocaleString()
-          : v.toLocaleString(undefined, { maximumFractionDigits: 4 });
-      }
-      if (v === null || v === undefined) return '';
-      return String(v);
-    }
-
-    function fmtTimeFilter(timeFilter) {
-      if (!timeFilter || typeof timeFilter !== 'object') return 'none';
-      if (timeFilter.kind === 'month_year') {
-        const month = Number(timeFilter.month || 0);
-        const year = Number(timeFilter.year || 0);
-        if (month >= 1 && month <= 12 && year > 0) {
-          return `${year}-${String(month).padStart(2, '0')}`;
-        }
-      }
-      if (timeFilter.kind === 'year_only' && timeFilter.year) return String(timeFilter.year);
-      if (timeFilter.kind === 'relative' && timeFilter.value) return String(timeFilter.value).replace(/_/g, ' ');
-      return esc(JSON.stringify(timeFilter));
-    }
-
-    function fmtFilters(valueFilters) {
-      if (!Array.isArray(valueFilters) || !valueFilters.length) return 'none';
-      return valueFilters
-        .map((vf) => `${vf.column || '?'}=${vf.value || '?'}`)
-        .join(', ');
-    }
-
-    function setStatus(msg) {
-      els.statusText.textContent = msg;
-    }
-
-    function newSessionId() {
-      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
-      return `sess-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-    }
-
-    function safeStorageGet(key) {
-      try {
-        return localStorage.getItem(key);
-      } catch (err) {
-        return null;
-      }
-    }
-
-    function safeStorageSet(key, value) {
-      try {
-        localStorage.setItem(key, value);
-      } catch (err) {
-        // Ignore storage errors (private mode or blocked storage).
-      }
-    }
-
-	    function saveState() {
-	      safeStorageSet(STORAGE_SESSION_KEY, state.sessionId);
-	      safeStorageSet(STORAGE_THREAD_KEY, JSON.stringify(state.turns.slice(-30)));
-	      safeStorageSet(STORAGE_CONN_KEY, state.connectionId || 'default');
-	      safeStorageSet(STORAGE_TENANT_KEY, state.tenantId || 'public');
-	    }
-
-    function loadState() {
-      const existingSession = safeStorageGet(STORAGE_SESSION_KEY);
-      state.sessionId = existingSession || newSessionId();
-      try {
-        const raw = safeStorageGet(STORAGE_THREAD_KEY);
-        const parsed = raw ? JSON.parse(raw) : [];
-        if (Array.isArray(parsed)) state.turns = parsed;
-      } catch (err) {
-        state.turns = [];
-      }
-      const savedConn = safeStorageGet(STORAGE_CONN_KEY);
-      state.connectionId = savedConn || 'default';
-      const savedTenant = safeStorageGet(STORAGE_TENANT_KEY);
-      state.tenantId = (savedTenant || 'public').trim() || 'public';
-      updateSessionChip();
-    }
-
-    function updateSessionChip() {
-      const shortId = state.sessionId ? state.sessionId.slice(0, 12) : 'none';
-      els.sessionChip.textContent = `session: ${shortId}`;
-    }
-
-    function resetSession(clearThread = true) {
-      state.sessionId = newSessionId();
-      if (clearThread) state.turns = [];
-      saveState();
-      renderThread();
-      updateSessionChip();
-      setStatus('Started a fresh session.');
-    }
-
-    function renderExamples() {
-      els.examples.innerHTML = EXAMPLES
-        .map((q) => `<button class="pill" type="button">${esc(q)}</button>`)
-        .join('');
-      Array.from(els.examples.querySelectorAll('button')).forEach((btn, idx) => {
-        btn.addEventListener('click', () => {
-          els.queryInput.value = EXAMPLES[idx];
-          els.queryInput.focus();
-        });
-      });
-    }
-
-    function renderModelCatalog(modelState) {
-      if (!modelState || !Array.isArray(modelState.options) || modelState.options.length === 0) {
-        els.modelCatalog.innerHTML = '<span class="hint">No local model metadata.</span>';
-        return;
-      }
-
-      const active = els.localModelSelect.value;
-      els.modelCatalog.innerHTML = modelState.options.map((opt) => {
-        const cls = [
-          'model-pill',
-          opt.installed ? '' : 'install',
-          active === opt.name ? 'active' : ''
-        ].join(' ').trim();
-        const action = opt.installed ? 'Select' : 'Download';
-        return `<button type="button" class="${cls}" data-model="${esc(opt.name)}" data-installed="${opt.installed ? '1' : '0'}">${esc(opt.name)} • ${esc(opt.tier)} • ${action}</button>`;
-      }).join('');
-
-      Array.from(els.modelCatalog.querySelectorAll('button[data-model]')).forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const model = btn.getAttribute('data-model');
-          const installed = btn.getAttribute('data-installed') === '1';
-          if (installed) await selectLocalModel(model);
-          else await pullLocalModel(model);
-        });
-      });
-    }
-
-    async function loadLocalModels() {
-      try {
-        const stateResp = await fetch('/api/assistant/models/local').then((r) => r.json());
-        const installed = (stateResp.options || []).filter((o) => o.installed);
-        els.localModelSelect.innerHTML =
-          '<option value="">Auto-select</option>' +
-          installed.map((o) => `<option value="${esc(o.name)}">${esc(o.name)} (${esc(o.tier)})</option>`).join('');
-
-        const active = stateResp.active_intent_model || '';
-        if (active && installed.some((o) => o.name === active)) {
-          els.localModelSelect.value = active;
-        }
-        renderModelCatalog(stateResp);
-      } catch (err) {
-        els.modelCatalog.innerHTML = `<span class="hint">Local model service unavailable: ${esc(err.message)}</span>`;
-      }
-    }
-
-    async function loadConnections() {
-      try {
-        const data = await fetch('/api/assistant/connections').then((r) => r.json());
-        const list = Array.isArray(data.connections) ? data.connections : [];
-        if (!list.length) {
-          els.connectionSelect.innerHTML = '<option value="default">default</option>';
-          state.connectionId = 'default';
-          saveState();
-          return;
-        }
-
-        const defaultId = data.default_connection_id || 'default';
-        els.connectionSelect.innerHTML = list.map((c) => {
-          const label = `${c.id}${c.is_default ? ' (default)' : ''} • ${c.kind}${c.exists ? '' : ' • missing'}`;
-          return `<option value="${esc(c.id)}">${esc(label)}</option>`;
-        }).join('');
-
-        const preferred = state.connectionId || defaultId;
-        const hasPreferred = list.some((c) => c.id === preferred);
-        state.connectionId = hasPreferred ? preferred : defaultId;
-        els.connectionSelect.value = state.connectionId;
-        saveState();
-      } catch (err) {
-        setStatus(`Connections unavailable: ${err.message}`);
-      }
-    }
-
-    async function toggleCorrection(correctionId, enabled) {
-      try {
-        const response = await fetch('/api/assistant/corrections/toggle', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            db_connection_id: state.connectionId || 'default',
-            correction_id: correctionId,
-            enabled
-          })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || data.message || 'Toggle failed');
-        setStatus(data.message || 'Correction updated.');
-        await loadCorrections();
-      } catch (err) {
-        setStatus(`Correction update failed: ${err.message}`);
-      }
-    }
-
-	    async function loadCorrections() {
-	      if (!els.correctionsList) return;
-	      try {
-	        const q = new URLSearchParams({
-	          db_connection_id: state.connectionId || 'default',
-	          include_disabled: 'true',
-          limit: '60'
-        });
-        const data = await fetch(`/api/assistant/corrections?${q}`).then((r) => r.json());
-        const rules = Array.isArray(data.rules) ? data.rules : [];
-        if (!rules.length) {
-          els.correctionsList.innerHTML = '<div class="hint">No learned corrections yet.</div>';
-          return;
-        }
-        els.correctionsList.innerHTML = rules.map((rule) => {
-          const dims = Array.isArray(rule.target_dimensions) && rule.target_dimensions.length
-            ? rule.target_dimensions.join(', ')
-            : 'none';
-          return `
-            <div class="correction-item">
-              <div class="top">
-                <strong>${esc(rule.keyword || 'keyword')}</strong>
-                <button class="btn ${rule.enabled ? 'warn' : 'primary'}" data-correction-id="${esc(rule.correction_id)}" data-next-enabled="${rule.enabled ? '0' : '1'}" type="button" style="padding:4px 8px; font-size:0.72rem;">
-                  ${rule.enabled ? 'Disable' : 'Enable'}
-                </button>
-              </div>
-              <div class="hint">→ ${esc(rule.target_table)} • ${esc(rule.target_metric)} • dims: ${esc(dims)}</div>
-              <div class="hint">weight=${esc(fmt(rule.weight || 0))} • ${rule.enabled ? 'enabled' : 'disabled'}</div>
-            </div>
-          `;
-        }).join('');
-
-        Array.from(els.correctionsList.querySelectorAll('button[data-correction-id]')).forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const correctionId = btn.getAttribute('data-correction-id');
-            const nextEnabled = btn.getAttribute('data-next-enabled') === '1';
-            if (!correctionId) return;
-            await toggleCorrection(correctionId, nextEnabled);
-          });
-        });
-      } catch (err) {
-        els.correctionsList.innerHTML = `<div class="hint">Corrections unavailable: ${esc(err.message)}</div>`;
-      }
-    }
-
-	    function renderTrustDashboard(data, slo, incidents) {
-	      if (!els.trustPanel) return;
-	      const modes = Array.isArray(data.by_mode) ? data.by_mode : [];
-      const modeRows = modes.length
-        ? modes.map((m) => (
-            `<div class="hint">${esc(m.mode)} • runs=${esc(fmt(m.runs))} • success=${esc(fmt(Math.round((m.success_rate || 0) * 100)))}% • avg=${esc(fmt(m.avg_execution_ms || 0))} ms</div>`
-          )).join('')
-        : '<div class="hint">No mode metrics yet.</div>';
-      const failures = Array.isArray(data.recent_failures) ? data.recent_failures.slice(0, 4) : [];
-      const failureRows = failures.length
-        ? failures.map((f) => `<div class="hint">${esc(f.created_at)} • ${esc(f.llm_mode)} • ${esc((f.goal || '').slice(0, 90))}</div>`).join('')
-        : '<div class="hint">No recent failed runs.</div>';
-      const sloStatus = slo && typeof slo === 'object' ? String(slo.status || 'unknown') : 'unknown';
-      const sloBurn = slo && typeof slo === 'object' ? fmt(slo.burn_rate || 0) : 'n/a';
-      const sloBreaches = slo && Array.isArray(slo.breaches) ? slo.breaches : [];
-      const breachRows = sloBreaches.length
-        ? sloBreaches.map((b) => `<div class="hint">${esc(b.metric)} • actual=${esc(fmt(b.actual))} target=${esc(fmt(b.target))}</div>`).join('')
-        : '<div class="hint">No active SLO breaches.</div>';
-      const incidentRows = incidents && Array.isArray(incidents.incidents)
-        ? incidents.incidents.slice(0, 4).map((i) => `<div class="hint">${esc(i.severity)} • ${esc(i.status)} • ${esc(i.title)}</div>`).join('')
-        : '<div class="hint">No recent incidents.</div>';
-      els.trustPanel.innerHTML = `
-        <div class="trust-card">
-          <div><strong>Trust window:</strong> ${esc(fmt(data.window_hours || 0))}h • tenant=${esc(data.tenant_id || 'all')}</div>
-          <div class="trust-kpis">
-            <div class="hint">runs: <strong>${esc(fmt(data.runs || 0))}</strong></div>
-            <div class="hint">success: <strong>${esc(fmt(Math.round((data.success_rate || 0) * 100)))}%</strong></div>
-            <div class="hint">avg confidence: <strong>${esc(fmt(Math.round((data.avg_confidence || 0) * 100)))}%</strong></div>
-            <div class="hint">p95 execution: <strong>${esc(fmt(data.p95_execution_ms || 0))} ms</strong></div>
-          </div>
-          <div style="margin-top:6px;"><strong>By mode</strong></div>
-          ${modeRows}
-          <div style="margin-top:6px;"><strong>Recent failures</strong></div>
-          ${failureRows}
-          <div style="margin-top:8px;"><strong>SLO:</strong> ${esc(sloStatus)} • burn=${esc(sloBurn)}</div>
-          ${breachRows}
-          <div style="margin-top:8px;"><strong>Incidents</strong></div>
-          ${incidentRows}
-        </div>
-      `;
-    }
-
-	    async function loadTrustDashboard() {
-	      if (!els.trustPanel) return;
-	      try {
-        const q = new URLSearchParams({
-          tenant_id: state.tenantId || 'public',
-          hours: '168'
-        });
-        const [data, slo, incidents] = await Promise.all([
-          fetch(`/api/assistant/trust/dashboard?${q}`).then((r) => r.json()),
-          fetch(`/api/assistant/slo/evaluate?${q}`).then((r) => r.json()),
-          fetch(`/api/assistant/incidents?${q}&limit=8`).then((r) => r.json())
-        ]);
-        renderTrustDashboard(data, slo, incidents);
-      } catch (err) {
-        els.trustPanel.innerHTML = `<div class="hint">Trust metrics unavailable: ${esc(err.message)}</div>`;
-      }
-    }
-
-	    async function runSourceTruthCheck() {
-	      if (!els.trustPanel) return;
-	      setStatus('Running source-truth parity checks...');
-      try {
-        const q = new URLSearchParams({
-          db_connection_id: state.connectionId || 'default',
-          llm_mode: els.modeSelect.value || 'deterministic',
-          max_cases: '6'
-        });
-        if (els.localModelSelect.value) q.set('local_model', els.localModelSelect.value);
-        const response = await fetch(`/api/assistant/source-truth/check?${q}`);
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Source-truth check failed');
-        const rows = Array.isArray(data.runs) ? data.runs : [];
-        const preview = rows.slice(0, 4).map((r) => (
-          `<div class="hint">${esc(r.case_id)} • ${r.exact_match ? 'match' : 'mismatch'} • ${esc(fmt(r.latency_ms || 0))} ms</div>`
-        )).join('');
-        els.trustPanel.innerHTML = `
-          <div class="trust-card">
-            <div><strong>Source truth:</strong> accuracy=${esc(fmt(data.accuracy_pct || 0))}% • exact=${esc(fmt(data.exact_matches || 0))}/${esc(fmt(data.evaluated_cases || 0))} • mode=${esc(data.mode_actual || '')}</div>
-            <div style="margin-top:6px;">${preview || '<span class="hint">No cases evaluated.</span>'}</div>
-          </div>
-        ` + els.trustPanel.innerHTML;
-        setStatus('Source-truth check complete.');
-      } catch (err) {
-        setStatus(`Source-truth check failed: ${err.message}`);
-      }
-    }
-
-    async function selectLocalModel(modelName) {
-      setStatus(`Activating ${modelName}...`);
-      try {
-        const response = await fetch('/api/assistant/models/local/select', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: modelName, narrator_model: modelName })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || data.message || 'Model activation failed');
-        els.localModelSelect.value = modelName;
-        setStatus(data.message || `Activated ${modelName}`);
-        await loadLocalModels();
-      } catch (err) {
-        setStatus(`Model activation failed: ${err.message}`);
-      }
-    }
-
-    async function pullLocalModel(modelName) {
-      setStatus(`Downloading ${modelName}. This may take a few minutes...`);
-      try {
-        const response = await fetch('/api/assistant/models/local/pull', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: modelName, activate_after_download: true })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || data.message || 'Model pull failed');
-        setStatus(data.message || `${modelName} downloaded`);
-        if (data.active_intent_model) {
-          els.localModelSelect.value = data.active_intent_model;
-        }
-        await loadLocalModels();
-      } catch (err) {
-        setStatus(`Model download failed: ${err.message}`);
-      }
-    }
-
-    function renderTable(columns, rows) {
-      if (!Array.isArray(columns) || columns.length === 0 || !Array.isArray(rows) || rows.length === 0) {
-        return '<div class="hint">No rows returned.</div>';
-      }
-      const head = `<tr>${columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>`;
-      const body = rows.map((row) => (
-        `<tr>${columns.map((c) => `<td>${esc(fmt(row[c]))}</td>`).join('')}</tr>`
-      )).join('');
-      return `<div class="table-wrap"><table><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
-    }
-
-    function renderMiniChart(chartSpec, columns, rows) {
-      if (!Array.isArray(rows) || rows.length < 2) return '';
-      const hasMetric = Array.isArray(columns) && columns.includes('metric_value');
-      if (!hasMetric) return '';
-      const xKey = chartSpec && chartSpec.x ? chartSpec.x : (columns.find((c) => c !== 'metric_value') || null);
-      if (!xKey) return '';
-      const items = rows
-        .map((r) => ({ label: fmt(r[xKey]), value: Number(r.metric_value || 0) }))
-        .filter((r) => Number.isFinite(r.value))
-        .slice(0, 8);
-      if (!items.length) return '';
-      const maxVal = Math.max(...items.map((i) => i.value), 1);
-      const bars = items.map((item) => {
-        const width = Math.max(4, Math.round((item.value / maxVal) * 100));
-        return `
-          <div class="row-item">
-            <span>${esc(item.label)}</span>
-            <span class="bar"><i style="width:${width}%"></i></span>
-            <span>${esc(fmt(item.value))}</span>
-          </div>
-        `;
-      }).join('');
-      return `<div class="mini-chart">${bars}</div>`;
-    }
-
-    function humanizeToken(value) {
-      const raw = String(value || '').trim();
+    function md(raw) {
       if (!raw) return '';
       return raw
-        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-        .replace(/[_-]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^[-*] (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\\/li>)/gs, '<ul>$1</ul>')
+        .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\\n{2,}/g, '</p><p>')
+        .replace(/^(?!<[hulo])(.+)$/gm, '<p>$1</p>')
+        .replace(/<ul>\\s*<ul>/g, '<ul>')
+        .replace(/<\\/ul>\\s*<\\/ul>/g, '</ul>');
     }
 
-    function friendlyTableName(tableName) {
-      const table = String(tableName || '').trim();
-      if (!table) return 'unknown';
-      const map = {
-        datada_mart_transactions: 'Transactions',
-        datada_mart_quotes: 'Quotes',
-        datada_dim_customers: 'Customers',
-        datada_mart_bookings: 'Bookings',
-        datada_document_chunks: 'Documents'
-      };
-      return map[table] || humanizeToken(table);
+    function confidenceBadge(score, label) {
+      if (score >= 0.75) return `<span class="badge badge-high">High confidence</span>`;
+      if (score >= 0.45) return `<span class="badge badge-medium">Medium confidence</span>`;
+      return `<span class="badge badge-low">Low confidence</span>`;
     }
 
-    function friendlyCheckLabel(name) {
-      const key = String(name || '').trim();
-      const map = {
-        execution_success: 'Query ran successfully',
-        non_empty_result: 'Returned data',
-        time_scope_applied: 'Time filter applied',
-        concept_alignment: 'Question and metric aligned',
-        goal_term_coverage: 'Question concept coverage',
-        schema_grounding: 'Metric grounded to schema',
-        replay_consistency: 'Result reproducible',
-        catalog_ready: 'Semantic catalog ready',
-        semantic_versioned: 'Dataset snapshot versioned',
-        governance: 'Governance check passed',
-        document_table_available: 'Document index available',
-        citation_matches: 'Document citations found',
-        pipeline: 'Pipeline completed'
-      };
-      return map[key] || humanizeToken(key || 'check');
+    function buildTable(columns, rows) {
+      if (!columns || !rows || !rows.length) return '';
+      const hdr = columns.map(c => `<th>${esc(c)}</th>`).join('');
+      const body = rows.slice(0, 20).map(r =>
+        '<tr>' + columns.map(c => `<td>${fmt(r[c])}</td>`).join('') + '</tr>'
+      ).join('');
+      return `<div class="table-wrap"><table><thead><tr>${hdr}</tr></thead><tbody>${body}</tbody></table></div>`;
     }
 
-    function shortText(value, maxLen = 200) {
-      const text = String(value || '').trim();
-      if (!text) return '';
-      if (text.length <= maxLen) return text;
-      return `${text.slice(0, Math.max(0, maxLen - 1)).trim()}…`;
-    }
-
-    function friendlySummary(value) {
-      const raw = String(value || '').trim();
-      if (!raw) return 'No summary emitted by this step.';
-      if (raw.startsWith('{') || raw.startsWith('[')) {
-        return shortText(
-          raw
-            .replace(/[{}[\]"]/g, ' ')
-            .replace(/'/g, '')
-            .replace(/,\s*/g, ' | ')
-            .replace(/\s+/g, ' ')
-            .trim(),
-          260
-        );
+    function detectChartType(columns, rows) {
+      if (!columns || !rows || rows.length < 2 || columns.length < 2) return null;
+      const numericCols = columns.filter(c => rows.some(r => typeof r[c] === 'number'));
+      const textCols = columns.filter(c => !numericCols.includes(c));
+      if (textCols.length >= 1 && numericCols.length >= 1) {
+        const labelCol = textCols[0];
+        const isTimeLike = /date|month|year|week|day|time|period/i.test(labelCol);
+        return { type: isTimeLike ? 'line' : 'bar', labelCol, valueCols: numericCols };
       }
-      return shortText(raw, 260);
+      return null;
     }
 
-    function summarizePreview(payloadPreview) {
-      if (payloadPreview === null || payloadPreview === undefined) return '';
-      if (typeof payloadPreview === 'string') return shortText(payloadPreview, 120);
-      if (Array.isArray(payloadPreview)) return shortText(payloadPreview.map((v) => fmt(v)).join(', '), 120);
-      if (typeof payloadPreview === 'object') {
-        const pairs = Object.entries(payloadPreview)
-          .slice(0, 3)
-          .map(([k, v]) => `${humanizeToken(k)}: ${fmt(v)}`);
-        return shortText(pairs.join(' | '), 140);
-      }
-      return shortText(fmt(payloadPreview), 120);
-    }
-
-	    function buildBlackboardMaps(evidencePackets) {
-	      const packet = Array.isArray(evidencePackets)
-	        ? evidencePackets.find((p) => p && p.agent === 'Blackboard')
-	        : null;
-	      const artifacts = packet && Array.isArray(packet.artifacts) ? packet.artifacts : [];
-	      const edges = packet && Array.isArray(packet.edges) ? packet.edges : [];
-	      const artifactsByProducer = new Map();
-	      const artifactsByConsumer = new Map();
-	      artifacts.forEach((artifact) => {
-	        const producer = String((artifact && artifact.producer) || 'UnknownAgent');
-	        const bucket = artifactsByProducer.get(producer) || [];
-	        bucket.push(artifact);
-	        artifactsByProducer.set(producer, bucket);
-	        const consumers = Array.isArray(artifact && artifact.consumed_by) ? artifact.consumed_by : [];
-	        consumers.forEach((consumer) => {
-	          const c = String(consumer || '');
-	          if (!c) return;
-	          const incoming = artifactsByConsumer.get(c) || [];
-	          incoming.push(artifact);
-	          artifactsByConsumer.set(c, incoming);
-	        });
-	      });
-	      const handoffsByFrom = new Map();
-	      const handoffsByTo = new Map();
-	      edges.forEach((edge) => {
-	        const from = String((edge && edge.from) || '');
-	        const to = String((edge && edge.to) || '');
-	        if (!from || !to) return;
-	        const artifactType = String((edge && edge.artifact_type) || '');
-	        const bucket = handoffsByFrom.get(from) || [];
-	        if (!bucket.some((handoff) => handoff.to === to && handoff.artifactType === artifactType)) {
-	          bucket.push({ to, artifactType });
-	        }
-	        handoffsByFrom.set(from, bucket);
-	        const reverseBucket = handoffsByTo.get(to) || [];
-	        if (!reverseBucket.some((handoff) => handoff.from === from && handoff.artifactType === artifactType)) {
-	          reverseBucket.push({ from, artifactType });
-	        }
-	        handoffsByTo.set(to, reverseBucket);
-	      });
-	      return { artifacts, edges, artifactsByProducer, artifactsByConsumer, handoffsByFrom, handoffsByTo };
-	    }
-
-    function renderAgentMission(trace, evidencePackets) {
-      const steps = Array.isArray(trace) ? trace : [];
-      const maps = buildBlackboardMaps(evidencePackets);
-      if (!steps.length && !maps.artifacts.length) return '<div class="hint">No trace captured.</div>';
-
-      const maxDuration = Math.max(
-        1,
-        ...steps.map((step) => {
-          const ms = Number(step && step.duration_ms);
-          return Number.isFinite(ms) ? ms : 0;
-        })
-      );
-      const totalDuration = steps.reduce((acc, step) => acc + (Number(step && step.duration_ms) || 0), 0);
-
-      const path = [];
-      steps.forEach((step) => {
-        const agent = String((step && step.agent) || 'Agent');
-        if (!path.length || path[path.length - 1] !== agent) path.push(agent);
+    let chartCounter = 0;
+    function buildChart(columns, rows) {
+      const spec = detectChartType(columns, rows);
+      if (!spec) return '';
+      const id = 'chart_' + (++chartCounter);
+      const labels = rows.map(r => String(r[spec.labelCol] || ''));
+      const datasets = spec.valueCols.slice(0, 3).map((col, i) => {
+        const colors = ['rgba(196,163,90,0.8)', 'rgba(139,58,58,0.8)', 'rgba(90,158,111,0.8)'];
+        const bgColors = ['rgba(196,163,90,0.15)', 'rgba(139,58,58,0.15)', 'rgba(90,158,111,0.15)'];
+        return {
+          label: col,
+          data: rows.map(r => r[col]),
+          borderColor: colors[i] || colors[0],
+          backgroundColor: spec.type === 'line' ? bgColors[i] : colors[i],
+          borderWidth: 2,
+          fill: spec.type === 'line',
+          tension: 0.3,
+          borderRadius: spec.type === 'bar' ? 4 : 0
+        };
       });
-      if (!path.length) {
-        maps.artifacts.forEach((artifact) => {
-          const producer = String((artifact && artifact.producer) || 'Agent');
-          if (!path.includes(producer)) path.push(producer);
+      setTimeout(() => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        new Chart(el, {
+          type: spec.type,
+          data: { labels, datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: datasets.length > 1, labels: { color: '#8a8478', font: { size: 11 } } }
+            },
+            scales: {
+              x: { ticks: { color: '#5a5549', font: { size: 10 } }, grid: { color: '#262626' } },
+              y: { ticks: { color: '#5a5549', font: { size: 10 } }, grid: { color: '#262626' } }
+            }
+          }
         });
-      }
+      }, 50);
+      return `<div class="chart-wrap"><canvas id="${id}"></canvas></div>`;
+    }
 
-      const pathHtml = path.length > 1
-        ? `<div class="mission-path">${path.map((agent, idx) => (
-            `${idx ? '<span class="path-arrow">→</span>' : ''}<span class="path-node">${esc(agent)}</span>`
-          )).join('')}</div>`
-        : '';
+    function buildTrace(trace) {
+      if (!trace || !trace.length) return '';
+      return '<div class="trace-list">' + trace.map(t => {
+        const st = (t.status || '').toLowerCase();
+        const dot = st === 'failed' ? 'fail' : st === 'warning' ? 'warn' : 'ok';
+        const ms = t.duration_ms != null ? Math.round(t.duration_ms) + 'ms' : '';
+        return `<div class="trace-item"><span class="trace-dot ${dot}"></span><span class="trace-name">${esc(t.agent || t.role || '')}</span><span class="trace-summary">${esc(t.summary || '')}</span><span class="trace-time">${ms}</span></div>`;
+      }).join('') + '</div>';
+    }
 
-      let cards = '';
-      if (steps.length) {
-        cards = steps.map((step, idx) => {
-          const agent = String(step.agent || 'Agent');
-          const role = humanizeToken(step.role || 'step');
-          const status = String(step.status || 'unknown').toLowerCase();
-          const duration = Number(step.duration_ms || 0);
-          const pct = Math.max(4, Math.round((Math.max(0, duration) / maxDuration) * 100));
-          const cls = status === 'success' ? 'ok' : 'warn';
-          const insight = friendlySummary(step.summary || '');
-          const handoffs = (maps.handoffsByFrom.get(agent) || []).slice(0, 4);
-          const produced = (maps.artifactsByProducer.get(agent) || []).slice(-2);
-          const handoffHtml = handoffs.length
-            ? `<div class="handoff-row">${handoffs.map((handoff) => {
-                const artifactLabel = handoff.artifactType ? ` • ${humanizeToken(handoff.artifactType)}` : '';
-                return `<span class="handoff-pill">${esc(agent)} → ${esc(handoff.to)}${esc(artifactLabel)}</span>`;
-              }).join('')}</div>`
-            : '';
-          const artifactHtml = produced.length
-            ? `<div class="artifact-row">${produced.map((artifact) => (
-                `<span class="artifact-pill">${esc(humanizeToken(artifact.artifact_type || 'artifact'))}: ${esc(summarizePreview(artifact.payload_preview || artifact.summary || ''))}</span>`
-              )).join('')}</div>`
-            : '';
+    function buildAudit(checks) {
+      if (!checks || !checks.length) return '';
+      return '<div class="audit-grid">' + checks.map(c => {
+        const cls = c.passed === false ? 'fail' : c.passed === true ? 'pass' : 'warn';
+        const icon = c.passed === false ? '&#10007;' : c.passed === true ? '&#10003;' : '&#9888;';
+        return `<div class="audit-item ${cls}"><span class="audit-icon">${icon}</span>${esc(c.check_name || c.name || '')}</div>`;
+      }).join('') + '</div>';
+    }
 
-          return `
-            <div class="trace-step ${cls}">
-              <div class="head"><span>${esc(agent)} • ${esc(role || 'step')}</span><span>${esc(status)} • ${esc(fmt(duration))} ms</span></div>
-              <div class="trace-bar"><i style="width:${pct}%"></i></div>
-              <div class="mission-insight">${esc(insight)}</div>
-              ${handoffHtml}
-              ${artifactHtml}
-              <div class="meta"><span>step ${esc(idx + 1)}</span><span>${esc(step.time || '')}</span></div>
+    /* ---- render ---- */
+    function renderThread() {
+      const el = $('thread');
+      if (!state.turns.length) {
+        el.innerHTML = `
+          <div class="empty">
+            <h2>What would you like to know?</h2>
+            <p>Ask questions about your data in plain English. dataDa will analyze, verify, and explain.</p>
+            <div class="pills">
+              <div class="pill" onclick="askExample(this)">Total revenue last quarter</div>
+              <div class="pill" onclick="askExample(this)">Compare bookings this month vs last</div>
+              <div class="pill" onclick="askExample(this)">Top 10 customers by transaction volume</div>
+              <div class="pill" onclick="askExample(this)">Show me monthly trends</div>
             </div>
-          `;
-        }).join('');
-      } else {
-        cards = maps.artifacts.slice(-8).map((artifact) => (
-          `<div class="trace-step ok">
-            <div class="head"><span>${esc(artifact.producer || 'Agent')} • ${esc(humanizeToken(artifact.artifact_type || 'artifact'))}</span><span>captured</span></div>
-            <div class="mission-insight">${esc(friendlySummary(artifact.summary || ''))}</div>
-          </div>`
-        )).join('');
-      }
-
-      const edgeRows = maps.edges
-        .slice(0, 40)
-        .map((edge) => `${edge.from || 'agent'} → ${edge.to || 'agent'} (${humanizeToken(edge.artifact_type || 'artifact')})`);
-      const edgesHtml = edgeRows.length
-        ? `
-          <details>
-            <summary>Full handoff list (${esc(fmt(maps.edges.length))})</summary>
-            <div class="mono">${esc(edgeRows.join('\\n'))}</div>
-          </details>
-        `
-        : '';
-
-      return `
-        <div class="mission-control">
-          <div class="mission-head">
-            <strong>Agent mission trace</strong>
-            <span class="hint">${esc(fmt(steps.length || maps.artifacts.length))} steps • ${esc(fmt(totalDuration))} ms</span>
-          </div>
-          ${pathHtml}
-          <div class="trace mission-list">${cards}</div>
-          ${edgesHtml}
-        </div>
-      `;
-    }
-
-    function renderQualityOverview(quality) {
-      const payload = quality && typeof quality === 'object' ? quality : {};
-      const grounding = payload.grounding && typeof payload.grounding === 'object' ? payload.grounding : {};
-      const cards = [
-        ['Audit score', payload.audit_score === undefined ? 'n/a' : fmt(payload.audit_score)],
-        ['Source table', grounding.table || 'unknown'],
-        ['Metric', grounding.metric || 'n/a'],
-        ['Metric logic', grounding.metric_expr || 'n/a'],
-        ['Goal terms hit', Array.isArray(grounding.goal_terms_detected) && grounding.goal_terms_detected.length ? grounding.goal_terms_detected.join(', ') : 'none'],
-        ['Goal terms missed', Array.isArray(grounding.goal_term_misses) && grounding.goal_term_misses.length ? grounding.goal_term_misses.join(', ') : 'none']
-      ];
-      return `
-        <div class="quality-grid">
-          ${cards.map(([k, v]) => `<div class="quality-card"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')}
-        </div>
-      `;
-    }
-
-    function checksHtml(checks) {
-      if (!Array.isArray(checks) || checks.length === 0) return '<span class="hint">No checks.</span>';
-      return checks.map((c) => {
-        const ok = !!c.passed;
-        return `<span class="tag ${ok ? 'ok' : 'warn'}">${ok ? 'OK' : 'REVIEW'} ${esc(friendlyCheckLabel(c.check_name || 'check'))}</span>`;
-      }).join(' ');
-    }
-
-	    function pickHeadlineValue(data) {
-	      if (!data || !Array.isArray(data.sample_rows) || data.sample_rows.length === 0) return null;
-	      const row0 = data.sample_rows[0] || {};
-	      if (Object.prototype.hasOwnProperty.call(row0, 'metric_value')) {
-	        return row0.metric_value;
-      }
-      const cols = Array.isArray(data.columns) ? data.columns : [];
-      if (cols.length === 1) return row0[cols[0]];
-	      const numericCandidate = Object.entries(row0).find(([, v]) => typeof v === 'number');
-	      return numericCandidate ? numericCandidate[1] : null;
-	    }
-
-	    function renderExplainView(turnIndex) {
-	      const turn = state.turns[turnIndex];
-	      if (!turn || !turn.response) {
-	        return '<div class="hint">No trace available for this turn.</div>';
-	      }
-	      const data = turn.response;
-	      const trace = Array.isArray(data.agent_trace) ? data.agent_trace : [];
-	      const maps = buildBlackboardMaps(data.evidence_packets || []);
-	      const autonomy = ((data.data_quality || {}).autonomy || {});
-	      const path = [];
-	      trace.forEach((step) => {
-	        const agent = String((step && step.agent) || 'Agent');
-	        if (!path.length || path[path.length - 1] !== agent) path.push(agent);
-	      });
-	      const flow = path.map((agent, idx) => (
-	        `${idx ? '<span class="path-arrow">→</span>' : ''}<span class="path-node">${esc(agent)}</span>`
-	      )).join('');
-	      const cards = trace.map((step, idx) => {
-	        const agent = String(step.agent || 'Agent');
-	        const role = humanizeToken(step.role || 'step');
-	        const status = String(step.status || 'unknown');
-	        const incoming = (maps.handoffsByTo.get(agent) || []).slice(0, 3);
-	        const incomingArtifacts = (maps.artifactsByConsumer.get(agent) || []).slice(-2);
-	        const outgoing = (maps.handoffsByFrom.get(agent) || []).slice(0, 4);
-	        const incomingText = incoming.length
-	          ? incoming.map((h) => `${h.from} (${humanizeToken(h.artifactType || 'artifact')})`).join(' • ')
-	          : 'No direct handoff inputs.';
-	        const artifactText = incomingArtifacts.length
-	          ? incomingArtifacts.map((a) => `${a.producer}: ${summarizePreview(a.payload_preview || a.summary || '')}`).join(' • ')
-	          : 'No blackboard artifact preview.';
-	        const outgoingText = outgoing.length
-	          ? outgoing.map((h) => `${agent} → ${h.to} (${humanizeToken(h.artifactType || 'artifact')})`).join(' • ')
-	          : 'No downstream handoff.';
-	        return `
-	          <div class="explain-card">
-	            <div class="title">Step ${idx + 1}: ${esc(agent)} • ${esc(role)}</div>
-	            <div class="line"><strong>Status:</strong> ${esc(status)} • ${esc(fmt(step.duration_ms || 0))} ms</div>
-	            <div class="line"><strong>Input received:</strong> ${esc(incomingText)}</div>
-	            <div class="line"><strong>Input context:</strong> ${esc(artifactText)}</div>
-	            <div class="line"><strong>Decision:</strong> ${esc(friendlySummary(step.summary || ''))}</div>
-	            <div class="line"><strong>Output shared:</strong> ${esc(outgoingText)}</div>
-	          </div>
-	        `;
-	      }).join('');
-	      const sqlRationale = autonomy.correction_applied
-	        ? String(autonomy.correction_reason || 'Autonomy selected a better candidate plan.')
-	        : 'Base plan remained selected after audit and autonomy scoring.';
-	      return `
-	        <div class="explain-summary">
-	          <div><strong>Question:</strong> ${esc(turn.goal || '')}</div>
-	          <div style="margin-top:4px;"><strong>Run:</strong> ${esc((data.trace_id || '').slice(0, 12))} • ${esc((data.runtime || {}).mode || 'unknown')} engine • confidence ${esc(fmt(Math.round((data.confidence_score || 0) * 100)))}%</div>
-	        </div>
-	        <div class="explain-flow">
-	          <strong>Decision flow</strong>
-	          <div class="flow-line">${flow || '<span class="hint">No agent path available.</span>'}</div>
-	        </div>
-	        <div class="explain-cards">
-	          ${cards || '<div class="hint">No trace steps were captured.</div>'}
-	        </div>
-	        <div class="explain-summary">
-	          <strong>How final SQL was chosen</strong>
-	          <div style="margin-top:5px;" class="line">${esc(sqlRationale)}</div>
-	          <div class="mono">${esc(data.sql || 'No SQL generated')}</div>
-	        </div>
-	        <div class="explain-summary md-block">
-	          <strong>How final narration was produced</strong>
-	          <div style="margin-top:6px;">${md(data.answer_markdown || '')}</div>
-	        </div>
-	        <details>
-	          <summary>Advanced diagnostics JSON</summary>
-	          <div class="mono json-view">${esc(JSON.stringify(data.data_quality || {}, null, 2))}</div>
-	        </details>
-	      `;
-	    }
-
-	    function openExplainModal(turnIndex) {
-	      if (!els.explainModal || !els.explainBody) return;
-	      els.explainBody.innerHTML = renderExplainView(turnIndex);
-	      els.explainModal.hidden = false;
-	      document.body.style.overflow = 'hidden';
-	    }
-
-	    function closeExplainModal() {
-	      if (!els.explainModal || !els.explainBody) return;
-	      els.explainModal.hidden = true;
-	      els.explainBody.innerHTML = '';
-	      document.body.style.overflow = '';
-	    }
-
-	    function responseCard(turn, turnIndex) {
-	      const data = turn.response;
-	      if (!data) return `<div class="bubble assistant">Thinking...</div>`;
-	      const runtime = data.runtime || {};
-	      const confidencePct = Math.round((data.confidence_score || 0) * 100);
-	      const headline = pickHeadlineValue(data);
-	      const suggestions = (data.suggested_questions || []).slice(0, 4);
-	      const suggestionHtml = suggestions.length
-	        ? `<div class="suggestions">${suggestions.map((q) => `<button class="pill suggest" type="button" data-q="${esc(q)}">${esc(q)}</button>`).join('')}</div>`
-	        : '';
-	      return `
-	        <div class="bubble assistant md-block">${md(data.answer_markdown || '')}</div>
-	        <div class="assistant-meta">
-	          <span>confidence: ${esc(data.confidence || 'unknown')} (${confidencePct}%)</span>
-	          <span>engine: ${esc((runtime.mode || 'unknown').toUpperCase())}</span>
-	          <span>rows: ${esc(fmt(data.row_count || 0))}</span>
-	          <span>time: ${esc(fmt(data.execution_time_ms || 0))} ms</span>
-	          ${headline === null || headline === undefined ? '' : `<span>key result: ${esc(fmt(headline))}</span>`}
-	        </div>
-	        ${suggestionHtml}
-	        <div class="assistant-actions">
-	          <button class="btn ghost explain-btn" type="button" data-turn-index="${esc(turnIndex)}">Explain Yourself</button>
-	        </div>
-	      `;
-	    }
-
-	    function renderThread() {
-	      if (!state.turns.length) {
-	        els.thread.innerHTML = `
-	          <div class="empty-state">
-            Ask a question to start. Try:
-            <br/>• "What kind of data do I have?"
-            <br/>• "Total MT103 transactions count split by month wise and platform wise"
-            <br/>• Then ask a follow-up like "Now only for December 2025."
-          </div>
-        `;
+          </div>`;
         return;
-	      }
+      }
 
-	      els.thread.innerHTML = state.turns.map((turn, idx) => `
-	        <article class="turn">
-	          <div class="turn-head">
-	            <span>Turn ${idx + 1}</span>
-	            <span>${turn.response && turn.response.trace_id ? esc(turn.response.trace_id.slice(0, 12)) : 'pending'}</span>
-	          </div>
-	          <div class="turn-body">
-	            <div class="bubble user">${esc(turn.goal)}</div>
-	            ${responseCard(turn, idx)}
-	          </div>
-	        </article>
-	      `).join('');
+      el.innerHTML = state.turns.map((turn, i) => {
+        let html = `<div class="turn-user"><q>${esc(turn.goal)}</q></div>`;
+        const r = turn.response;
+        if (!r) {
+          html += `<div class="card"><div class="loading-card"><div class="spinner"></div>Analyzing...</div></div>`;
+          return html;
+        }
+        if (!r.success && r.error) {
+          html += `<div class="error-card">${esc(r.error || r.answer_markdown || 'Query failed')}</div>`;
+          return html;
+        }
 
-	      Array.from(els.thread.querySelectorAll('button.suggest')).forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const q = btn.getAttribute('data-q');
-	          els.queryInput.value = q || '';
-	          els.queryInput.focus();
-	        });
-	      });
-	      Array.from(els.thread.querySelectorAll('button.explain-btn')).forEach((btn) => {
-	        btn.addEventListener('click', () => {
-	          const idxRaw = btn.getAttribute('data-turn-index');
-	          const turnIndex = Number(idxRaw);
-	          if (!Number.isFinite(turnIndex)) return;
-	          openExplainModal(turnIndex);
-	        });
-	      });
-	      els.thread.scrollTop = els.thread.scrollHeight;
-	    }
+        const badge = confidenceBadge(r.confidence_score || 0);
+        const answer = md(r.answer_markdown || '');
+        const chart = buildChart(r.columns || [], r.sample_rows || []);
+        const table = buildTable(r.columns || [], r.sample_rows || []);
 
-    async function loadArchitecture() {
-      try {
-        const data = await fetch('/api/assistant/architecture').then((r) => r.json());
-        const flow = (data.pipeline_flow || []).map((line) => line.replace(/^\\d+\\.\\s*/, ''));
-        const guardrails = (data.guardrails || []).map((g) => `<li>${esc(g)}</li>`).join('');
-        const agents = (data.agents || []).map((a) => `
-          <div class="arch-agent">
-            <h4>${esc(a.name)}</h4>
-            <div class="role">${esc(a.role)}</div>
-            <div class="hint">${esc(a.description)}</div>
-            <div class="hint" style="margin-top:4px;">In: ${esc((a.inputs || []).join(', '))}</div>
-            <div class="hint">Out: ${esc((a.outputs || []).join(', '))}</div>
+        const suggestions = (r.suggested_questions || []).slice(0, 3).map(q =>
+          `<div class="suggestion" onclick="askExample(this)">${esc(q)}</div>`
+        ).join('');
+
+        const hasSql = r.sql && r.sql.trim();
+        const hasTrace = r.agent_trace && r.agent_trace.length;
+        const hasChecks = r.sanity_checks && r.sanity_checks.length;
+        const hasInspect = hasSql || hasTrace || hasChecks;
+
+        let inspect = '';
+        if (hasInspect) {
+          inspect += `<div class="inspect-toggle" onclick="toggleInspect(this)"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>Inspect</div>`;
+          inspect += `<div class="inspect-content">`;
+          if (hasSql) inspect += `<div class="inspect-section"><div class="inspect-label">SQL</div><div class="inspect-sql">${esc(r.sql)}</div></div>`;
+          if (hasTrace) inspect += `<div class="inspect-section"><div class="inspect-label">Agent Trace</div>${buildTrace(r.agent_trace)}</div>`;
+          if (hasChecks) inspect += `<div class="inspect-section"><div class="inspect-label">Audit Checks</div>${buildAudit(r.sanity_checks)}</div>`;
+          inspect += `</div>`;
+        }
+
+        const rowCount = r.row_count != null ? `<span class="meta-chip">${fmt(r.row_count)} rows</span><span class="meta-sep"></span>` : '';
+        const execTime = r.execution_time_ms != null ? `<span class="meta-chip">${Math.round(r.execution_time_ms)}ms</span>` : '';
+        const mode = r.runtime && r.runtime.mode ? `<span class="meta-chip">${esc(r.runtime.mode)}</span><span class="meta-sep"></span>` : '';
+
+        html += `<div class="card">
+          <div class="card-body">
+            <div style="margin-bottom:12px">${badge}</div>
+            <div class="card-answer">${answer}</div>
+            ${chart}${table}
+            ${suggestions ? '<div class="suggestions">' + suggestions + '</div>' : ''}
           </div>
-        `).join('');
-
-        els.archContent.innerHTML = `
-          <div class="arch-flow">${flow.map((f) => `<div class="arch-step">${esc(f)}</div>`).join('')}</div>
-          <div class="hint" style="margin-bottom:6px;"><strong>Guardrails:</strong></div>
-          <ul style="margin: 0 0 8px 18px; color: #9eb7d6; font-size: 0.82rem;">${guardrails}</ul>
-          <div class="arch-agents">${agents}</div>
-        `;
-        state.architectureLoaded = true;
-      } catch (err) {
-        els.archContent.innerHTML = `<div class="hint">Failed to load architecture: ${esc(err.message)}</div>`;
-      }
+          <div class="card-meta">${mode}${rowCount}${execTime}</div>
+          ${inspect}
+        </div>`;
+        return html;
+      }).join('');
+      el.scrollTop = el.scrollHeight;
     }
 
-    async function initSystemStatus() {
-      try {
-        const [health, providers] = await Promise.all([
-          fetch('/api/assistant/health').then((r) => r.json()),
-          fetch('/api/assistant/providers').then((r) => r.json())
-        ]);
-        const defaultConn = health.default_connection_id || 'default';
-        els.dbPath.textContent = `${health.db_path} (${defaultConn})`;
-        els.healthState.textContent = health.status;
-        els.semanticState.textContent = health.semantic_ready ? 'ready' : 'not ready';
-        els.recommendedMode.textContent = providers.recommended_mode;
-        els.modeSelect.value = providers.default_mode || 'auto';
-      } catch (err) {
-        els.healthState.textContent = 'unreachable';
-        els.semanticState.textContent = 'unknown';
-      }
+    function toggleInspect(el) {
+      el.classList.toggle('open');
+      const content = el.nextElementSibling;
+      if (content) content.classList.toggle('open');
     }
 
+    function askExample(el) {
+      $('goalInput').value = el.textContent;
+      runQuery();
+    }
+
+    function persistThread() {
+      localStorage.setItem(STORAGE_THREAD, JSON.stringify(state.turns));
+    }
+
+    /* ---- query ---- */
     async function runQuery() {
-      const goal = els.queryInput.value.trim();
-      if (!goal) {
-        setStatus('Enter a question first.');
-        return;
-      }
+      const goal = $('goalInput').value.trim();
+      if (!goal) return;
 
-	      const turn = { goal, response: null };
-	      state.turns.push(turn);
-	      saveState();
-	      renderThread();
+      $('goalInput').value = '';
+      autoResize($('goalInput'));
+      $('runBtn').disabled = true;
 
-      els.runBtn.disabled = true;
-      setStatus('Running agent team...');
-      let timeoutId = null;
+      const turn = { goal, response: null };
+      state.turns.push(turn);
+      renderThread();
+      persistThread();
 
       try {
-        const controller = new AbortController();
-        timeoutId = setTimeout(() => controller.abort(), 120000);
-        const response = await fetch('/api/assistant/query', {
+        const body = {
+          goal,
+          db_connection_id: $('connSelect').value || state.connectionId || undefined,
+          llm_mode: $('modeSelect').value,
+          session_id: state.sessionId,
+          storyteller_mode: $('storytellerToggle').classList.contains('on'),
+          auto_correction: $('correctionToggle').classList.contains('on'),
+          strict_truth: $('truthToggle').classList.contains('on'),
+          max_refinement_rounds: parseInt($('refinementSelect').value),
+          max_candidate_plans: parseInt($('candidateSelect').value),
+          tenant_id: 'public',
+          role: 'analyst'
+        };
+
+        const resp = await fetch('/api/assistant/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            goal,
-            db_connection_id: state.connectionId || 'default',
-            llm_mode: els.modeSelect.value,
-            local_model: els.localModelSelect.value || null,
-            session_id: state.sessionId,
-            storyteller_mode: !!els.storyMode.checked,
-            tenant_id: state.tenantId || 'public',
-            role: 'analyst'
-          })
+          body: JSON.stringify(body)
         });
-        clearTimeout(timeoutId);
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.detail || data.error || 'Query failed');
-        }
+        const data = await resp.json();
         turn.response = data;
-        if (data.runtime && data.runtime.session_id) {
-          state.sessionId = data.runtime.session_id;
-          updateSessionChip();
+      } catch (e) {
+        turn.response = { success: false, error: e.message || 'Network error' };
+      }
+
+      renderThread();
+      persistThread();
+      $('runBtn').disabled = false;
+    }
+
+    /* ---- textarea auto resize ---- */
+    function autoResize(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+    }
+
+    /* ---- settings panel ---- */
+    function openSettings() {
+      $('settingsOverlay').classList.add('open');
+      $('settingsPanel').classList.add('open');
+    }
+    function closeSettings() {
+      $('settingsOverlay').classList.remove('open');
+      $('settingsPanel').classList.remove('open');
+    }
+
+    /* ---- load connections ---- */
+    async function loadConnections() {
+      try {
+        const r = await fetch('/api/assistant/connections');
+        const d = await r.json();
+        const sel = $('connSelect');
+        sel.innerHTML = '<option value="">default</option>';
+        (d.connections || []).forEach(c => {
+          const opt = document.createElement('option');
+          opt.value = c.id;
+          opt.textContent = c.id + (c.is_default ? ' (default)' : '');
+          sel.appendChild(opt);
+        });
+        if (state.connectionId) sel.value = state.connectionId;
+      } catch(e) {}
+    }
+
+    /* ---- health check ---- */
+    async function checkHealth() {
+      try {
+        const r = await fetch('/api/assistant/health');
+        const d = await r.json();
+        const dot = $('healthDot');
+        const line = $('statusLine');
+        if (d.status === 'ok' || d.semantic_ready) {
+          dot.classList.remove('offline');
+          dot.title = 'Connected';
+          line.textContent = ' ready';
+        } else {
+          dot.classList.add('offline');
+          dot.title = 'Degraded';
+          line.textContent = ' degraded';
         }
-        saveState();
-        renderThread();
-        setStatus('Done.');
-      } catch (err) {
-        turn.response = {
-          success: false,
-          answer_markdown: `**Request failed**\\n\\n${err.message}`,
-          confidence: 'uncertain',
-          confidence_score: 0,
-          sanity_checks: [],
-          columns: [],
-          sample_rows: [],
-          runtime: { mode: 'error' },
-          execution_time_ms: 0,
-          row_count: 0
-        };
-        saveState();
-        renderThread();
-        setStatus(`Request failed: ${err.message}`);
-      } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-        els.runBtn.disabled = false;
+      } catch (e) {
+        $('healthDot').classList.add('offline');
+        $('healthDot').title = 'Offline';
+        $('statusLine').textContent = ' offline';
       }
     }
 
-	    function wireEvents() {
-	      if (els.runBtn) els.runBtn.addEventListener('click', runQuery);
-	      if (els.refreshModelsBtn) els.refreshModelsBtn.addEventListener('click', loadLocalModels);
-	      if (els.refreshConnectionsBtn) els.refreshConnectionsBtn.addEventListener('click', loadConnections);
-	      if (els.connectionSelect) els.connectionSelect.addEventListener('change', () => {
-	        state.connectionId = els.connectionSelect.value || 'default';
-	        saveState();
-	        setStatus(`Using connection: ${state.connectionId}`);
-	      });
-	      if (els.localModelSelect) els.localModelSelect.addEventListener('change', async () => {
-	        const model = els.localModelSelect.value;
-	        if (!model) return;
-	        await selectLocalModel(model);
-	      });
-	      if (els.newSessionBtn) els.newSessionBtn.addEventListener('click', () => resetSession(true));
-	      if (els.clearThreadBtn) els.clearThreadBtn.addEventListener('click', async () => {
-	        state.turns = [];
-	        saveState();
-	        renderThread();
-        try {
-          await fetch('/api/assistant/session/clear', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              db_connection_id: state.connectionId || 'default',
-              session_id: state.sessionId,
-              tenant_id: state.tenantId || 'public'
-            })
-          });
-        } catch (err) {
-          // local clear already completed
-	        }
-	        setStatus('Thread cleared in this session.');
-	      });
-	      if (els.toggleArchBtn) els.toggleArchBtn.addEventListener('click', async () => {
-	        const visible = els.architecturePanel.classList.contains('visible');
-	        if (visible) {
-	          els.architecturePanel.classList.remove('visible');
-          els.toggleArchBtn.textContent = 'View Agent Team Map';
-          return;
-        }
-	        if (!state.architectureLoaded) await loadArchitecture();
-	        els.architecturePanel.classList.add('visible');
-	        els.toggleArchBtn.textContent = 'Hide Agent Team Map';
-	      });
-	      if (els.queryInput) els.queryInput.addEventListener('keydown', (e) => {
-	        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) runQuery();
-	      });
-	      if (els.explainCloseBtn) els.explainCloseBtn.addEventListener('click', closeExplainModal);
-	      if (els.explainModal) els.explainModal.addEventListener('click', (e) => {
-	        if (e.target === els.explainModal) closeExplainModal();
-	      });
-	      document.addEventListener('keydown', (e) => {
-	        if (e.key === 'Escape') closeExplainModal();
-	      });
-	    }
+    /* ---- init ---- */
+    function init() {
+      $('settingsBtn').onclick = openSettings;
+      $('settingsClose').onclick = closeSettings;
+      $('settingsOverlay').onclick = closeSettings;
+      $('connSelect').onchange = () => {
+        state.connectionId = $('connSelect').value;
+        localStorage.setItem(STORAGE_CONN, state.connectionId);
+      };
 
-    async function init() {
-      loadState();
-      renderExamples();
+      const ta = $('goalInput');
+      ta.addEventListener('input', () => autoResize(ta));
+      ta.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); runQuery(); }
+      });
+
       renderThread();
-      wireEvents();
-      await Promise.all([initSystemStatus(), loadLocalModels(), loadConnections()]);
-      await Promise.all([loadCorrections(), loadTrustDashboard()]);
-      setStatus('Ready.');
+      loadConnections();
+      checkHealth();
     }
 
     init();
@@ -5100,7 +3371,6 @@ def get_ui_html() -> str:
 </body>
 </html>
 '''
-
 
 app = create_app()
 
