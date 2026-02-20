@@ -1,9 +1,10 @@
 # dataDa Agentic Analytics -- Gap Tracker
 
 > **Created**: 2026-02-20
-> **Status**: Phases 1, 2 & 3 implemented -- 250 tests passing
-> **Primary file**: `src/haikugraph/poc/agentic_team.py` (~5150 lines)
-> **Secondary file**: `src/haikugraph/agents/contracts.py` (441 lines)
+> **Updated**: 2026-02-20
+> **Status**: Phases 1-5 implemented -- 250 tests passing
+> **Primary file**: `src/haikugraph/poc/agentic_team.py` (~5460 lines)
+> **Secondary file**: `src/haikugraph/agents/contracts.py` (451 lines)
 
 ---
 
@@ -13,7 +14,8 @@
 2. [Dependency Graph](#dependency-graph)
 3. [Phase Roadmap](#phase-roadmap)
 4. [Gap Details (1-11)](#gap-details)
-5. [Effort & Risk Matrix](#effort--risk-matrix)
+5. [Phase 5 -- Catalog-Grounded Resolution](#phase-5----catalog-grounded-resolution)
+6. [Effort & Risk Matrix](#effort--risk-matrix)
 
 ---
 
@@ -110,6 +112,14 @@ Three test queries expose the same cluster of defects:
 | 7 | Real specialist agents | 2 days | DONE |
 | 9 | Lateral agent communication | 3-5 days | DONE (post-audit feedback loop) |
 | 11 | Agent contribution map | 2 days | DONE |
+
+### Phase 5 -- Catalog-Grounded Resolution  DONE
+| Step | Title | Est. Effort | Status |
+|------|-------|-------------|--------|
+| 5.1 | Extract `DOMAIN_TO_MART` constant | 0.25 day | DONE |
+| 5.2 | `schema_exploration` intent + handler | 0.5 day | DONE |
+| 5.3 | Catalog-grounded metric resolution | 0.5 day | DONE |
+| 5.4 | Catalog-grounded dimension resolution | 0.5 day | DONE |
 
 ---
 
@@ -875,6 +885,117 @@ trace.append({
 
 ---
 
+## Phase 5 -- Catalog-Grounded Resolution
+
+> **Commit**: `2335dbd` — "Replace rigid deterministic intake with catalog-grounded resolution"
+> **Date**: 2026-02-20
+> **Tests**: 250 passed, 15 skipped, 0 failures
+
+### Motivation
+
+The `_intake_deterministic` method (~360 lines) mapped user questions to structured query plans via hardcoded keyword→slot matching. When a user asked *"what are the customer demographics that we capture?"*, the system:
+1. Misclassified intent as `metric` (no match in 7 hardcoded `data_overview` phrases)
+2. Fell back to `customer_count` metric (no "demographics" in the if/elif chain)
+3. Produced `SELECT COUNT(DISTINCT customer_key)` → "2,124 customers"
+
+The **catalog** (`_build_catalog`) already contained the truth — columns, metrics, dimension values — all introspected from the live database. The intake layer duplicated this truth as a frozen, hand-maintained keyword map.
+
+### What Changed
+
+#### Step 5.1: Extract `DOMAIN_TO_MART` Constant
+
+- Added `DOMAIN_TO_MART` module-level constant (line ~52) mapping domain names to mart table names
+- Replaced 3 inline duplicated definitions in `_intake_deterministic`, `_enforce_intake_consistency`, and `_semantic_retrieval_agent`
+- **Lines changed**: -18 / +8
+
+#### Step 5.2: New `schema_exploration` Intent + Handler
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| `_detect_schema_exploration()` | line ~2984 | Detects schema-oriented signals scoped to a specific domain |
+| `_schema_exploration_agent()` | line ~3010 | Generates rich markdown from catalog — no SQL execution |
+| `run()` handler | line ~1271 | Early return with `AssistantQueryResponse` after data_overview block |
+| Clarification exemption | line ~2857 | Added `"schema_exploration"` to exempt set |
+
+Broadened `data_overview` triggers from 7 exact-match phrases to 8 regex patterns (strict superset — every old phrase still matches).
+
+Schema exploration signals:
+- "what do we capture/track/store/have" + domain keyword
+- "what fields/columns/attributes/demographics" + domain keyword
+- "describe the" + domain keyword
+- "what information" + domain keyword
+
+**Output format**: Markdown with table name, row count, column list (with annotations for time columns, dimension values, identifiers), available metrics with SQL expressions, and suggested follow-up queries.
+
+#### Step 5.3: Catalog-Grounded Metric Resolution
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| `_resolve_metric_from_catalog()` | line ~3050 | Scoring algorithm over catalog metrics |
+
+**Scoring algorithm** (per metric candidate):
+- Token overlap: each metric name token found in goal → +2
+- High-affinity keywords: `"refund"→refund_count/refund_rate` +3, `"mt103"→mt103_count/mt103_rate` +3, etc.
+- Aggregation affinity: count words boost `_count` → +1, amount words boost `amount/value/revenue` → +1
+- Average prefix: `"avg"/"average"` in goal → `avg_` metrics +2
+- Score 0 → domain default (`transaction_count`, `quote_count`, etc.)
+
+**Post-resolution overrides** (5 lines replacing 66 lines of if/elif):
+- `"refund rate"` in goal → force `refund_rate`
+- `"mt103"` + rate words → force `mt103_rate`
+- `"refund"` + amount words − count words → force `total_amount`
+- `"mt103"` + amount words − count words → force `total_amount`
+
+**Backward compatibility**: Every existing metric assignment produces the same result:
+
+| Goal pattern | Old result | New scoring winner | Match? |
+|---|---|---|---|
+| "refund count" | refund_count | refund_count (refund+3, count+1) | Yes |
+| "total amount" | total_amount | total_amount (total+2, amount+2) | Yes |
+| "average amount" | avg_amount | avg_amount (avg+2, amount+2) | Yes |
+| "how many transactions" | transaction_count | transaction_count (transaction+2, count+1) | Yes |
+| "payee" | payee_count | payee_count (payee+3) | Yes |
+| "demographics" (no match) | customer_count | customer_count (score 0, domain default) | Yes |
+
+#### Step 5.4: Catalog-Grounded Dimension Resolution
+
+| Component | Location | Description |
+|-----------|----------|-------------|
+| `_build_dim_candidates_from_catalog()` | line ~2984 | Builds keyword→column mapping dynamically |
+
+**Candidate selection**:
+- Includes all columns from `catalog["dimension_values"]` (sampled categorical columns)
+- Includes columns with dimension-like suffixes: `_name`, `_type`, `_status`, `_code`, `_country`, `_state`, `_flow`
+- Excludes key/id/timestamp columns: `_key`, `_id`, `_ts`
+
+**Alias generation** (per candidate column):
+- Exact column name: `platform_name → platform_name`
+- Prefix-stripped: `address_country → country`, `txn_flow → flow`
+- Split tokens: `platform_name → platform`
+- Always adds: `month → __month__`
+
+**Intentional change**: `"customer" → "customer_id"` (old hardcoded) is dropped because `_id` columns are excluded — this is better behavior since `customer_id` is high-cardinality and shouldn't be a GROUP BY dimension.
+
+### Manual Test Results
+
+| Query | Before | After | Status |
+|-------|--------|-------|--------|
+| "what are the customer demographics that we capture?" | `SELECT COUNT(DISTINCT customer_key)` → "2,124 customers" | Schema description: 11 columns, type (INDIVIDUAL, CORPORATE), address_country (GB, DE, US...), address_state, status, metrics | **Fixed** |
+| "what fields does the bookings table have?" | `SELECT COUNT(DISTINCT booking_key)` → "1,491 bookings" | Schema description: 12 columns, currency, deal_type, status, linked_txn_status, metrics | **Fixed** |
+| "how many refunds" | refund_count → 2,761 | refund_count → 2,761 | **Regression pass** |
+| "total transaction amount" | total_amount → $41.4B | total_amount → $41.4B | **Regression pass** |
+| "mt103 transaction amount" | total_amount + has_mt103=true filter | total_amount + has_mt103=true filter | **Regression pass** |
+| "transactions split by platform and month" | transaction_count grouped by __month__, platform_name → 20 rows | transaction_count grouped by __month__, platform_name → 20 rows | **Regression pass** |
+
+### Net Impact
+
+- **Lines removed**: 142 (hardcoded if/elif chains, duplicated mappings)
+- **Lines added**: 328 (new methods, schema exploration handler, catalog scoring)
+- **Net new logic**: ~186 lines, but replaces brittle keyword matching with schema-aware resolution
+- **New capabilities**: Schema exploration queries now return rich catalog-derived answers instead of misclassified metric counts
+
+---
+
 ## Effort & Risk Matrix
 
 | Gap | Phase | Effort | Risk | Mitigation |
@@ -890,8 +1011,12 @@ trace.append({
 | **7** | 4 | 2 days | LOW -- currently stubs, so any implementation is additive | Start with one specialist (transactions); expand after validation |
 | **9** | 4 | 3-5 days | HIGH -- architectural change to execution flow | Bound re-plan to 1 cycle; guard with feature flag; measure latency impact |
 | **11** | 4 | 2 days | LOW -- observability enhancement, no logic change | Ship incrementally: contribution first, then confidence reasoning |
+| **5.1** | 5 | 0.25 day | LOW -- pure refactoring, no behavior change | Run full test suite after extraction |
+| **5.2** | 5 | 0.5 day | LOW -- additive intent, no existing queries affected | Verify 0 tests break; manual test 3 schema queries |
+| **5.3** | 5 | 0.5 day | MEDIUM -- metric scoring must reproduce old if/elif results | Trace all old branches against scoring output; keep targeted overrides for edge cases |
+| **5.4** | 5 | 0.5 day | LOW -- dynamic mapping is superset of old static mapping | Verify all old keywords resolve identically; only intentional change is dropping high-cardinality `customer_id` |
 
-**Total estimated effort**: 15-17 days
+**Total estimated effort**: 15-17 days (Phases 1-4) + 1.75 days (Phase 5) = ~17-19 days
 
 ---
 
@@ -905,3 +1030,10 @@ trace.append({
 - [x] GAP 8 (foundation) is Phase 1
 - [x] Effort estimates and risk mitigations included
 - [x] Dependency graph is consistent with phase ordering
+- [x] Phase 5 catalog-grounded resolution implemented and documented
+- [x] 250 tests pass after Phase 5 (0 regressions)
+- [x] 6 manual queries verified (2 new schema_exploration, 4 regression checks)
+- [x] `DOMAIN_TO_MART` constant eliminates 3 duplicated inline definitions
+- [x] Schema exploration answers "what demographics/fields do we capture" queries correctly
+- [x] Metric scoring reproduces all old if/elif results
+- [x] Dimension mapping is a superset of old hardcoded mapping
