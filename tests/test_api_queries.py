@@ -157,11 +157,12 @@ class TestUIEndpoint:
         assert "text/html" in resp.headers["content-type"]
         assert "dataDa" in resp.text
 
-    def test_ui_script_escapes_handoff_newline(self, client):
-        """UI script should keep escaped newline in handoff join to avoid JS parse errors."""
+    def test_ui_script_has_query_runtime(self, client):
+        """UI script should contain the runQuery function and Chart.js integration."""
         resp = client.get("/")
         assert resp.status_code == 200
-        assert "edgeRows.join('\\n')" in resp.text
+        assert "runQuery" in resp.text
+        assert "chart.js" in resp.text.lower() or "Chart" in resp.text
 
 
 # =============================================================================

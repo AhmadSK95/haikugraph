@@ -26,6 +26,7 @@ from haikugraph.agents.contracts import (
     EvidenceItem,
     SanityCheck,
 )
+from haikugraph.agents.stats_agent import run_stats_analysis
 from haikugraph.llm.router import call_llm
 from haikugraph.poc.autonomy import AutonomyConfig, AgentMemoryStore
 from haikugraph.sql.safe_executor import SafeSQLExecutor
@@ -1711,6 +1712,36 @@ class AgenticAnalyticsTeam:
                     score=confidence_score,
                 )
 
+            # ── Statistical analysis ──────────────────────────────
+            stats_dict: dict[str, Any] = {}
+            if execution["success"] and execution.get("sample_rows"):
+                try:
+                    import pandas as _pd
+
+                    stats_df = _pd.DataFrame(execution["sample_rows"])
+                    if not stats_df.empty:
+                        stats_result = run_stats_analysis(stats_df)
+                        stats_dict = stats_result.to_dict()
+                        trace.append(
+                            {
+                                "agent": "StatsAgent",
+                                "role": "statistical_analysis",
+                                "status": "success",
+                                "duration_ms": 0,
+                                "summary": stats_result.summary,
+                            }
+                        )
+                except Exception as stats_exc:
+                    trace.append(
+                        {
+                            "agent": "StatsAgent",
+                            "role": "statistical_analysis",
+                            "status": "warning",
+                            "duration_ms": 0,
+                            "summary": f"Stats analysis skipped: {stats_exc}",
+                        }
+                    )
+
             return AssistantQueryResponse(
                 success=execution["success"],
                 answer_markdown=narration["answer_markdown"],
@@ -1752,6 +1783,7 @@ class AgenticAnalyticsTeam:
                     },
                     "blackboard": {"artifact_count": len(blackboard), "edges": self._blackboard_edges(blackboard)},
                 },
+                stats_analysis=stats_dict,
                 suggested_questions=narration.get("suggested_questions", []),
             )
         except Exception as exc:
