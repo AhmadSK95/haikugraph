@@ -1345,6 +1345,7 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
             reason=f"ollama unavailable: {providers.checks['ollama'].reason}",
             intent_model=None,
             narrator_model=None,
+            fallback_warning=f"LLM mode 'local' requested but Ollama unavailable ({providers.checks['ollama'].reason}). Running in deterministic mode.",
         )
 
     if mode == LLMMode.OPENAI:
@@ -1366,6 +1367,7 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
             reason=f"openai unavailable: {providers.checks['openai'].reason}",
             intent_model=None,
             narrator_model=None,
+            fallback_warning=f"LLM mode 'openai' requested but OpenAI unavailable ({providers.checks['openai'].reason}). Running in deterministic mode.",
         )
 
     # auto mode
@@ -1398,6 +1400,7 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
         reason="no llm provider available",
         intent_model=None,
         narrator_model=None,
+        fallback_warning="LLM mode 'auto' requested but no provider available. Running in deterministic mode.",
     )
 
 

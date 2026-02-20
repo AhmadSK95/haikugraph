@@ -57,6 +57,50 @@ DOMAIN_TO_MART: dict[str, str] = {
     "documents": "datada_document_chunks",
 }
 
+# ── GAP 14: Well-defined JOIN paths between known marts ──────────────────
+JOIN_PATHS: dict[tuple[str, str], dict[str, Any]] = {
+    ("datada_mart_transactions", "datada_dim_customers"): {
+        "type": "LEFT JOIN",
+        "on": "t.customer_key = c.customer_key",
+        "aliases": ("t", "c"),
+    },
+    ("datada_dim_customers", "datada_mart_transactions"): {
+        "type": "LEFT JOIN",
+        "on": "c.customer_key = t.customer_key",
+        "aliases": ("c", "t"),
+    },
+    ("datada_mart_transactions", "datada_mart_quotes"): {
+        "type": "LEFT JOIN",
+        "on": "t.quote_id = q.quote_id",
+        "aliases": ("t", "q"),
+    },
+    ("datada_mart_quotes", "datada_mart_transactions"): {
+        "type": "LEFT JOIN",
+        "on": "q.quote_id = t.quote_id",
+        "aliases": ("q", "t"),
+    },
+    ("datada_mart_quotes", "datada_dim_customers"): {
+        "type": "LEFT JOIN",
+        "on": "q.customer_key = c.customer_key",
+        "aliases": ("q", "c"),
+    },
+    ("datada_dim_customers", "datada_mart_quotes"): {
+        "type": "LEFT JOIN",
+        "on": "c.customer_key = q.customer_key",
+        "aliases": ("c", "q"),
+    },
+    ("datada_mart_bookings", "datada_dim_customers"): {
+        "type": "LEFT JOIN",
+        "on": "b.customer_key = c.customer_key",
+        "aliases": ("b", "c"),
+    },
+    ("datada_dim_customers", "datada_mart_bookings"): {
+        "type": "LEFT JOIN",
+        "on": "c.customer_key = b.customer_key",
+        "aliases": ("c", "b"),
+    },
+}
+
 
 def _q(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
@@ -128,6 +172,7 @@ class RuntimeSelection:
     reason: str
     intent_model: str | None = None
     narrator_model: str | None = None
+    fallback_warning: str | None = None
 
 
 class SemanticLayerManager:
@@ -896,6 +941,8 @@ class AgenticAnalyticsTeam:
         history = conversation_context or []
         autonomy_cfg = autonomy or AutonomyConfig()
         self._pipeline_warnings: list[str] = []
+        if runtime.fallback_warning:
+            self._pipeline_warnings.append(runtime.fallback_warning)
 
         try:
             effective_goal = self._run_agent(
@@ -990,6 +1037,13 @@ class AgenticAnalyticsTeam:
                 payload=intake,
                 consumed_by=["SemanticRetrievalAgent", "GovernanceAgent"],
             )
+            # ── GAP 13: Surface multi-domain detection ──────────────────
+            if intake.get("secondary_domains"):
+                self._pipeline_warnings.append(
+                    f"Multiple data domains detected: {', '.join(intake['domains_detected'])}. "
+                    f"Primary domain '{intake['domain']}' used; secondary domains "
+                    f"({', '.join(intake['secondary_domains'])}) may require cross-domain JOINs."
+                )
             clarification = self._run_agent(
                 trace,
                 "ClarificationAgent",
@@ -1537,6 +1591,7 @@ class AgenticAnalyticsTeam:
                 intake,
                 retrieval,
                 catalog,
+                runtime,
             )
             self._blackboard_post(
                 blackboard,
@@ -1638,6 +1693,7 @@ class AgenticAnalyticsTeam:
                 plan,
                 query_plan,
                 execution,
+                runtime,
             )
             self._blackboard_post(
                 blackboard,
@@ -1665,6 +1721,7 @@ class AgenticAnalyticsTeam:
                     enriched_intake,
                     retrieval,
                     catalog,
+                    runtime,
                 )
                 replan_qp = self._run_agent(
                     trace,
@@ -1689,6 +1746,7 @@ class AgenticAnalyticsTeam:
                     replan,
                     replan_qp,
                     replan_exec,
+                    runtime,
                 )
                 replan_score = float(replan_audit.get("score", 0.0))
                 if replan_score > audit_score:
@@ -2161,17 +2219,105 @@ class AgenticAnalyticsTeam:
         runtime: RuntimeSelection,
         catalog: dict[str, Any],
     ) -> dict[str, Any]:
-        return {
-            "mission": goal,
-            "runtime_mode": runtime.mode,
-            "specialists": [
-                "transactions",
-                "customers",
-                "revenue",
-                "risk",
-            ],
-            "available_marts": list(catalog.get("marts", {}).keys()),
+        result = self._chief_analyst_deterministic(goal, catalog)
+        result["mission"] = goal
+        result["runtime_mode"] = runtime.mode
+        result["available_marts"] = list(catalog.get("marts", {}).keys())
+
+        if runtime.use_llm and runtime.provider:
+            llm_result = self._chief_analyst_with_llm(goal, runtime, catalog, result)
+            if llm_result:
+                result.update(llm_result)
+        return result
+
+    def _chief_analyst_deterministic(
+        self,
+        goal: str,
+        catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        lower = goal.lower()
+        domain_keywords = {
+            "transactions": ["transaction", "payment", "transfer", "mt103", "refund", "swift"],
+            "customers": ["customer", "payee", "beneficiary", "university", "address"],
+            "quotes": ["quote", "forex", "exchange", "markup", "spread", "charge"],
+            "bookings": ["booking", "booked", "deal", "value date"],
         }
+        detected_domains: list[str] = []
+        for domain, keywords in domain_keywords.items():
+            if any(kw in lower for kw in keywords):
+                detected_domains.append(domain)
+        if not detected_domains:
+            detected_domains = ["transactions"]
+
+        priority = "normal"
+        if any(kw in lower for kw in ["urgent", "critical", "asap", "immediately"]):
+            priority = "high"
+        elif any(kw in lower for kw in ["when you can", "low priority", "nice to have"]):
+            priority = "low"
+
+        multi_domain_hint = len(detected_domains) > 1
+        specialists = ["transactions", "customers", "revenue", "risk"]
+
+        analysis_type = "metric"
+        if any(kw in lower for kw in ["compare", " vs ", "versus"]):
+            analysis_type = "comparison"
+        elif any(kw in lower for kw in ["trend", "over time", "historical"]):
+            analysis_type = "trend"
+        elif any(kw in lower for kw in ["top ", "rank", "best", "worst"]):
+            analysis_type = "ranking"
+        elif any(kw in lower for kw in ["breakdown", "by ", "per ", "split"]):
+            analysis_type = "grouped"
+
+        return {
+            "specialists": specialists,
+            "detected_domains": detected_domains,
+            "primary_domain": detected_domains[0],
+            "multi_domain_hint": multi_domain_hint,
+            "priority": priority,
+            "analysis_type": analysis_type,
+        }
+
+    def _chief_analyst_with_llm(
+        self,
+        goal: str,
+        runtime: RuntimeSelection,
+        catalog: dict[str, Any],
+        deterministic_result: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        available_marts = list(catalog.get("marts", {}).keys())
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are the Chief Analyst agent. Analyze the user's goal and return JSON with keys: "
+                    "detected_domains (list), analysis_type (string), specialists (list), reasoning (string). "
+                    f"Available marts: {available_marts}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Goal: {goal}\nDeterministic analysis: {json.dumps(deterministic_result)}\nRefine if needed. JSON only.",
+            },
+        ]
+        try:
+            raw = call_llm(
+                messages,
+                role="intent",
+                provider=runtime.provider,
+                model=runtime.intent_model,
+                timeout=20,
+            )
+            parsed = _extract_json_payload(raw)
+            if parsed and isinstance(parsed.get("detected_domains"), list):
+                return {"_llm_chief_reasoning": parsed.get("reasoning", ""), **{
+                    k: v for k, v in parsed.items()
+                    if k in ("detected_domains", "analysis_type", "specialists")
+                }}
+        except Exception as exc:
+            self._pipeline_warnings.append(
+                f"Chief analyst LLM enhancement failed ({type(exc).__name__}); using deterministic analysis."
+            )
+        return None
 
     def _resolve_contextual_goal(
         self,
@@ -3023,7 +3169,10 @@ class AgenticAnalyticsTeam:
                 model=runtime.intent_model,
                 timeout=30,
             )
-        except Exception:
+        except Exception as exc:
+            self._pipeline_warnings.append(
+                f"LLM intake refinement failed ({type(exc).__name__}); using deterministic parse."
+            )
             return None
         return _extract_json_payload(raw)
 
@@ -3308,6 +3457,13 @@ class AgenticAnalyticsTeam:
             intent = "grouped_metric"
         elif any(k in lower for k in ["list", "show rows", "display rows", "show me all"]):
             intent = "lookup"
+        # ── GAP 20: Complex analytical patterns ──────────────────
+        elif any(k in lower for k in ["trend", "over time", "moving average"]):
+            intent = "trend_analysis"
+        elif any(k in lower for k in ["percentile", "median", "p90", "p95"]):
+            intent = "percentile"
+        elif any(k in lower for k in ["top", "bottom", "rank"]) and " by " in lower:
+            intent = "ranked_grouped"
 
         domain = "transactions"
         if any(
@@ -3514,6 +3670,23 @@ class AgenticAnalyticsTeam:
             elif has_refund and ("with refund" in lower or "refund only" in lower or has_amount_words):
                 add_value_filter("has_refund", "true")
 
+        # ── GAP 13: Multi-domain detection ──────────────────
+        domain_keyword_lists = {
+            "transactions": ["transaction", "payment", "transfer", "mt103", "refund", "swift"],
+            "quotes": ["quote", "forex", "exchange rate", "amount to be paid", "markup", "charge", "spread"],
+            "bookings": ["booking", "booked", "deal type", "value date"],
+            "customers": ["customer", "payee", "university", "address", "beneficiary"],
+        }
+        domains_detected: list[str] = []
+        for d, keywords in domain_keyword_lists.items():
+            if any(kw in lower for kw in keywords):
+                domains_detected.append(d)
+        if not domains_detected:
+            domains_detected = [domain]
+        elif domain not in domains_detected:
+            domains_detected.insert(0, domain)
+        secondary_domains = [d for d in domains_detected if d != domain]
+
         return {
             "goal": g,
             "intent": intent,
@@ -3524,6 +3697,8 @@ class AgenticAnalyticsTeam:
             "top_n": top_n,
             "time_filter": time_filter,
             "value_filters": value_filters,
+            "domains_detected": domains_detected,
+            "secondary_domains": secondary_domains,
         }
 
     def _enforce_intake_consistency(
@@ -3978,6 +4153,7 @@ class AgenticAnalyticsTeam:
         intake: dict[str, Any],
         retrieval: dict[str, Any],
         catalog: dict[str, Any],
+        runtime: RuntimeSelection | None = None,
     ) -> dict[str, Any]:
         metric_expr = retrieval["metrics"].get(intake["metric"])
         if metric_expr is None:
@@ -4033,7 +4209,7 @@ class AgenticAnalyticsTeam:
                     intake["metric"] = "total_amount"
                     metric_expr = retrieval["metrics"].get("total_amount", metric_expr)
 
-        return {
+        deterministic_plan = {
             "goal": intake.get("goal", ""),
             "intent": intake["intent"],
             "table": retrieval["table"],
@@ -4055,6 +4231,66 @@ class AgenticAnalyticsTeam:
             ),
             "row_count_hint": retrieval["row_count"],
         }
+
+        if runtime and runtime.use_llm and runtime.provider:
+            llm_refinement = self._planning_agent_with_llm(
+                deterministic_plan, retrieval, catalog, runtime
+            )
+            if llm_refinement:
+                deterministic_plan["_llm_planning_reasoning"] = llm_refinement.get("reasoning", "")
+                # Apply LLM suggestions only if they reference valid catalog entries
+                if llm_refinement.get("metric") and llm_refinement["metric"] in retrieval["metrics"]:
+                    deterministic_plan["metric"] = llm_refinement["metric"]
+                    deterministic_plan["metric_expr"] = retrieval["metrics"][llm_refinement["metric"]]
+                if llm_refinement.get("dimensions") and isinstance(llm_refinement["dimensions"], list):
+                    valid_dims = [
+                        d for d in llm_refinement["dimensions"]
+                        if d in retrieval.get("columns", []) or d == "__month__"
+                    ]
+                    if valid_dims:
+                        deterministic_plan["dimensions"] = valid_dims[:MAX_DIMENSIONS]
+                        deterministic_plan["dimension"] = valid_dims[0]
+
+        return deterministic_plan
+
+    def _planning_agent_with_llm(
+        self,
+        plan: dict[str, Any],
+        retrieval: dict[str, Any],
+        catalog: dict[str, Any],
+        runtime: RuntimeSelection,
+    ) -> dict[str, Any] | None:
+        """Use LLM to evaluate and optionally refine the deterministic plan."""
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are PlanningAgent. Evaluate the query plan and suggest refinements. "
+                    "Return JSON with keys: metric (string or null), dimensions (list or null), "
+                    "reasoning (string). Only suggest changes if the current plan seems misaligned "
+                    f"with the goal. Available metrics: {list(retrieval['metrics'].keys())}. "
+                    f"Available columns: {retrieval.get('columns', [])}"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Goal: {plan.get('goal', '')}\nCurrent plan: {json.dumps({k: v for k, v in plan.items() if k != 'available_columns'})}\nJSON only.",
+            },
+        ]
+        try:
+            raw = call_llm(
+                messages,
+                role="intent",
+                provider=runtime.provider,
+                model=runtime.intent_model,
+                timeout=20,
+            )
+            return _extract_json_payload(raw)
+        except Exception as exc:
+            self._pipeline_warnings.append(
+                f"Planning agent LLM refinement failed ({type(exc).__name__}); using deterministic plan."
+            )
+        return None
 
     def _autonomous_refinement_agent(
         self,
@@ -4483,6 +4719,7 @@ class AgenticAnalyticsTeam:
         plan: dict[str, Any],
         execution: dict[str, Any],
         audit: dict[str, Any],
+        runtime: RuntimeSelection | None = None,
     ) -> dict[str, Any]:
         audit_base = float(audit.get("score", 0.0))
         execution_bonus = 0.04 if execution.get("success") else 0.0
@@ -4516,8 +4753,25 @@ class AgenticAnalyticsTeam:
             - goal_miss_penalty
             - latency_penalty
         )
-        total = max(0.0, min(1.0, raw_total))
-        return {
+        deterministic_total = max(0.0, min(1.0, raw_total))
+
+        # ── GAP 21: LLM-enhanced candidate scoring ──────────────────
+        llm_alignment_score = None
+        if runtime and runtime.use_llm and runtime.provider:
+            llm_score_result = self._candidate_score_with_llm(goal, plan, execution, runtime)
+            if llm_score_result is not None:
+                llm_alignment_score = max(0.0, min(1.0, float(llm_score_result)))
+                # Blend: 70% deterministic + 30% LLM alignment
+                total = max(
+                    deterministic_total,  # deterministic as floor
+                    0.7 * deterministic_total + 0.3 * llm_alignment_score,
+                )
+            else:
+                total = deterministic_total
+        else:
+            total = deterministic_total
+
+        result = {
             "audit_base": round(audit_base, 4),
             "execution_bonus": round(execution_bonus, 4),
             "non_empty_bonus": round(non_empty_bonus, 4),
@@ -4527,6 +4781,54 @@ class AgenticAnalyticsTeam:
             "goal_term_miss_count": len(misses),
             "total": round(total, 4),
         }
+        if llm_alignment_score is not None:
+            result["llm_alignment_score"] = round(llm_alignment_score, 4)
+            result["deterministic_total"] = round(deterministic_total, 4)
+        return result
+
+    def _candidate_score_with_llm(
+        self,
+        goal: str,
+        plan: dict[str, Any],
+        execution: dict[str, Any],
+        runtime: RuntimeSelection,
+    ) -> float | None:
+        """Use LLM to score goal-plan alignment (0.0 to 1.0)."""
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Score how well the query plan aligns with the user's goal. "
+                    "Return JSON with key: alignment_score (float 0.0 to 1.0)."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Goal: {goal}\n"
+                    f"Metric: {plan.get('metric')}, Table: {plan.get('table')}\n"
+                    f"Dimensions: {plan.get('dimensions')}\n"
+                    f"Execution success: {execution.get('success')}, rows: {execution.get('row_count')}\n"
+                    "JSON only."
+                ),
+            },
+        ]
+        try:
+            raw = call_llm(
+                messages,
+                role="intent",
+                provider=runtime.provider,
+                model=runtime.intent_model,
+                timeout=15,
+            )
+            parsed = _extract_json_payload(raw)
+            if parsed and "alignment_score" in parsed:
+                return float(parsed["alignment_score"])
+        except Exception as exc:
+            self._pipeline_warnings.append(
+                f"Candidate scoring LLM enhancement failed ({type(exc).__name__}); using deterministic score."
+            )
+        return None
 
     def _candidate_score(
         self,
@@ -4614,6 +4916,30 @@ class AgenticAnalyticsTeam:
                     }
                 )
         return edges
+
+    def _blackboard_query(
+        self,
+        blackboard: list[dict[str, Any]],
+        *,
+        producer: str | None = None,
+        artifact_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query blackboard entries by producer and/or artifact_type."""
+        return [
+            e
+            for e in blackboard
+            if (not producer or e.get("producer") == producer)
+            and (not artifact_type or e.get("artifact_type") == artifact_type)
+        ]
+
+    def _blackboard_latest(
+        self,
+        blackboard: list[dict[str, Any]],
+        artifact_type: str,
+    ) -> dict[str, Any] | None:
+        """Return the most recent blackboard entry of a given artifact_type."""
+        matches = self._blackboard_query(blackboard, artifact_type=artifact_type)
+        return matches[-1] if matches else None
 
     def _toolsmith_probe_findings(
         self,
@@ -4779,14 +5105,33 @@ class AgenticAnalyticsTeam:
             return {"allowed": False, "reason": "Destructive operations are blocked."}
         return {"allowed": True, "reason": "ok"}
 
+    def _apply_specialist_guidance(
+        self,
+        plan: dict[str, Any],
+        specialist_findings: list[dict[str, Any]],
+    ) -> None:
+        """Extract and apply specialist notes/warnings to the plan."""
+        guidance_notes: list[str] = []
+        for findings in specialist_findings:
+            if not isinstance(findings, dict):
+                continue
+            notes = findings.get("notes", [])
+            if isinstance(notes, list):
+                guidance_notes.extend(notes)
+            warnings = findings.get("warnings", [])
+            if isinstance(warnings, list):
+                for w in warnings:
+                    if w not in self._pipeline_warnings:
+                        self._pipeline_warnings.append(w)
+        if guidance_notes:
+            plan["_specialist_guidance"] = guidance_notes
+
     def _query_engine_agent(
         self,
         plan: dict[str, Any],
         specialist_findings: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        # Specialist findings are now used upstream for warnings; notes reserved
-        # for future SQL-enrichment integration.
-        _ = specialist_findings
+        self._apply_specialist_guidance(plan, specialist_findings)
 
         table = plan["table"]
         metric_expr = plan["metric_expr"]
@@ -4824,12 +5169,134 @@ class AgenticAnalyticsTeam:
                 f"FROM {table} WHERE {where_clause} "
                 f"GROUP BY {group_by} ORDER BY {', '.join(order_parts)} LIMIT {plan['top_n']}"
             )
+        # ── GAP 20: Complex analytical patterns ──────────────────
+        elif intent == "trend_analysis" and time_col:
+            sql = (
+                f"SELECT DATE_TRUNC('month', {time_col}) AS time_bucket, "
+                f"{metric_expr} AS metric_value, "
+                f"AVG({metric_expr}) OVER (ORDER BY DATE_TRUNC('month', {time_col}) "
+                f"ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS moving_avg "
+                f"FROM {table} WHERE {where_clause} AND {time_col} IS NOT NULL "
+                f"GROUP BY 1 ORDER BY 1"
+            )
+        elif intent == "percentile":
+            goal_lower = str(plan.get("goal", "")).lower()
+            if "p95" in goal_lower or "95th" in goal_lower:
+                pct = 0.95
+            elif "p90" in goal_lower or "90th" in goal_lower:
+                pct = 0.90
+            elif "median" in goal_lower or "p50" in goal_lower:
+                pct = 0.50
+            else:
+                pct = 0.50  # default to median
+            # Extract the column from metric_expr for PERCENTILE_CONT
+            # metric_expr is typically like "SUM(amount)" or "COUNT(*)"
+            # For percentile, we want the raw column
+            metric_name = plan.get("metric", "")
+            raw_col = metric_name.replace("total_", "").replace("average_", "")
+            # Try to find the actual column
+            available = plan.get("available_columns", [])
+            pct_col = None
+            for c in available:
+                if raw_col in c and c not in ("customer_key",):
+                    pct_col = c
+                    break
+            if pct_col:
+                sql = (
+                    f"SELECT PERCENTILE_CONT({pct}) WITHIN GROUP (ORDER BY {_q(pct_col)}) AS percentile_value "
+                    f"FROM {table} WHERE {where_clause}"
+                )
+            else:
+                sql = f"SELECT {metric_expr} AS metric_value FROM {table} WHERE {where_clause}"
+        elif intent == "ranked_grouped":
+            dims = plan.get("dimensions") or [plan.get("dimension")]
+            dims = [d for d in dims if d]
+            if dims:
+                dim = dims[0]
+                if dim == "__month__" and time_col:
+                    dim_expr = f"DATE_TRUNC('month', {time_col})"
+                    dim_alias = "month_bucket"
+                else:
+                    dim_expr = _q(dim)
+                    dim_alias = dim
+                sql = (
+                    f"SELECT {dim_expr} AS {_q(dim_alias)}, {metric_expr} AS metric_value, "
+                    f"RANK() OVER (ORDER BY {metric_expr} DESC) AS rank "
+                    f"FROM {table} WHERE {where_clause} "
+                    f"GROUP BY 1 ORDER BY 2 DESC LIMIT {plan['top_n']}"
+                )
+            else:
+                sql = f"SELECT {metric_expr} AS metric_value FROM {table} WHERE {where_clause}"
         elif intent == "lookup":
             sql = f"SELECT * FROM {table} WHERE {where_clause} LIMIT {plan['top_n']}"
         else:
             sql = f"SELECT {metric_expr} AS metric_value FROM {table} WHERE {where_clause}"
 
+        # ── GAP 14: Check for multi-table JOIN opportunity ──────────────────
+        secondary_domains = plan.get("secondary_domains", [])
+        if secondary_domains and intent not in ("comparison", "lookup"):
+            for sec_domain in secondary_domains:
+                sec_table = DOMAIN_TO_MART.get(sec_domain)
+                if not sec_table:
+                    continue
+                join_key = (table, sec_table)
+                join_path = JOIN_PATHS.get(join_key)
+                if join_path:
+                    join_sql = self._build_join_query(
+                        plan, table, sec_table, join_path, metric_expr, where_clause,
+                    )
+                    if join_sql:
+                        sql = join_sql
+                        break
+
         return {"sql": sql, "table": table}
+
+    def _build_join_query(
+        self,
+        plan: dict[str, Any],
+        primary_table: str,
+        secondary_table: str,
+        join_path: dict[str, Any],
+        metric_expr: str,
+        where_clause: str,
+    ) -> str | None:
+        """Generate a JOIN query between two tables using a known join path."""
+        alias1, alias2 = join_path["aliases"]
+        join_type = join_path["type"]
+        on_clause = join_path["on"]
+
+        dims = plan.get("dimensions") or []
+        time_col = plan.get("time_column")
+        intent = plan.get("intent", "metric")
+
+        # Prefix metric_expr with primary alias
+        prefixed_metric = f"{alias1}.{metric_expr.split('(')[-1].rstrip(')')}" if "(" not in metric_expr else metric_expr
+        if "(" in metric_expr:
+            prefixed_metric = metric_expr  # keep aggregation functions as-is
+
+        from_clause = f"{primary_table} {alias1} {join_type} {secondary_table} {alias2} ON {on_clause}"
+
+        if intent == "grouped_metric" and dims:
+            select_parts: list[str] = []
+            for dim in dims:
+                if dim == "__month__" and time_col:
+                    select_parts.append(f"DATE_TRUNC('month', {alias1}.{time_col}) AS month_bucket")
+                elif dim == "__month__":
+                    select_parts.append("'unknown_month' AS month_bucket")
+                else:
+                    select_parts.append(f"{_q(dim)} AS {_q(dim)}")
+            metric_idx = len(select_parts) + 1
+            group_by = ", ".join(str(i) for i in range(1, len(select_parts) + 1))
+            return (
+                f"SELECT {', '.join(select_parts)}, {metric_expr} AS metric_value "
+                f"FROM {from_clause} WHERE {where_clause} "
+                f"GROUP BY {group_by} ORDER BY {metric_idx} DESC NULLS LAST LIMIT {plan.get('top_n', 20)}"
+            )
+        else:
+            return (
+                f"SELECT {metric_expr} AS metric_value "
+                f"FROM {from_clause} WHERE {where_clause}"
+            )
 
     def _build_where_clause(self, plan: dict[str, Any], for_comparison: str) -> str:
         clauses = ["1=1"]
@@ -4917,6 +5384,7 @@ class AgenticAnalyticsTeam:
         plan: dict[str, Any],
         query_plan: dict[str, Any],
         execution: dict[str, Any],
+        runtime: RuntimeSelection | None = None,
     ) -> dict[str, Any]:
         checks: list[dict[str, Any]] = []
         warnings: list[str] = []
@@ -5101,6 +5569,16 @@ class AgenticAnalyticsTeam:
             score -= 0.08
         score = max(0.0, min(1.0, score))
 
+        # ── GAP 19: LLM-enhanced audit ──────────────────
+        if runtime and runtime.use_llm and runtime.provider:
+            llm_audit = self._audit_with_llm(plan, query_plan, execution, score, runtime)
+            if llm_audit:
+                adj = max(-0.3, min(0.2, float(llm_audit.get("score_adjustment", 0.0))))
+                score = max(0.0, min(1.0, score + adj))
+                extra_warnings = llm_audit.get("additional_warnings", [])
+                if isinstance(extra_warnings, list):
+                    warnings.extend(extra_warnings)
+
         query_columns_used = [c for c in available_columns if c in sql_lower]
         return {
             "checks": checks,
@@ -5124,6 +5602,50 @@ class AgenticAnalyticsTeam:
                 "value_filters": plan.get("value_filters", []),
             },
         }
+
+    def _audit_with_llm(
+        self,
+        plan: dict[str, Any],
+        query_plan: dict[str, Any],
+        execution: dict[str, Any],
+        deterministic_score: float,
+        runtime: RuntimeSelection,
+    ) -> dict[str, Any] | None:
+        """Use LLM to evaluate audit quality and suggest score adjustments."""
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are AuditAgent. Evaluate query quality. Return JSON with keys: "
+                    "score_adjustment (float between -0.3 and 0.2), "
+                    "additional_warnings (list of strings), reasoning (string)."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Goal: {plan.get('goal', '')}\n"
+                    f"SQL: {query_plan.get('sql', '')}\n"
+                    f"Success: {execution.get('success')}, Rows: {execution.get('row_count')}\n"
+                    f"Deterministic score: {deterministic_score:.2f}\n"
+                    "JSON only."
+                ),
+            },
+        ]
+        try:
+            raw = call_llm(
+                messages,
+                role="intent",
+                provider=runtime.provider,
+                model=runtime.intent_model,
+                timeout=20,
+            )
+            return _extract_json_payload(raw)
+        except Exception as exc:
+            self._pipeline_warnings.append(
+                f"Audit LLM enhancement failed ({type(exc).__name__}); using deterministic score."
+            )
+        return None
 
     def _narrative_agent(
         self,
