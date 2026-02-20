@@ -3265,12 +3265,47 @@ def get_ui_html() -> str:
         const hasSql = r.sql && r.sql.trim();
         const hasTrace = r.agent_trace && r.agent_trace.length;
         const hasChecks = r.sanity_checks && r.sanity_checks.length;
-        const hasInspect = hasSql || hasTrace || hasChecks;
+        const hasStats = r.stats_analysis && r.stats_analysis.summary;
+        const hasInspect = hasSql || hasTrace || hasChecks || hasStats;
 
         let inspect = '';
         if (hasInspect) {
           inspect += `<div class="inspect-toggle" onclick="toggleInspect(this)"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>Inspect</div>`;
           inspect += `<div class="inspect-content">`;
+          if (hasStats) {
+            const sa = r.stats_analysis;
+            let statsHtml = `<div class="inspect-section"><div class="inspect-label">Statistical Analysis</div>`;
+            statsHtml += `<p style="color:var(--text-muted);margin-bottom:8px">${esc(sa.summary)}</p>`;
+            if (sa.outliers && sa.outliers.length) {
+              statsHtml += '<div style="margin-bottom:6px">';
+              sa.outliers.forEach(o => {
+                statsHtml += `<div class="audit-item warn" style="display:inline-flex;margin:2px"><span class="audit-icon">&#9888;</span>${esc(o.column)}: ${o.n_outliers} outliers (${o.pct_outliers}%)</div>`;
+              });
+              statsHtml += '</div>';
+            }
+            if (sa.correlations && sa.correlations.length) {
+              const notable = sa.correlations.filter(c => c.strength !== 'none' && c.strength !== 'weak');
+              if (notable.length) {
+                statsHtml += '<div style="margin-bottom:6px">';
+                notable.forEach(c => {
+                  const cls = c.strength === 'strong' ? 'pass' : 'warn';
+                  statsHtml += `<div class="audit-item ${cls}" style="display:inline-flex;margin:2px">${esc(c.col_a)} ↔ ${esc(c.col_b)}: ${c.strength} (r=${c.pearson})</div>`;
+                });
+                statsHtml += '</div>';
+              }
+            }
+            if (sa.trends && sa.trends.length) {
+              statsHtml += '<div style="margin-bottom:6px">';
+              sa.trends.forEach(t => {
+                const icon = t.direction === 'up' ? '↑' : t.direction === 'down' ? '↓' : '→';
+                const cls = t.direction === 'up' ? 'pass' : t.direction === 'down' ? 'fail' : 'warn';
+                statsHtml += `<div class="audit-item ${cls}" style="display:inline-flex;margin:2px">${icon} ${esc(t.column)}: ${t.direction} (${t.pct_change_total > 0 ? '+' : ''}${t.pct_change_total}%, R²=${t.r_squared})</div>`;
+              });
+              statsHtml += '</div>';
+            }
+            statsHtml += '</div>';
+            inspect += statsHtml;
+          }
           if (hasSql) inspect += `<div class="inspect-section"><div class="inspect-label">SQL</div><div class="inspect-sql">${esc(r.sql)}</div></div>`;
           if (hasTrace) inspect += `<div class="inspect-section"><div class="inspect-label">Agent Trace</div>${buildTrace(r.agent_trace)}</div>`;
           if (hasChecks) inspect += `<div class="inspect-section"><div class="inspect-label">Audit Checks</div>${buildAudit(r.sanity_checks)}</div>`;
