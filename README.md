@@ -189,7 +189,7 @@ These epics close the gap between "query answering engine" and "autonomous data 
 | Epic | Status | Completion | Notes |
 |---|---|---:|---|
 | 8. Legacy cleanup + foundation hardening | active | 60% | dead code removed (922 lines); date/SQL centralization pending |
-| 9. UI overhaul (black/brick/gold minimalist) | pending | 0% | complete redesign, progressive disclosure, charting engine |
+| 9. UI overhaul (black/brick/gold minimalist) | active | 70% | complete redesign shipped; charting, progressive disclosure, settings panel |
 | 10. Advanced analytics engine | pending | 0% | statistical methods, forecasting, anomaly detection, cohort/funnel |
 | 11. Deliberative agent architecture | pending | 0% | pipeline to team, lateral communication, auto-refinement loops |
 | 12. Institutional knowledge system | pending | 0% | semantic memory, domain glossary, expert knowledge injection |
