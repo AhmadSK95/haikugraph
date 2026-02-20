@@ -463,9 +463,9 @@ def test_intent_no_schema_in_prompt():
 
 
 def test_intent_all_types_valid():
-    """E2) All A8 taxonomy types are valid enum values."""
-    # Verify IntentType enum has exactly 6 types from A8 spec
-    expected_types = {"metric", "grouped_metric", "comparison", "lookup", "diagnostic", "unknown"}
+    """E2) All A8+ taxonomy types are valid enum values."""
+    # Verify IntentType enum has all A8+ taxonomy types (original 6 + 3 statistical)
+    expected_types = {"metric", "grouped_metric", "comparison", "lookup", "diagnostic", "trend", "anomaly", "correlation", "unknown"}
     actual_types = {t.value for t in IntentType}
     
     assert actual_types == expected_types, f"Intent taxonomy mismatch. Expected {expected_types}, got {actual_types}"

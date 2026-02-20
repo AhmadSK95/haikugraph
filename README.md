@@ -192,7 +192,7 @@ These epics close the gap between "query answering engine" and "autonomous data 
 | 9. UI overhaul (black/brick/gold minimalist) | active | 70% | complete redesign shipped; charting, progressive disclosure, settings panel |
 | 10. Advanced analytics engine | active | 60% | stats agent shipped (distributions, correlations, outliers, trends, t-test); intent taxonomy extended |
 | 11. Deliberative agent architecture | pending | 0% | pipeline to team, lateral communication, auto-refinement loops |
-| 12. Institutional knowledge system | pending | 0% | semantic memory, domain glossary, expert knowledge injection |
+| 12. Institutional knowledge system | active | 65% | domain glossary + expert teaching endpoints shipped; effectiveness tracking active |
 | 13. Presentation + confidence layer | pending | 0% | evidence-backed presentations, agent contribution maps, failure transparency |
 
 ---

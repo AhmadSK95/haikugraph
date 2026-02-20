@@ -237,6 +237,46 @@ class AgentMemoryStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS datada_glossary (
+                        term_id VARCHAR,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        tenant_id VARCHAR DEFAULT 'public',
+                        term VARCHAR,
+                        definition VARCHAR,
+                        sql_expression VARCHAR,
+                        target_table VARCHAR,
+                        target_column VARCHAR,
+                        examples_json VARCHAR,
+                        contributed_by VARCHAR,
+                        version INTEGER DEFAULT 1,
+                        deprecated BOOLEAN DEFAULT FALSE,
+                        effectiveness_score DOUBLE DEFAULT 0.5,
+                        use_count INTEGER DEFAULT 0
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS datada_teachings (
+                        teaching_id VARCHAR,
+                        created_at TIMESTAMP,
+                        tenant_id VARCHAR DEFAULT 'public',
+                        expert_name VARCHAR,
+                        teaching_text VARCHAR,
+                        parsed_keyword VARCHAR,
+                        parsed_table VARCHAR,
+                        parsed_metric VARCHAR,
+                        parsed_dimensions_json VARCHAR,
+                        confidence DOUBLE DEFAULT 0.5,
+                        times_applied INTEGER DEFAULT 0,
+                        times_correct INTEGER DEFAULT 0,
+                        active BOOLEAN DEFAULT TRUE
+                    )
+                    """
+                )
                 self._ensure_column(conn, "datada_agent_memory", "tenant_id VARCHAR")
                 self._ensure_column(conn, "datada_agent_feedback", "tenant_id VARCHAR")
                 self._ensure_column(conn, "datada_agent_corrections", "tenant_id VARCHAR")
@@ -1273,3 +1313,243 @@ class AgentMemoryStore:
             source=source,
             weight=min(2.5, max(1.0, score)),
         )
+
+    # ------------------------------------------------------------------
+    # Domain Glossary
+    # ------------------------------------------------------------------
+
+    def upsert_glossary_term(
+        self,
+        *,
+        term: str,
+        definition: str,
+        sql_expression: str = "",
+        target_table: str = "",
+        target_column: str = "",
+        examples: list[str] | None = None,
+        contributed_by: str = "system",
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Add or update a business term in the domain glossary."""
+        tid = _clean_tenant(tenant_id)
+        now = datetime.utcnow().isoformat()
+        examples_json = json.dumps(examples or [])
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                existing = conn.execute(
+                    "SELECT term_id, version FROM datada_glossary WHERE tenant_id=? AND LOWER(term)=LOWER(?)",
+                    [tid, term.strip()],
+                ).fetchone()
+
+                if existing:
+                    term_id = existing[0]
+                    version = int(existing[1] or 0) + 1
+                    conn.execute(
+                        """UPDATE datada_glossary SET definition=?, sql_expression=?,
+                           target_table=?, target_column=?, examples_json=?,
+                           contributed_by=?, version=?, updated_at=?, deprecated=FALSE
+                           WHERE term_id=?""",
+                        [definition, sql_expression, target_table, target_column,
+                         examples_json, contributed_by, version, now, term_id],
+                    )
+                else:
+                    term_id = str(uuid.uuid4())
+                    conn.execute(
+                        """INSERT INTO datada_glossary
+                           (term_id, created_at, updated_at, tenant_id, term, definition,
+                            sql_expression, target_table, target_column, examples_json,
+                            contributed_by, version, deprecated, effectiveness_score, use_count)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,1,FALSE,0.5,0)""",
+                        [term_id, now, now, tid, term.strip(), definition,
+                         sql_expression, target_table, target_column, examples_json,
+                         contributed_by],
+                    )
+                return {"term_id": term_id, "term": term.strip(), "status": "ok"}
+            finally:
+                conn.close()
+
+    def list_glossary(self, *, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        """List all active glossary terms for a tenant."""
+        tid = _clean_tenant(tenant_id)
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """SELECT term_id, term, definition, sql_expression,
+                              target_table, target_column, examples_json,
+                              contributed_by, version, deprecated,
+                              effectiveness_score, use_count, updated_at
+                       FROM datada_glossary WHERE tenant_id=?
+                       ORDER BY term""",
+                    [tid],
+                ).fetchall()
+                return [
+                    {
+                        "term_id": r[0], "term": r[1], "definition": r[2],
+                        "sql_expression": r[3], "target_table": r[4],
+                        "target_column": r[5],
+                        "examples": json.loads(r[6]) if r[6] else [],
+                        "contributed_by": r[7], "version": r[8],
+                        "deprecated": bool(r[9]),
+                        "effectiveness_score": float(r[10] or 0.5),
+                        "use_count": int(r[11] or 0),
+                        "updated_at": r[12],
+                    }
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+
+    def resolve_glossary(self, text: str, *, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        """Find glossary terms that match tokens in the given text."""
+        tid = _clean_tenant(tenant_id)
+        tokens = _tokens(text)
+        if not tokens:
+            return []
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """SELECT term_id, term, definition, sql_expression,
+                              target_table, target_column
+                       FROM datada_glossary
+                       WHERE tenant_id=? AND deprecated=FALSE""",
+                    [tid],
+                ).fetchall()
+                matches = []
+                for r in rows:
+                    term_tokens = _tokens(r[1])
+                    if term_tokens & tokens:
+                        matches.append({
+                            "term_id": r[0], "term": r[1], "definition": r[2],
+                            "sql_expression": r[3], "target_table": r[4],
+                            "target_column": r[5],
+                        })
+                        # Increment use count
+                        conn.execute(
+                            "UPDATE datada_glossary SET use_count = use_count + 1 WHERE term_id = ?",
+                            [r[0]],
+                        )
+                return matches
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------
+    # Expert Teachings
+    # ------------------------------------------------------------------
+
+    def add_teaching(
+        self,
+        *,
+        teaching_text: str,
+        expert_name: str = "anonymous",
+        keyword: str = "",
+        target_table: str = "",
+        target_metric: str = "",
+        target_dimensions: list[str] | None = None,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Record an expert teaching as institutional knowledge.
+
+        Teachings are natural language rules from subject matter experts.
+        They get automatically converted to correction rules when possible.
+        """
+        tid = _clean_tenant(tenant_id)
+        now = datetime.utcnow().isoformat()
+        teaching_id = str(uuid.uuid4())
+        dims_json = json.dumps(target_dimensions or [])
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """INSERT INTO datada_teachings
+                       (teaching_id, created_at, tenant_id, expert_name,
+                        teaching_text, parsed_keyword, parsed_table,
+                        parsed_metric, parsed_dimensions_json,
+                        confidence, times_applied, times_correct, active)
+                       VALUES (?,?,?,?,?,?,?,?,?,0.5,0,0,TRUE)""",
+                    [teaching_id, now, tid, expert_name, teaching_text,
+                     keyword, target_table, target_metric, dims_json],
+                )
+
+                # Auto-create a correction rule if keyword and table are provided
+                correction_id = ""
+                if keyword and target_table:
+                    correction_id = self.upsert_correction(
+                        tenant_id=tid,
+                        keyword=keyword,
+                        target_table=target_table,
+                        target_metric=target_metric,
+                        target_dimensions=target_dimensions or [],
+                        notes=f"From teaching by {expert_name}: {teaching_text[:120]}",
+                        source="teaching",
+                    )
+
+                return {
+                    "teaching_id": teaching_id,
+                    "correction_id": correction_id,
+                    "status": "ok",
+                    "auto_correction_created": bool(correction_id),
+                }
+            finally:
+                conn.close()
+
+    def list_teachings(self, *, tenant_id: str | None = None, active_only: bool = True) -> list[dict[str, Any]]:
+        """List all teachings for a tenant."""
+        tid = _clean_tenant(tenant_id)
+        clause = "AND active = TRUE" if active_only else ""
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""SELECT teaching_id, created_at, expert_name, teaching_text,
+                               parsed_keyword, parsed_table, parsed_metric,
+                               parsed_dimensions_json, confidence,
+                               times_applied, times_correct, active
+                        FROM datada_teachings WHERE tenant_id=? {clause}
+                        ORDER BY created_at DESC""",
+                    [tid],
+                ).fetchall()
+                return [
+                    {
+                        "teaching_id": r[0], "created_at": r[1],
+                        "expert_name": r[2], "teaching_text": r[3],
+                        "keyword": r[4], "target_table": r[5],
+                        "target_metric": r[6],
+                        "target_dimensions": json.loads(r[7]) if r[7] else [],
+                        "confidence": float(r[8] or 0.5),
+                        "times_applied": int(r[9] or 0),
+                        "times_correct": int(r[10] or 0),
+                        "active": bool(r[11]),
+                    }
+                    for r in rows
+                ]
+            finally:
+                conn.close()
+
+    def record_teaching_outcome(
+        self, teaching_id: str, *, correct: bool, tenant_id: str | None = None
+    ) -> None:
+        """Record whether a teaching led to a correct answer."""
+        tid = _clean_tenant(tenant_id)
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    """UPDATE datada_teachings
+                       SET times_applied = times_applied + 1,
+                           times_correct = times_correct + CASE WHEN ? THEN 1 ELSE 0 END,
+                           confidence = CASE
+                             WHEN times_applied > 0
+                             THEN (times_correct + CASE WHEN ? THEN 1.0 ELSE 0.0 END)
+                                  / (times_applied + 1.0)
+                             ELSE 0.5 END
+                       WHERE teaching_id = ? AND tenant_id = ?""",
+                    [correct, correct, teaching_id, tid],
+                )
+            finally:
+                conn.close()
