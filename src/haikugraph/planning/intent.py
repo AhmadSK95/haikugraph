@@ -16,21 +16,27 @@ from haikugraph.llm.router import call_llm
 
 class IntentType(str, Enum):
     """Types of question intents recognized by the system.
-    
-    A8 Intent Taxonomy (fixed):
+
+    A8+ Intent Taxonomy:
     - metric: single aggregated value
     - grouped_metric: aggregated values by dimension
     - comparison: same metric across time or cohorts
     - lookup: raw rows / listings
     - diagnostic: health, gaps, anomalies, missing data
+    - trend: time-series direction, seasonality, breakpoints
+    - anomaly: outlier detection, unusual patterns
+    - correlation: relationship between variables
     - unknown: cannot confidently classify
     """
-    
+
     METRIC = "metric"  # Single aggregated value: "What is total revenue?"
     GROUPED_METRIC = "grouped_metric"  # Aggregation by dimension: "Revenue by barber"
     COMPARISON = "comparison"  # Temporal/cohort comparison: "This vs last month"
     LOOKUP = "lookup"  # Raw rows: "Show me recent appointments"
     DIAGNOSTIC = "diagnostic"  # Health/anomalies: "Why did revenue drop?"
+    TREND = "trend"  # Time-series trend: "Show monthly trend for revenue"
+    ANOMALY = "anomaly"  # Outlier detection: "Any unusual transactions?"
+    CORRELATION = "correlation"  # Relationship: "How does price relate to volume?"
     UNKNOWN = "unknown"  # Cannot confidently classify
 
 

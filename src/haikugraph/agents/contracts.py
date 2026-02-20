@@ -421,8 +421,14 @@ class AssistantQueryResponse(BaseModel):
         description="Data quality and audit score summary",
     )
     
+    # Statistical analysis
+    stats_analysis: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Statistical analysis results (distributions, correlations, outliers, trends)",
+    )
+
     # Errors
     error: str | None = Field(None, description="Error message if failed")
-    
+
     # Suggestions
     suggested_questions: list[str] = Field(default_factory=list, description="Follow-up questions")
