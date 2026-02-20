@@ -791,40 +791,81 @@ def build_subquestions(
 
     # For breakdown queries, try to create a single grouped subquestion
     if has_breakdown and entities and metrics:
-        # Find best table containing both group key and metric
-        group_entity = entities[0]
         metric = metrics[0] if metrics else None
 
         if metric:
             metric_table = metric["mapped_columns"][0].split(".")[0]
-            group_tables = set(ref.split(".")[0] for ref in group_entity["mapped_to"])
+            metric_col = metric["mapped_columns"][0].split(".")[1]
 
-            if metric_table in group_tables:
-                # Both in same table - create single grouped subquestion
-                group_col = next(
-                    (
-                        ref.split(".")[1]
-                        for ref in group_entity["mapped_to"]
-                        if ref.startswith(metric_table + ".")
-                    ),
-                    None,
-                )
-                metric_col = metric["mapped_columns"][0].split(".")[1]
+            # ── Collect ALL requested dimensions, not just the first entity ──
+            # 1. Start with entity-based dimensions (existing logic)
+            group_cols: list[str] = []
+            group_col_set: set[str] = set()
+            for ent in entities:
+                ent_tables = set(ref.split(".")[0] for ref in ent["mapped_to"])
+                if metric_table in ent_tables:
+                    col = next(
+                        (
+                            ref.split(".")[1]
+                            for ref in ent["mapped_to"]
+                            if ref.startswith(metric_table + ".")
+                        ),
+                        None,
+                    )
+                    if col and col not in group_col_set and col != metric_col:
+                        group_cols.append(col)
+                        group_col_set.add(col)
 
+            # 2. Detect additional dimension keywords from the question by
+            #    matching tokens against actual column names in the metric table.
+            columns = graph["nodes"]["columns"]
+            table_cols = [c for c in columns if c["table"] == metric_table]
+            q_tokens = set(re.findall(r"[a-z][a-z0-9_]*", question))
+
+            # Also detect "month", "week", "year", "day" as time dimensions
+            time_dim_map = {
+                "month": "__month__",
+                "monthly": "__month__",
+                "week": "__week__",
+                "weekly": "__week__",
+                "year": "__year__",
+                "yearly": "__year__",
+                "day": "__day__",
+                "daily": "__day__",
+                "quarter": "__quarter__",
+                "quarterly": "__quarter__",
+            }
+            for token in q_tokens:
+                if token in time_dim_map and time_dim_map[token] not in group_col_set:
+                    group_cols.append(time_dim_map[token])
+                    group_col_set.add(time_dim_map[token])
+
+            # Match question tokens against column names (fuzzy: token in column name)
+            for col_info in table_cols:
+                col_name = col_info["column"].lower()
+                for token in q_tokens:
+                    if len(token) >= 4 and token in col_name and col_name not in group_col_set and col_name != metric_col:
+                        group_cols.append(col_name)
+                        group_col_set.add(col_name)
+                        break
+
+            if group_cols:
+                dim_names = ", ".join(group_cols)
+                all_cols = sorted(set(group_cols + [metric_col]))
                 subquestions.append(
                     {
                         "id": "SQ1",
                         "description": (
                             f"Compute {metric['aggregation']}({metric_col}) "
-                            f"per {group_entity['name']}"
+                            f"per {dim_names}"
                         ),
                         "tables": [metric_table],
-                        "columns": sorted([group_col, metric_col]) if group_col else [metric_col],
-                        "group_by": [group_col] if group_col else [],
+                        "columns": all_cols,
+                        "group_by": group_cols,
                         "aggregations": [{"agg": metric["aggregation"], "col": metric_col}],
                         "required_joins": [],
                         "confidence": round(
-                            min(group_entity["confidence"], metric["confidence"]), 2
+                            min((e["confidence"] for e in entities), default=0.7) * 0.9, 2
                         ),
                     }
                 )
