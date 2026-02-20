@@ -3014,6 +3014,37 @@ def get_ui_html() -> str:
     /* ---- error card ---- */
     .error-card{background:var(--brick-dim);border:1px solid var(--brick);border-radius:12px;padding:16px 20px;font-size:13px;color:var(--brick)}
 
+    /* ---- explain button in meta row ---- */
+    .explain-btn{font-size:11px;font-weight:600;color:var(--gold);background:var(--gold-dim);border:1px solid var(--gold-mid);border-radius:6px;padding:3px 10px;cursor:pointer;transition:all .15s;letter-spacing:0.3px;text-transform:uppercase}
+    .explain-btn:hover{background:var(--gold-mid);border-color:var(--gold)}
+
+    /* ---- collapsed older turns ---- */
+    .turn-collapsed{cursor:pointer;padding:8px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text-dim);transition:all .15s;display:flex;align-items:center;gap:8px;overflow:hidden}
+    .turn-collapsed:hover{background:var(--surface-2);color:var(--text-muted);border-color:var(--gold-mid)}
+    .turn-collapsed .coll-q{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .turn-collapsed .coll-badge{flex-shrink:0}
+
+    /* ---- explain modal ---- */
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;opacity:0;pointer-events:none;transition:opacity .2s;display:flex;align-items:center;justify-content:center}
+    .modal-overlay.open{opacity:1;pointer-events:all}
+    .modal{background:var(--surface);border:1px solid var(--border);border-radius:14px;width:90vw;max-width:720px;max-height:80vh;overflow-y:auto;padding:0;box-shadow:0 24px 60px rgba(0,0,0,0.5)}
+    .modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--surface);z-index:1;border-radius:14px 14px 0 0}
+    .modal-header h3{font-size:15px;font-weight:600;color:var(--gold);margin:0}
+    .modal-body{padding:20px 22px;display:flex;flex-direction:column;gap:18px}
+
+    /* ---- timeline in modal ---- */
+    .timeline{display:flex;flex-direction:column;gap:0;position:relative}
+    .timeline::before{content:'';position:absolute;left:11px;top:14px;bottom:14px;width:2px;background:var(--border)}
+    .tl-item{display:flex;gap:12px;align-items:flex-start;padding:8px 0;position:relative}
+    .tl-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px;z-index:1;border:2px solid var(--bg)}
+    .tl-dot.ok{background:var(--success);border-color:var(--success)}
+    .tl-dot.warn{background:var(--gold);border-color:var(--gold)}
+    .tl-dot.fail{background:var(--brick);border-color:var(--brick)}
+    .tl-body{flex:1;min-width:0}
+    .tl-agent{font-size:12px;font-weight:600;color:var(--text)}
+    .tl-summary{font-size:11px;color:var(--text-muted);margin-top:2px}
+    .tl-meta{font-size:10px;color:var(--text-dim);font-family:var(--mono);margin-top:2px}
+
     /* ---- responsive ---- */
     @media(max-width:640px){
       .app{padding:0 12px}
@@ -3046,6 +3077,19 @@ def get_ui_html() -> str:
         <textarea id="goalInput" rows="1" placeholder="Ask your data anything..." autofocus></textarea>
         <button class="run-btn" id="runBtn" onclick="runQuery()">Run</button>
       </div>
+    </div>
+  </div>
+
+  <!-- explain modal -->
+  <div class="modal-overlay" id="explainOverlay" onclick="closeExplain()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3>Explain This Answer</h3>
+        <button class="icon-btn" onclick="closeExplain()">
+          <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="explainBody"></div>
     </div>
   </div>
 
@@ -3224,6 +3268,8 @@ def get_ui_html() -> str:
     }
 
     /* ---- render ---- */
+    const _expandedTurns = {};
+
     function renderThread() {
       const el = $('thread');
       if (!state.turns.length) {
@@ -3241,8 +3287,23 @@ def get_ui_html() -> str:
         return;
       }
 
+      const len = state.turns.length;
       el.innerHTML = state.turns.map((turn, i) => {
-        let html = `<div class="turn-user"><q>${esc(turn.goal)}</q></div>`;
+        const isOld = i < len - 2;
+        const isExpanded = !!_expandedTurns[i];
+
+        /* ---- collapsed pill for older turns ---- */
+        if (isOld && !isExpanded && turn.response) {
+          const r = turn.response;
+          const cls = (r.confidence_score || 0) >= 0.75 ? 'badge-high' : (r.confidence_score || 0) >= 0.45 ? 'badge-medium' : 'badge-low';
+          return `<div class="turn-collapsed" onclick="expandTurn(${i})">
+            <span class="coll-badge badge ${cls}" style="font-size:9px;padding:2px 6px;border-radius:4px">&bull;</span>
+            <span class="coll-q">${esc(turn.goal)}</span>
+          </div>`;
+        }
+
+        /* ---- full render ---- */
+        let html = `<div class="turn-user"><q>${esc(turn.goal)}</q>${isOld && isExpanded ? ' <span style="font-size:11px;color:var(--text-dim);cursor:pointer" onclick="collapseTurn(' + i + ')">[collapse]</span>' : ''}</div>`;
         const r = turn.response;
         if (!r) {
           html += `<div class="card"><div class="loading-card"><div class="spinner"></div>Analyzing...</div></div>`;
@@ -3266,55 +3327,12 @@ def get_ui_html() -> str:
         const hasTrace = r.agent_trace && r.agent_trace.length;
         const hasChecks = r.sanity_checks && r.sanity_checks.length;
         const hasStats = r.stats_analysis && r.stats_analysis.summary;
-        const hasInspect = hasSql || hasTrace || hasChecks || hasStats;
-
-        let inspect = '';
-        if (hasInspect) {
-          inspect += `<div class="inspect-toggle" onclick="toggleInspect(this)"><svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>Inspect</div>`;
-          inspect += `<div class="inspect-content">`;
-          if (hasStats) {
-            const sa = r.stats_analysis;
-            let statsHtml = `<div class="inspect-section"><div class="inspect-label">Statistical Analysis</div>`;
-            statsHtml += `<p style="color:var(--text-muted);margin-bottom:8px">${esc(sa.summary)}</p>`;
-            if (sa.outliers && sa.outliers.length) {
-              statsHtml += '<div style="margin-bottom:6px">';
-              sa.outliers.forEach(o => {
-                statsHtml += `<div class="audit-item warn" style="display:inline-flex;margin:2px"><span class="audit-icon">&#9888;</span>${esc(o.column)}: ${o.n_outliers} outliers (${o.pct_outliers}%)</div>`;
-              });
-              statsHtml += '</div>';
-            }
-            if (sa.correlations && sa.correlations.length) {
-              const notable = sa.correlations.filter(c => c.strength !== 'none' && c.strength !== 'weak');
-              if (notable.length) {
-                statsHtml += '<div style="margin-bottom:6px">';
-                notable.forEach(c => {
-                  const cls = c.strength === 'strong' ? 'pass' : 'warn';
-                  statsHtml += `<div class="audit-item ${cls}" style="display:inline-flex;margin:2px">${esc(c.col_a)} ↔ ${esc(c.col_b)}: ${c.strength} (r=${c.pearson})</div>`;
-                });
-                statsHtml += '</div>';
-              }
-            }
-            if (sa.trends && sa.trends.length) {
-              statsHtml += '<div style="margin-bottom:6px">';
-              sa.trends.forEach(t => {
-                const icon = t.direction === 'up' ? '↑' : t.direction === 'down' ? '↓' : '→';
-                const cls = t.direction === 'up' ? 'pass' : t.direction === 'down' ? 'fail' : 'warn';
-                statsHtml += `<div class="audit-item ${cls}" style="display:inline-flex;margin:2px">${icon} ${esc(t.column)}: ${t.direction} (${t.pct_change_total > 0 ? '+' : ''}${t.pct_change_total}%, R²=${t.r_squared})</div>`;
-              });
-              statsHtml += '</div>';
-            }
-            statsHtml += '</div>';
-            inspect += statsHtml;
-          }
-          if (hasSql) inspect += `<div class="inspect-section"><div class="inspect-label">SQL</div><div class="inspect-sql">${esc(r.sql)}</div></div>`;
-          if (hasTrace) inspect += `<div class="inspect-section"><div class="inspect-label">Agent Trace</div>${buildTrace(r.agent_trace)}</div>`;
-          if (hasChecks) inspect += `<div class="inspect-section"><div class="inspect-label">Audit Checks</div>${buildAudit(r.sanity_checks)}</div>`;
-          inspect += `</div>`;
-        }
+        const hasExplain = hasSql || hasTrace || hasChecks || hasStats;
 
         const rowCount = r.row_count != null ? `<span class="meta-chip">${fmt(r.row_count)} rows</span><span class="meta-sep"></span>` : '';
         const execTime = r.execution_time_ms != null ? `<span class="meta-chip">${Math.round(r.execution_time_ms)}ms</span>` : '';
         const mode = r.runtime && r.runtime.mode ? `<span class="meta-chip">${esc(r.runtime.mode)}</span><span class="meta-sep"></span>` : '';
+        const explainBtn = hasExplain ? `<span class="meta-sep"></span><button class="explain-btn" onclick="openExplain(${i})">Explain</button>` : '';
 
         html += `<div class="card">
           <div class="card-body">
@@ -3323,18 +3341,114 @@ def get_ui_html() -> str:
             ${chart}${table}
             ${suggestions ? '<div class="suggestions">' + suggestions + '</div>' : ''}
           </div>
-          <div class="card-meta">${mode}${rowCount}${execTime}</div>
-          ${inspect}
+          <div class="card-meta">${mode}${rowCount}${execTime}${explainBtn}</div>
         </div>`;
         return html;
       }).join('');
-      el.scrollTop = el.scrollHeight;
+
+      /* auto-scroll to latest */
+      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
     }
 
-    function toggleInspect(el) {
-      el.classList.toggle('open');
-      const content = el.nextElementSibling;
-      if (content) content.classList.toggle('open');
+    /* ---- expand / collapse older turns ---- */
+    function expandTurn(i) {
+      _expandedTurns[i] = true;
+      renderThread();
+      /* scroll to the expanded turn */
+      requestAnimationFrame(() => {
+        const turns = $('thread').children;
+        if (turns[i]) turns[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    }
+    function collapseTurn(i) {
+      delete _expandedTurns[i];
+      renderThread();
+    }
+
+    /* ---- explain modal ---- */
+    function openExplain(turnIdx) {
+      const turn = state.turns[turnIdx];
+      if (!turn || !turn.response) return;
+      const r = turn.response;
+      const body = $('explainBody');
+      let html = '';
+
+      /* question */
+      html += `<div><div class="inspect-label">Question</div><p style="color:var(--text);font-size:14px">${esc(turn.goal)}</p></div>`;
+
+      /* agent trace as timeline */
+      if (r.agent_trace && r.agent_trace.length) {
+        html += `<div><div class="inspect-label">Agent Trace</div><div class="timeline">`;
+        r.agent_trace.forEach(t => {
+          const st = (t.status || '').toLowerCase();
+          const dot = st === 'failed' ? 'fail' : st === 'warning' ? 'warn' : 'ok';
+          const ms = t.duration_ms != null ? Math.round(t.duration_ms) + 'ms' : '';
+          html += `<div class="tl-item"><div class="tl-dot ${dot}"></div><div class="tl-body"><div class="tl-agent">${esc(t.agent || t.role || '')}</div><div class="tl-summary">${esc(t.summary || '')}</div>${ms ? '<div class="tl-meta">' + ms + '</div>' : ''}</div></div>`;
+        });
+        html += '</div></div>';
+      }
+
+      /* SQL */
+      if (r.sql && r.sql.trim()) {
+        html += `<div><div class="inspect-label">SQL Query</div><div class="inspect-sql">${esc(r.sql)}</div></div>`;
+      }
+
+      /* audit checks */
+      if (r.sanity_checks && r.sanity_checks.length) {
+        html += `<div><div class="inspect-label">Audit Checks</div>${buildAudit(r.sanity_checks)}</div>`;
+      }
+
+      /* stats analysis */
+      if (r.stats_analysis && r.stats_analysis.summary) {
+        const sa = r.stats_analysis;
+        let sh = `<div><div class="inspect-label">Statistical Analysis</div>`;
+        sh += `<p style="color:var(--text-muted);margin-bottom:8px;font-size:12px">${esc(sa.summary)}</p>`;
+        if (sa.outliers && sa.outliers.length) {
+          sh += '<div style="margin-bottom:6px">';
+          sa.outliers.forEach(o => {
+            sh += `<div class="audit-item warn" style="display:inline-flex;margin:2px"><span class="audit-icon">&#9888;</span>${esc(o.column)}: ${o.n_outliers} outliers (${o.pct_outliers}%)</div>`;
+          });
+          sh += '</div>';
+        }
+        if (sa.correlations && sa.correlations.length) {
+          const notable = sa.correlations.filter(c => c.strength !== 'none' && c.strength !== 'weak');
+          if (notable.length) {
+            sh += '<div style="margin-bottom:6px">';
+            notable.forEach(c => {
+              const cls = c.strength === 'strong' ? 'pass' : 'warn';
+              sh += `<div class="audit-item ${cls}" style="display:inline-flex;margin:2px">${esc(c.col_a)} &harr; ${esc(c.col_b)}: ${c.strength} (r=${c.pearson})</div>`;
+            });
+            sh += '</div>';
+          }
+        }
+        if (sa.trends && sa.trends.length) {
+          sh += '<div style="margin-bottom:6px">';
+          sa.trends.forEach(t => {
+            const icon = t.direction === 'up' ? '&uarr;' : t.direction === 'down' ? '&darr;' : '&rarr;';
+            const cls = t.direction === 'up' ? 'pass' : t.direction === 'down' ? 'fail' : 'warn';
+            sh += `<div class="audit-item ${cls}" style="display:inline-flex;margin:2px">${icon} ${esc(t.column)}: ${t.direction} (${t.pct_change_total > 0 ? '+' : ''}${t.pct_change_total}%, R&sup2;=${t.r_squared})</div>`;
+          });
+          sh += '</div>';
+        }
+        sh += '</div>';
+        html += sh;
+      }
+
+      /* confidence + meta footer */
+      const confPct = Math.round((r.confidence_score || 0) * 100);
+      html += `<div style="border-top:1px solid var(--border);padding-top:14px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">`;
+      html += `<span class="meta-chip" style="font-size:12px">Confidence: ${confPct}%</span>`;
+      if (r.row_count != null) html += `<span class="meta-chip">${fmt(r.row_count)} rows</span>`;
+      if (r.execution_time_ms != null) html += `<span class="meta-chip">${Math.round(r.execution_time_ms)}ms</span>`;
+      if (r.runtime && r.runtime.mode) html += `<span class="meta-chip">Mode: ${esc(r.runtime.mode)}</span>`;
+      html += `</div>`;
+
+      body.innerHTML = html;
+      $('explainOverlay').classList.add('open');
+    }
+
+    function closeExplain() {
+      $('explainOverlay').classList.remove('open');
     }
 
     function askExample(el) {
