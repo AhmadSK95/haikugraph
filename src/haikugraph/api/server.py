@@ -2386,6 +2386,73 @@ def _register_routes(app: FastAPI) -> None:
             status="rolled_back",
         )
 
+    # ------------------------------------------------------------------
+    # Glossary endpoints
+    # ------------------------------------------------------------------
+
+    @app.get("/api/assistant/glossary")
+    async def list_glossary(
+        tenant_id: str | None = None,
+        x_datada_tenant_id: str | None = Header(default=None),
+    ):
+        tid = (tenant_id or x_datada_tenant_id or "public").strip() or "public"
+        team, _, _ = _resolve_team_for_connection(app, None)
+        terms = team.list_glossary(tenant_id=tid)
+        return {"terms": terms, "count": len(terms)}
+
+    @app.post("/api/assistant/glossary")
+    async def upsert_glossary(
+        request: Request,
+        x_datada_tenant_id: str | None = Header(default=None),
+    ):
+        body = await request.json()
+        tid = (body.get("tenant_id") or x_datada_tenant_id or "public").strip() or "public"
+        team, _, _ = _resolve_team_for_connection(app, body.get("db_connection_id"))
+        result = team.upsert_glossary_term(
+            term=body.get("term", ""),
+            definition=body.get("definition", ""),
+            sql_expression=body.get("sql_expression", ""),
+            target_table=body.get("target_table", ""),
+            target_column=body.get("target_column", ""),
+            examples=body.get("examples"),
+            contributed_by=body.get("contributed_by", "user"),
+            tenant_id=tid,
+        )
+        return result
+
+    # ------------------------------------------------------------------
+    # Teaching endpoints
+    # ------------------------------------------------------------------
+
+    @app.get("/api/assistant/teachings")
+    async def list_teachings(
+        tenant_id: str | None = None,
+        x_datada_tenant_id: str | None = Header(default=None),
+    ):
+        tid = (tenant_id or x_datada_tenant_id or "public").strip() or "public"
+        team, _, _ = _resolve_team_for_connection(app, None)
+        teachings = team.list_teachings(tenant_id=tid)
+        return {"teachings": teachings, "count": len(teachings)}
+
+    @app.post("/api/assistant/teach")
+    async def add_teaching(
+        request: Request,
+        x_datada_tenant_id: str | None = Header(default=None),
+    ):
+        body = await request.json()
+        tid = (body.get("tenant_id") or x_datada_tenant_id or "public").strip() or "public"
+        team, _, _ = _resolve_team_for_connection(app, body.get("db_connection_id"))
+        result = team.add_teaching(
+            teaching_text=body.get("teaching_text", ""),
+            expert_name=body.get("expert_name", "anonymous"),
+            keyword=body.get("keyword", ""),
+            target_table=body.get("target_table", ""),
+            target_metric=body.get("target_metric", ""),
+            target_dimensions=body.get("target_dimensions"),
+            tenant_id=tid,
+        )
+        return result
+
     @app.get("/api/assistant/trust/dashboard", response_model=TrustDashboardResponse)
     async def trust_dashboard(
         tenant_id: str | None = None,

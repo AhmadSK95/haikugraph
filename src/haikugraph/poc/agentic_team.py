@@ -843,6 +843,23 @@ class AgenticAnalyticsTeam:
     ) -> dict[str, Any]:
         return self.memory.rollback_tool_candidate(tool_id, tenant_id=tenant_id, reason=reason)
 
+    # -- Glossary delegation --
+    def upsert_glossary_term(self, **kw: Any) -> dict[str, Any]:
+        return self.memory.upsert_glossary_term(**kw)
+
+    def list_glossary(self, **kw: Any) -> list[dict[str, Any]]:
+        return self.memory.list_glossary(**kw)
+
+    def resolve_glossary(self, text: str, **kw: Any) -> list[dict[str, Any]]:
+        return self.memory.resolve_glossary(text, **kw)
+
+    # -- Teaching delegation --
+    def add_teaching(self, **kw: Any) -> dict[str, Any]:
+        return self.memory.add_teaching(**kw)
+
+    def list_teachings(self, **kw: Any) -> list[dict[str, Any]]:
+        return self.memory.list_teachings(**kw)
+
     def run(
         self,
         goal: str,
