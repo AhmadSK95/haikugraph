@@ -427,8 +427,24 @@ class AssistantQueryResponse(BaseModel):
         description="Statistical analysis results (distributions, correlations, outliers, trends)",
     )
 
+    # Agent contribution map
+    contribution_map: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per-agent contribution summary showing what each agent added or changed.",
+    )
+    confidence_reasoning: str = Field(
+        default="",
+        description="Explanation for the assigned confidence level.",
+    )
+
     # Errors
     error: str | None = Field(None, description="Error message if failed")
+
+    # Warnings
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="User-visible warnings about query interpretation (e.g., dropped dimensions).",
+    )
 
     # Suggestions
     suggested_questions: list[str] = Field(default_factory=list, description="Follow-up questions")

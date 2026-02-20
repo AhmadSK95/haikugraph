@@ -2892,9 +2892,19 @@ def get_ui_html() -> str:
     .status-dot.offline{background:var(--brick)}
 
     /* ---- thread ---- */
-    .thread{flex:1;overflow-y:auto;padding:8px 0 24px;display:flex;flex-direction:column;gap:24px;scrollbar-width:thin;scrollbar-color:var(--surface-3) transparent}
+    .thread{flex:1;overflow-y:auto;padding:16px 0 24px;display:flex;flex-direction:column;gap:20px;scrollbar-width:thin;scrollbar-color:var(--surface-3) transparent;scroll-behavior:smooth}
     .thread::-webkit-scrollbar{width:6px}
     .thread::-webkit-scrollbar-thumb{background:var(--surface-3);border-radius:3px}
+
+    /* ---- chat turn wrapper ---- */
+    .turn{display:flex;flex-direction:column;gap:12px;animation:fadeIn .25s ease}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+    /* ---- user message bubble ---- */
+    .turn-user-bubble{align-self:flex-end;max-width:75%;padding:12px 18px;background:var(--gold-dim);border:1px solid var(--gold-mid);border-radius:18px 18px 4px 18px;font-size:14px;line-height:1.5;color:var(--text);word-wrap:break-word}
+
+    /* ---- assistant response wrapper ---- */
+    .turn-assistant{align-self:flex-start;width:100%}
 
     /* ---- empty state ---- */
     .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px 0}
@@ -2904,9 +2914,8 @@ def get_ui_html() -> str:
     .pill{padding:8px 16px;border:1px solid var(--gold-mid);border-radius:20px;font-size:13px;color:var(--gold);transition:all .15s;cursor:pointer}
     .pill:hover{background:var(--gold-dim);border-color:var(--gold)}
 
-    /* ---- user turn ---- */
-    .turn-user{font-size:14px;color:var(--text-muted);padding-left:2px}
-    .turn-user q{color:var(--text);font-style:normal;quotes:none}
+    /* ---- timestamp ---- */
+    .turn-time{font-size:10px;color:var(--text-dim);text-align:right;padding-right:4px}
 
     /* ---- answer card ---- */
     .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden}
@@ -3018,11 +3027,12 @@ def get_ui_html() -> str:
     .explain-btn{font-size:11px;font-weight:600;color:var(--gold);background:var(--gold-dim);border:1px solid var(--gold-mid);border-radius:6px;padding:3px 10px;cursor:pointer;transition:all .15s;letter-spacing:0.3px;text-transform:uppercase}
     .explain-btn:hover{background:var(--gold-mid);border-color:var(--gold)}
 
-    /* ---- collapsed older turns ---- */
-    .turn-collapsed{cursor:pointer;padding:8px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text-dim);transition:all .15s;display:flex;align-items:center;gap:8px;overflow:hidden}
-    .turn-collapsed:hover{background:var(--surface-2);color:var(--text-muted);border-color:var(--gold-mid)}
-    .turn-collapsed .coll-q{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .turn-collapsed .coll-badge{flex-shrink:0}
+    /* ---- loading pulse ---- */
+    .loading-dots{display:inline-flex;gap:4px;align-items:center;padding:4px 0}
+    .loading-dots span{width:6px;height:6px;border-radius:50%;background:var(--text-dim);animation:pulse 1.2s ease infinite}
+    .loading-dots span:nth-child(2){animation-delay:.2s}
+    .loading-dots span:nth-child(3){animation-delay:.4s}
+    @keyframes pulse{0%,80%,100%{opacity:.3;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
 
     /* ---- explain modal ---- */
     .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:200;opacity:0;pointer-events:none;transition:opacity .2s;display:flex;align-items:center;justify-content:center}
@@ -3268,7 +3278,7 @@ def get_ui_html() -> str:
     }
 
     /* ---- render ---- */
-    const _expandedTurns = {};
+    let _shouldAutoScroll = true;
 
     function renderThread() {
       const el = $('thread');
@@ -3287,30 +3297,20 @@ def get_ui_html() -> str:
         return;
       }
 
-      const len = state.turns.length;
       el.innerHTML = state.turns.map((turn, i) => {
-        const isOld = i < len - 2;
-        const isExpanded = !!_expandedTurns[i];
+        const ts = turn.timestamp ? `<div class="turn-time">${new Date(turn.timestamp).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>` : '';
+        let html = `<div class="turn">`;
+        html += `${ts}<div class="turn-user-bubble">${esc(turn.goal)}</div>`;
 
-        /* ---- collapsed pill for older turns ---- */
-        if (isOld && !isExpanded && turn.response) {
-          const r = turn.response;
-          const cls = (r.confidence_score || 0) >= 0.75 ? 'badge-high' : (r.confidence_score || 0) >= 0.45 ? 'badge-medium' : 'badge-low';
-          return `<div class="turn-collapsed" onclick="expandTurn(${i})">
-            <span class="coll-badge badge ${cls}" style="font-size:9px;padding:2px 6px;border-radius:4px">&bull;</span>
-            <span class="coll-q">${esc(turn.goal)}</span>
-          </div>`;
-        }
-
-        /* ---- full render ---- */
-        let html = `<div class="turn-user"><q>${esc(turn.goal)}</q>${isOld && isExpanded ? ' <span style="font-size:11px;color:var(--text-dim);cursor:pointer" onclick="collapseTurn(' + i + ')">[collapse]</span>' : ''}</div>`;
         const r = turn.response;
         if (!r) {
-          html += `<div class="card"><div class="loading-card"><div class="spinner"></div>Analyzing...</div></div>`;
+          html += `<div class="turn-assistant"><div class="card"><div class="loading-card"><div class="loading-dots"><span></span><span></span><span></span></div>Analyzing your data...</div></div></div>`;
+          html += `</div>`;
           return html;
         }
         if (!r.success && r.error) {
-          html += `<div class="error-card">${esc(r.error || r.answer_markdown || 'Query failed')}</div>`;
+          html += `<div class="turn-assistant"><div class="error-card">${esc(r.error || r.answer_markdown || 'Query failed')}</div></div>`;
+          html += `</div>`;
           return html;
         }
 
@@ -3334,7 +3334,7 @@ def get_ui_html() -> str:
         const mode = r.runtime && r.runtime.mode ? `<span class="meta-chip">${esc(r.runtime.mode)}</span><span class="meta-sep"></span>` : '';
         const explainBtn = hasExplain ? `<span class="meta-sep"></span><button class="explain-btn" onclick="openExplain(${i})">Explain</button>` : '';
 
-        html += `<div class="card">
+        html += `<div class="turn-assistant"><div class="card">
           <div class="card-body">
             <div style="margin-bottom:12px">${badge}</div>
             <div class="card-answer">${answer}</div>
@@ -3342,28 +3342,25 @@ def get_ui_html() -> str:
             ${suggestions ? '<div class="suggestions">' + suggestions + '</div>' : ''}
           </div>
           <div class="card-meta">${mode}${rowCount}${execTime}${explainBtn}</div>
-        </div>`;
+        </div></div>`;
+        html += `</div>`;
         return html;
       }).join('');
 
-      /* auto-scroll to latest */
-      requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+      /* auto-scroll to latest only when a new message was just added */
+      if (_shouldAutoScroll) {
+        requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+      }
     }
 
-    /* ---- expand / collapse older turns ---- */
-    function expandTurn(i) {
-      _expandedTurns[i] = true;
-      renderThread();
-      /* scroll to the expanded turn */
-      requestAnimationFrame(() => {
-        const turns = $('thread').children;
-        if (turns[i]) turns[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    /* detect if user has scrolled up — disable auto-scroll so history stays in view */
+    document.addEventListener('DOMContentLoaded', () => {
+      const el = $('thread');
+      if (el) el.addEventListener('scroll', () => {
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        _shouldAutoScroll = atBottom;
       });
-    }
-    function collapseTurn(i) {
-      delete _expandedTurns[i];
-      renderThread();
-    }
+    });
 
     /* ---- explain modal ---- */
     function openExplain(turnIdx) {
@@ -3469,8 +3466,9 @@ def get_ui_html() -> str:
       autoResize($('goalInput'));
       $('runBtn').disabled = true;
 
-      const turn = { goal, response: null };
+      const turn = { goal, response: null, timestamp: Date.now() };
       state.turns.push(turn);
+      _shouldAutoScroll = true;
       renderThread();
       persistThread();
 
@@ -3500,6 +3498,7 @@ def get_ui_html() -> str:
         turn.response = { success: false, error: e.message || 'Network error' };
       }
 
+      _shouldAutoScroll = true;
       renderThread();
       persistThread();
       $('runBtn').disabled = false;

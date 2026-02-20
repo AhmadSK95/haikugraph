@@ -47,6 +47,8 @@ MONTH_MAP = {
     "december": 12,
 }
 
+MAX_DIMENSIONS = 3
+
 
 def _q(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
@@ -141,9 +143,9 @@ class SemanticLayerManager:
             conn = duckdb.connect(str(self.db_path), read_only=False)
             try:
                 source_tables = self._detect_source_tables(conn)
+                self._build_customers_view(conn, source_tables.get("customers"))
                 self._build_transactions_view(conn, source_tables.get("transactions"))
                 self._build_quotes_view(conn, source_tables.get("quotes"))
-                self._build_customers_view(conn, source_tables.get("customers"))
                 self._build_bookings_view(conn, source_tables.get("bookings"))
                 catalog = self._build_catalog(conn, source_tables)
             finally:
@@ -265,7 +267,9 @@ class SemanticLayerManager:
                     0.0::DOUBLE AS amount_collected,
                     0.0::DOUBLE AS amount,
                     FALSE::BOOLEAN AS has_mt103,
-                    FALSE::BOOLEAN AS has_refund
+                    FALSE::BOOLEAN AS has_refund,
+                    NULL::VARCHAR AS address_country,
+                    NULL::VARCHAR AS address_state
                 WHERE FALSE
                 """
             )
@@ -298,29 +302,33 @@ class SemanticLayerManager:
             FROM {_q(table)}
         )
         SELECT
-            COALESCE(transaction_id, CONCAT('row_', CAST(ROW_NUMBER() OVER () AS VARCHAR))) AS transaction_key,
-            transaction_id,
-            customer_id,
-            payee_id,
-            platform_name,
-            state,
-            txn_flow,
-            payment_status,
-            account_details_status,
-            deal_details_status,
-            quote_status,
-            COALESCE(payment_created_ts, created_ts, updated_ts) AS event_ts,
-            mt103_created_ts,
-            payment_created_ts,
-            created_ts,
-            updated_ts,
-            COALESCE(payment_amount_num, 0.0) AS payment_amount,
-            COALESCE(deal_amount_num, 0.0) AS deal_amount,
-            COALESCE(amount_collected_num, 0.0) AS amount_collected,
-            COALESCE(payment_amount_num, deal_amount_num, amount_collected_num, 0.0) AS amount,
-            CASE WHEN mt103_created_ts IS NULL THEN FALSE ELSE TRUE END AS has_mt103,
-            CASE WHEN refund_id_raw IS NULL THEN FALSE ELSE TRUE END AS has_refund
-        FROM base
+            COALESCE(b.transaction_id, CONCAT('row_', CAST(ROW_NUMBER() OVER () AS VARCHAR))) AS transaction_key,
+            b.transaction_id,
+            b.customer_id,
+            b.payee_id,
+            b.platform_name,
+            b.state,
+            b.txn_flow,
+            b.payment_status,
+            b.account_details_status,
+            b.deal_details_status,
+            b.quote_status,
+            COALESCE(b.payment_created_ts, b.created_ts, b.updated_ts) AS event_ts,
+            b.mt103_created_ts,
+            b.payment_created_ts,
+            b.created_ts,
+            b.updated_ts,
+            COALESCE(b.payment_amount_num, 0.0) AS payment_amount,
+            COALESCE(b.deal_amount_num, 0.0) AS deal_amount,
+            COALESCE(b.amount_collected_num, 0.0) AS amount_collected,
+            COALESCE(b.payment_amount_num, b.deal_amount_num, b.amount_collected_num, 0.0) AS amount,
+            CASE WHEN b.mt103_created_ts IS NULL THEN FALSE ELSE TRUE END AS has_mt103,
+            CASE WHEN refund_id_raw IS NULL THEN FALSE ELSE TRUE END AS has_refund,
+            c.address_country,
+            c.address_state
+        FROM base b
+        LEFT JOIN datada_dim_customers c
+            ON b.customer_id = c.customer_id
         """
         conn.execute(sql)
 
@@ -599,7 +607,10 @@ class SemanticLayerManager:
             }
 
         dim_map = {
-            "datada_mart_transactions": ["platform_name", "state", "payment_status", "txn_flow"],
+            "datada_mart_transactions": [
+                "platform_name", "state", "payment_status", "txn_flow",
+                "address_country", "address_state",
+            ],
             "datada_mart_quotes": ["status", "from_currency", "to_currency", "purpose_code"],
             "datada_dim_customers": ["type", "address_country", "address_state", "status"],
             "datada_mart_bookings": ["currency", "deal_type", "status", "linked_txn_status"],
@@ -876,6 +887,7 @@ class AgenticAnalyticsTeam:
         started = time.perf_counter()
         history = conversation_context or []
         autonomy_cfg = autonomy or AutonomyConfig()
+        self._pipeline_warnings: list[str] = []
 
         try:
             effective_goal = self._run_agent(
@@ -1077,6 +1089,7 @@ class AgenticAnalyticsTeam:
                     },
                     suggested_questions=suggested[:6],
                     error="clarification_required",
+                    warnings=self._pipeline_warnings,
                 )
 
             pre_gov = self._run_agent(
@@ -1117,6 +1130,7 @@ class AgenticAnalyticsTeam:
                     agent_trace=trace,
                     suggested_questions=["Ask an aggregated business metric instead."],
                     data_quality=catalog.get("quality", {}),
+                    warnings=self._pipeline_warnings,
                 )
 
             if intake.get("intent") == "data_overview":
@@ -1243,6 +1257,7 @@ class AgenticAnalyticsTeam:
                     sample_rows=overview.get("sample_rows", []),
                     columns=overview.get("columns", ["mart", "row_count"]),
                     suggested_questions=overview.get("suggested_questions", []),
+                    warnings=self._pipeline_warnings,
                 )
 
             if intake.get("intent") == "document_qa" or intake.get("domain") == "documents":
@@ -1415,6 +1430,7 @@ class AgenticAnalyticsTeam:
                         "blackboard": {"artifact_count": len(blackboard), "edges": self._blackboard_edges(blackboard)},
                     },
                     suggested_questions=doc_answer.get("suggested_questions", []),
+                    warnings=self._pipeline_warnings,
                 )
 
             retrieval = self._run_agent(
@@ -1462,6 +1478,7 @@ class AgenticAnalyticsTeam:
                 "domain_analysis",
                 self._transactions_specialist,
                 plan,
+                catalog,
             )
             customer_findings = self._run_agent(
                 trace,
@@ -1469,6 +1486,7 @@ class AgenticAnalyticsTeam:
                 "domain_analysis",
                 self._customer_specialist,
                 plan,
+                catalog,
             )
             revenue_findings = self._run_agent(
                 trace,
@@ -1476,6 +1494,7 @@ class AgenticAnalyticsTeam:
                 "domain_analysis",
                 self._revenue_specialist,
                 plan,
+                catalog,
             )
             risk_findings = self._run_agent(
                 trace,
@@ -1483,7 +1502,11 @@ class AgenticAnalyticsTeam:
                 "domain_analysis",
                 self._risk_specialist,
                 plan,
+                catalog,
             )
+            # Surface specialist warnings into pipeline
+            for findings in [tx_findings, customer_findings, revenue_findings, risk_findings]:
+                self._pipeline_warnings.extend(findings.get("warnings", []))
             self._blackboard_post(
                 blackboard,
                 producer="SpecialistAgents",
@@ -1542,6 +1565,66 @@ class AgenticAnalyticsTeam:
                 payload=audit,
                 consumed_by=["AutonomyAgent", "NarrativeAgent"],
             )
+            self._pipeline_warnings.extend(audit.get("warnings", []))
+
+            # ── GAP 9: Post-audit feedback loop ──────────────────
+            # If the first audit score is poor and there are concept misses,
+            # re-invoke planning→query→execution→audit once to self-correct.
+            audit_score = float(audit.get("score", 1.0))
+            goal_term_misses = audit.get("grounding", {}).get("goal_term_misses", [])
+            if audit_score < 0.5 and goal_term_misses and not intake.get("_replan_applied"):
+                enriched_intake = self._enrich_intake_from_audit(intake, audit)
+                enriched_intake["_replan_applied"] = True
+
+                replan = self._run_agent(
+                    trace,
+                    "PlanningAgent",
+                    "replan_after_audit",
+                    self._planning_agent,
+                    enriched_intake,
+                    retrieval,
+                    catalog,
+                )
+                replan_qp = self._run_agent(
+                    trace,
+                    "QueryEngineerAgent",
+                    "replan_sql_compilation",
+                    self._query_engine_agent,
+                    replan,
+                    [tx_findings, customer_findings, revenue_findings, risk_findings],
+                )
+                replan_exec = self._run_agent(
+                    trace,
+                    "ExecutionAgent",
+                    "replan_execution",
+                    self._execution_agent,
+                    replan_qp,
+                )
+                replan_audit = self._run_agent(
+                    trace,
+                    "AuditAgent",
+                    "replan_audit",
+                    self._audit_agent,
+                    replan,
+                    replan_qp,
+                    replan_exec,
+                )
+                replan_score = float(replan_audit.get("score", 0.0))
+                if replan_score > audit_score:
+                    plan = replan
+                    query_plan = replan_qp
+                    execution = replan_exec
+                    audit = replan_audit
+                    self._pipeline_warnings.append(
+                        f"Query was automatically refined based on audit feedback "
+                        f"(score {audit_score:.2f} → {replan_score:.2f})."
+                    )
+                else:
+                    self._pipeline_warnings.append(
+                        "Audit-driven re-plan attempted but did not improve results; "
+                        "keeping original query."
+                    )
+
             autonomy_result = self._run_agent(
                 trace,
                 "AutonomyAgent",
@@ -1616,6 +1699,30 @@ class AgenticAnalyticsTeam:
 
             confidence_score = max(0.0, min(1.0, float(audit.get("score", 0.6))))
             confidence = self._to_confidence(confidence_score)
+
+            # ── GAP 11: Build contribution map from trace ─────────
+            contribution_map = [
+                {
+                    "agent": entry["agent"],
+                    "role": entry.get("role", ""),
+                    "contribution": entry.get("contribution", ""),
+                    "dropped_items": entry.get("dropped_items", []),
+                    "status": entry.get("status", "unknown"),
+                }
+                for entry in trace
+                if entry.get("contribution")
+            ]
+            audit_warnings = audit.get("warnings", [])
+            grounding = audit.get("grounding", {})
+            coverage_pct = grounding.get("concept_coverage_pct", 100.0)
+            misses = grounding.get("goal_term_misses", [])
+            confidence_reasoning = (
+                f"Score {confidence_score:.2f} ({confidence.value}). "
+                f"Concept coverage {coverage_pct}%"
+                + (f", missed terms: {misses}" if misses else "")
+                + (f", {len(audit_warnings)} audit warning(s)" if audit_warnings else "")
+                + "."
+            )
 
             evidence_packets = [
                 {
@@ -1783,6 +1890,8 @@ class AgenticAnalyticsTeam:
                 | {"blackboard_entries": len(blackboard)},
                 agent_trace=trace,
                 chart_spec=chart_spec,
+                contribution_map=contribution_map,
+                confidence_reasoning=confidence_reasoning,
                 evidence_packets=evidence_packets,
                 data_quality={
                     **catalog.get("quality", {}),
@@ -1802,6 +1911,7 @@ class AgenticAnalyticsTeam:
                 },
                 stats_analysis=stats_dict,
                 suggested_questions=narration.get("suggested_questions", []),
+                warnings=self._pipeline_warnings,
             )
         except Exception as exc:
             total_ms = (time.perf_counter() - started) * 1000
@@ -1829,7 +1939,61 @@ class AgenticAnalyticsTeam:
                 error=str(exc),
                 agent_trace=trace,
                 suggested_questions=["Try a simpler business question."],
+                warnings=getattr(self, "_pipeline_warnings", []),
             )
+
+    @staticmethod
+    def _extract_contribution(agent: str, out: Any) -> tuple[str, list[str]]:
+        """Derive a contribution string and dropped_items from agent output."""
+        contribution = ""
+        dropped: list[str] = []
+        if not isinstance(out, dict):
+            return contribution, dropped
+
+        if agent == "IntakeAgent":
+            dims = out.get("dimensions", [])
+            metric = out.get("metric", "")
+            domain = out.get("domain", "")
+            contribution = f"domain={domain}, metric={metric}, dims={dims}"
+        elif agent == "PlanningAgent":
+            contribution = (
+                f"table={out.get('table')}, metric={out.get('metric')}, "
+                f"dims={out.get('dimensions', [])}"
+            )
+            dropped = [
+                d for d in out.get("_dropped_dimensions", [])
+            ] if out.get("_dropped_dimensions") else []
+        elif agent == "QueryEngineerAgent":
+            sql = str(out.get("sql", ""))[:120]
+            contribution = f"sql={sql}"
+        elif agent == "ExecutionAgent":
+            contribution = (
+                f"rows={out.get('row_count')}, "
+                f"cols={out.get('columns', [])}"
+            )
+        elif agent == "AuditAgent":
+            contribution = (
+                f"score={out.get('score')}, "
+                f"warnings={len(out.get('warnings', []))}, "
+                f"misses={out.get('grounding', {}).get('goal_term_misses', [])}"
+            )
+        elif agent == "AutonomyAgent":
+            contribution = (
+                f"correction={out.get('correction_applied', False)}, "
+                f"reason={out.get('correction_reason', '')[:80]}"
+            )
+        elif agent == "NarrativeAgent":
+            contribution = f"headline={str(out.get('headline_value', ''))[:60]}"
+        elif agent == "VisualizationAgent":
+            contribution = f"chart_type={out.get('type', 'unknown')}"
+        elif agent.endswith("SpecialistAgent"):
+            warnings = out.get("warnings", [])
+            contribution = f"warnings={len(warnings)}"
+        else:
+            # Generic: summarise top-level keys
+            contribution = f"keys={list(out.keys())[:6]}"
+
+        return contribution, dropped
 
     def _run_agent(
         self,
@@ -1843,6 +2007,7 @@ class AgenticAnalyticsTeam:
         start = time.perf_counter()
         try:
             out = fn(*args, **kwargs)
+            contribution, dropped_items = self._extract_contribution(agent, out)
             trace.append(
                 {
                     "agent": agent,
@@ -1850,6 +2015,8 @@ class AgenticAnalyticsTeam:
                     "status": "success",
                     "duration_ms": round((time.perf_counter() - start) * 1000, 2),
                     "summary": _compact(out),
+                    "contribution": contribution,
+                    "dropped_items": dropped_items,
                 }
             )
             return out
@@ -1861,9 +2028,51 @@ class AgenticAnalyticsTeam:
                     "status": "failed",
                     "duration_ms": round((time.perf_counter() - start) * 1000, 2),
                     "summary": str(exc),
+                    "contribution": "",
+                    "dropped_items": [],
                 }
             )
             raise
+
+    def _enrich_intake_from_audit(
+        self,
+        intake: dict[str, Any],
+        audit: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Merge audit feedback into intake for a re-plan cycle (GAP 9).
+
+        Extracts ``goal_term_misses`` and ``concept_misses`` from the audit
+        grounding report, maps them to known dimension/metric keywords, and
+        merges them into a copy of the intake payload.  The caller is
+        responsible for setting ``_replan_applied`` on the result to prevent
+        infinite loops.
+        """
+        enriched = dict(intake)
+        grounding = audit.get("grounding", {})
+        goal_term_misses = grounding.get("goal_term_misses", [])
+        existing_dims: list[str] = list(enriched.get("dimensions") or [])
+
+        # Map missed concepts to dimensions/metric hints
+        concept_dim_hints: dict[str, str] = {
+            "forex_domain": "datada_mart_quotes",
+            "mt103": "has_mt103",
+            "refund": "has_refund",
+        }
+        for miss in goal_term_misses:
+            miss_lower = str(miss).lower().strip()
+            if miss_lower in concept_dim_hints:
+                hint = concept_dim_hints[miss_lower]
+                if hint.startswith("datada_mart_"):
+                    enriched["domain"] = hint.replace("datada_mart_", "")
+                elif hint not in existing_dims:
+                    existing_dims.append(hint)
+
+        enriched["dimensions"] = existing_dims
+        enriched["_audit_feedback"] = {
+            "goal_term_misses": goal_term_misses,
+            "original_score": audit.get("score", 0),
+        }
+        return enriched
 
     def _chief_analyst(
         self,
@@ -2563,10 +2772,10 @@ class AgenticAnalyticsTeam:
                         **parsed,
                         **{k: v for k, v in cleaned.items() if v not in (None, "")},
                     }
-                    merged = self._enforce_intake_consistency(goal, deterministic, merged)
+                    merged = self._enforce_intake_consistency(goal, deterministic, merged, catalog)
                     parsed.update(merged)
                     parsed["_llm_intake_used"] = True
-        parsed = self._enforce_intake_consistency(goal, deterministic, parsed)
+        parsed = self._enforce_intake_consistency(goal, deterministic, parsed, catalog)
         if memory_hints:
             parsed = self._apply_memory_hints(goal, parsed, memory_hints)
         return parsed
@@ -2923,6 +3132,8 @@ class AgenticAnalyticsTeam:
                 "status": "payment_status",
                 "flow": "txn_flow",
                 "customer": "customer_id",
+                "region": "address_country",
+                "country": "address_country",
                 "month": "__month__",
             },
             "quotes": {
@@ -2956,18 +3167,69 @@ class AgenticAnalyticsTeam:
             for t in [" by ", "split", "breakdown", "top", "wise", "per ", "month wise", "grouped", "group by"]
         )
         has_month_signal = bool(
-            re.search(r"\b(by month|monthly|month[\s-]?wise|trend)\b", lower)
+            re.search(r"\b(by month|monthly|month[\s-]?wise)\b", lower)
             or ("month" in lower and dim_signal)
             or ("split my month" in lower)
         )
+        has_trend_signal = bool(re.search(r"\btrends?\b", lower))
         if domain != "documents" and has_month_signal:
             dimensions.append("__month__")
 
+        matched_dim_keys: set[str] = set()
         for key, col in dim_candidates.get(domain, {}).items():
             if key == "month":
                 continue
             if key in lower and dim_signal and col not in dimensions:
                 dimensions.append(col)
+                matched_dim_keys.add(key)
+
+        # Dynamic dimension discovery: for unmatched keywords, try to
+        # resolve against actual catalog columns via substring matching.
+        if dim_signal and domain != "documents":
+            by_match = re.findall(r"\bby\s+(\w+)", lower)
+            split_match = re.findall(r"\bsplit\s+(?:by\s+)?(\w+)", lower)
+            candidate_words = set(by_match + split_match)
+            noise = {"the", "a", "an", "and", "or", "each", "every", "month", "monthly"}
+            candidate_words -= noise
+            candidate_words -= matched_dim_keys
+            known_keys = set(dim_candidates.get(domain, {}).keys())
+            _domain_to_mart = {
+                "transactions": "datada_mart_transactions",
+                "quotes": "datada_mart_quotes",
+                "customers": "datada_dim_customers",
+                "bookings": "datada_mart_bookings",
+            }
+            mart_name = _domain_to_mart.get(domain, "")
+            dim_value_cols = set(catalog.get("dimension_values", {}).get(mart_name, {}).keys())
+            mart_cols = set(catalog.get("marts", {}).get(mart_name, {}).get("columns", []))
+            available_dim_cols = dim_value_cols | mart_cols
+
+            for word in candidate_words:
+                if word in known_keys:
+                    continue
+                # Try substring match: "country" -> "address_country"
+                resolved = None
+                for col in sorted(available_dim_cols):
+                    if word in col or col in word:
+                        if col not in dimensions:
+                            resolved = col
+                            break
+                if resolved:
+                    dimensions.append(resolved)
+                    self._pipeline_warnings.append(
+                        f"Dimension '{word}' dynamically resolved to column "
+                        f"'{resolved}' via catalog lookup."
+                    )
+                else:
+                    self._pipeline_warnings.append(
+                        f"Dimension keyword '{word}' was not recognized for the "
+                        f"'{domain}' domain and was ignored."
+                    )
+
+        # "trend" implies time-series but should not override explicit dimensions.
+        # Only add __month__ when "trend" appears and no month signal already added it.
+        if has_trend_signal and domain != "documents" and "__month__" not in dimensions:
+            dimensions.append("__month__")
 
         if intent == "grouped_metric" and not dimensions and domain in dim_candidates:
             # Fallback grouped intent: prefer first stable dimension for readable grouping.
@@ -2975,8 +3237,13 @@ class AgenticAnalyticsTeam:
             if default_col != "__month__":
                 dimensions.append(default_col)
 
-        if len(dimensions) > 2:
-            dimensions = dimensions[:2]
+        if len(dimensions) > MAX_DIMENSIONS:
+            dropped_dims = dimensions[MAX_DIMENSIONS:]
+            dimensions = dimensions[:MAX_DIMENSIONS]
+            self._pipeline_warnings.append(
+                f"Requested {len(dimensions) + len(dropped_dims)} dimensions but "
+                f"only {MAX_DIMENSIONS} are supported. Dropped: {', '.join(dropped_dims)}."
+            )
         if metric == "university_count":
             dimensions = [d for d in dimensions if d != "is_university"]
         dimension = dimensions[0] if dimensions else None
@@ -3066,6 +3333,7 @@ class AgenticAnalyticsTeam:
         goal: str,
         deterministic: dict[str, Any],
         parsed: dict[str, Any],
+        catalog: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         out = dict(parsed)
         lower = goal.lower()
@@ -3112,10 +3380,39 @@ class AgenticAnalyticsTeam:
         if "split" in lower and str(out.get("intent") or "") == "metric":
             out["intent"] = "grouped_metric"
 
-        dims = list(out.get("dimensions") or [])
+        raw_dims = list(out.get("dimensions") or [])
         dim0 = out.get("dimension")
-        if not dims and isinstance(dim0, str) and dim0.strip():
-            dims = [dim0.strip()]
+        if not raw_dims and isinstance(dim0, str) and dim0.strip():
+            raw_dims = [dim0.strip()]
+
+        # Validate LLM-provided dims against catalog columns (preserve valid ones).
+        _domain_to_mart = {
+            "transactions": "datada_mart_transactions",
+            "quotes": "datada_mart_quotes",
+            "customers": "datada_dim_customers",
+            "bookings": "datada_mart_bookings",
+        }
+        mart_name = _domain_to_mart.get(out.get("domain", ""), "")
+        available_cols: set[str] = set()
+        if catalog:
+            available_cols = set(
+                catalog.get("marts", {}).get(mart_name, {}).get("columns", [])
+            )
+        dims: list[str] = []
+        for dim in raw_dims:
+            if dim == "__month__" or dim in available_cols:
+                if dim not in dims:
+                    dims.append(dim)
+            elif available_cols:
+                self._pipeline_warnings.append(
+                    f"Dimension '{dim}' from intake is not in {mart_name} schema; removed."
+                )
+            else:
+                # No catalog available -- keep dim as-is (best effort).
+                if dim not in dims:
+                    dims.append(dim)
+
+        # Additive keyword enrichment: add missing dims based on goal keywords.
         dim_signal = any(
             token in lower for token in [" by ", "split", "breakdown", "wise", "per ", "grouped", "group by"]
         )
@@ -3126,8 +3423,15 @@ class AgenticAnalyticsTeam:
                 dims.append("platform_name")
             if "state" in lower and dim_signal and "state" not in dims:
                 dims.append("state")
-        if len(dims) > 2:
-            dims = dims[:2]
+            if ("region" in lower or "country" in lower) and dim_signal and "address_country" not in dims:
+                dims.append("address_country")
+        if len(dims) > MAX_DIMENSIONS:
+            dropped = dims[MAX_DIMENSIONS:]
+            dims = dims[:MAX_DIMENSIONS]
+            self._pipeline_warnings.append(
+                f"Requested {len(dims) + len(dropped)} dimensions but only "
+                f"{MAX_DIMENSIONS} are supported. Dropped: {', '.join(dropped)}."
+            )
         out["dimensions"] = dims
         out["dimension"] = dims[0] if dims else None
 
@@ -3171,7 +3475,7 @@ class AgenticAnalyticsTeam:
         if past_metric and merged.get("metric") == "transaction_count":
             merged["metric"] = past_metric
         if past_dims and not merged.get("dimensions"):
-            merged["dimensions"] = past_dims[:2]
+            merged["dimensions"] = past_dims[:MAX_DIMENSIONS]
             merged["dimension"] = merged["dimensions"][0]
         if not merged.get("time_filter") and isinstance(best.get("time_filter"), dict):
             merged["time_filter"] = best["time_filter"]
@@ -3506,8 +3810,13 @@ class AgenticAnalyticsTeam:
                 continue
             if dim in retrieval["columns"]:
                 dimensions.append(dim)
-        if len(dimensions) > 2:
-            dimensions = dimensions[:2]
+            else:
+                self._pipeline_warnings.append(
+                    f"Dimension '{dim}' was requested but is not available in "
+                    f"{retrieval['table']}. It was removed from the query."
+                )
+        if len(dimensions) > MAX_DIMENSIONS:
+            dimensions = dimensions[:MAX_DIMENSIONS]
         dimension = dimensions[0] if dimensions else None
 
         value_filters = list(intake.get("value_filters", []))
@@ -3629,6 +3938,7 @@ class AgenticAnalyticsTeam:
                 goal=goal,
                 base_plan=seed_plan,
                 base_execution=seed_execution,
+                base_audit=base_audit,
                 catalog=catalog,
                 memory_hints=memory_hints or [],
                 learned_corrections=learned_corrections or [],
@@ -3745,6 +4055,7 @@ class AgenticAnalyticsTeam:
         goal: str,
         base_plan: dict[str, Any],
         base_execution: dict[str, Any],
+        base_audit: dict[str, Any] | None = None,
         catalog: dict[str, Any],
         memory_hints: list[dict[str, Any]],
         learned_corrections: list[dict[str, Any]],
@@ -3858,14 +4169,16 @@ class AgenticAnalyticsTeam:
 
         enrich_dims: list[str] = []
         existing_dims = list(base_plan.get("dimensions") or [])
-        if re.search(r"\b(by month|month wise|monthly|trend)\b", lower) and "__month__" not in existing_dims:
+        if re.search(r"\b(by month|month wise|monthly|trends?)\b", lower) and "__month__" not in existing_dims:
             enrich_dims.append("__month__")
         if "platform" in lower and "platform_name" not in existing_dims:
             enrich_dims.append("platform_name")
         if "state" in lower and "state" not in existing_dims:
             enrich_dims.append("state")
+        if ("region" in lower or "country" in lower) and "address_country" not in existing_dims:
+            enrich_dims.append("address_country")
         if enrich_dims:
-            merged_dims = (existing_dims + enrich_dims)[:2]
+            merged_dims = (existing_dims + enrich_dims)[:MAX_DIMENSIONS]
             variant = self._build_plan_variant(
                 base_plan,
                 catalog,
@@ -3884,6 +4197,38 @@ class AgenticAnalyticsTeam:
             )
             if variant:
                 candidates.append(variant)
+
+        # Audit-driven dimension variants: if audit detected goal_term_misses
+        # that could be dimension names, generate candidates with those added.
+        if base_audit:
+            goal_misses = base_audit.get("grounding", {}).get("goal_term_misses", [])
+            table = base_plan.get("table", "")
+            available_cols = set(
+                catalog.get("marts", {}).get(table, {}).get("columns", [])
+            )
+            dim_value_cols = set(
+                catalog.get("dimension_values", {}).get(table, {}).keys()
+            )
+            discoverable = available_cols | dim_value_cols
+            for missed_term in goal_misses[:3]:
+                missed_lower = str(missed_term).lower().strip()
+                if not missed_lower:
+                    continue
+                resolved_col = None
+                for col in sorted(discoverable):
+                    if missed_lower in col or col in missed_lower:
+                        resolved_col = col
+                        break
+                if resolved_col and resolved_col not in existing_dims:
+                    new_dims = existing_dims + [resolved_col]
+                    variant = self._build_plan_variant(
+                        base_plan,
+                        catalog,
+                        dimensions=new_dims[:MAX_DIMENSIONS],
+                        reason=f"audit_dimension_miss:{missed_term}->{resolved_col}",
+                    )
+                    if variant:
+                        candidates.append(variant)
 
         pool_cap = max(1, autonomy.max_candidate_plans * max(1, autonomy.max_refinement_rounds))
         return candidates[:pool_cap]
@@ -3923,7 +4268,7 @@ class AgenticAnalyticsTeam:
             for dim in dimensions:
                 if dim == "__month__" or dim in plan["available_columns"]:
                     valid_dims.append(dim)
-            plan["dimensions"] = valid_dims[:2]
+            plan["dimensions"] = valid_dims[:MAX_DIMENSIONS]
             plan["dimension"] = plan["dimensions"][0] if plan["dimensions"] else None
 
         if time_filter is not ...:
@@ -3964,12 +4309,14 @@ class AgenticAnalyticsTeam:
         lower = goal.lower()
         dims = list(plan.get("dimensions") or [])
         dimension_bonus = 0.0
-        if re.search(r"\b(by month|month wise|monthly|trend)\b", lower) and "__month__" in dims:
+        if re.search(r"\b(by month|month wise|monthly)\b", lower) and "__month__" in dims:
             dimension_bonus += 0.03
         if "platform" in lower and "platform_name" in dims:
             dimension_bonus += 0.03
         if "state" in lower and "state" in dims:
             dimension_bonus += 0.02
+        if ("region" in lower or "country" in lower) and "address_country" in dims:
+            dimension_bonus += 0.03
 
         latency_penalty = 0.0
         if execution.get("execution_time_ms") and float(execution["execution_time_ms"]) > 6000:
@@ -4179,41 +4526,65 @@ class AgenticAnalyticsTeam:
             )
         return out
 
-    def _transactions_specialist(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def _transactions_specialist(self, plan: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         if plan["table"] != "datada_mart_transactions":
-            return {"active": False, "notes": []}
+            return {"active": False, "notes": [], "warnings": []}
         notes = ["Use distinct transaction_key for counts to avoid duplicate counting."]
+        warnings: list[str] = []
         if "amount" in plan["metric"]:
             notes.append("Use normalized amount column prioritizing payment_amount/deal_amount.")
-        return {"active": True, "notes": notes}
+        # Validate dimensions against schema
+        available = set(plan.get("available_columns", []))
+        for dim in plan.get("dimensions", []):
+            if dim != "__month__" and dim not in available:
+                warnings.append(f"Dimension '{dim}' not found in {plan['table']}.")
+        # Validate metric
+        metrics = catalog.get("metrics_by_table", {}).get(plan["table"], {})
+        if plan.get("metric") and plan["metric"] not in metrics:
+            warnings.append(f"Metric '{plan['metric']}' not in available metrics for {plan['table']}.")
+        return {"active": True, "notes": notes, "warnings": warnings}
 
-    def _customer_specialist(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def _customer_specialist(self, plan: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         if plan["table"] not in {"datada_dim_customers", "datada_mart_transactions"}:
-            return {"active": False, "notes": []}
-        return {
-            "active": True,
-            "notes": ["Customer-level metrics should use distinct customer keys where possible."],
-        }
+            return {"active": False, "notes": [], "warnings": []}
+        notes = ["Customer-level metrics should use distinct customer keys where possible."]
+        warnings: list[str] = []
+        # Suggest geographic dimensions when customer table is involved
+        dims = set(plan.get("dimensions", []))
+        goal_lower = str(plan.get("goal", "")).lower()
+        if ("country" in goal_lower or "region" in goal_lower) and "address_country" not in dims:
+            notes.append("Consider adding address_country as a dimension for geographic breakdown.")
+        # Validate dimensions
+        available = set(plan.get("available_columns", []))
+        for dim in plan.get("dimensions", []):
+            if dim != "__month__" and dim not in available:
+                warnings.append(f"Dimension '{dim}' not found in {plan['table']}.")
+        return {"active": True, "notes": notes, "warnings": warnings}
 
-    def _revenue_specialist(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def _revenue_specialist(self, plan: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         if "amount" not in plan["metric"] and "quote_value" not in plan["metric"]:
-            return {"active": False, "notes": []}
-        return {
-            "active": True,
-            "notes": [
-                "Revenue metrics should summarize numeric normalized columns only.",
-            ],
-        }
+            return {"active": False, "notes": [], "warnings": []}
+        notes = ["Revenue metrics should summarize numeric normalized columns only."]
+        warnings: list[str] = []
+        metrics = catalog.get("metrics_by_table", {}).get(plan["table"], {})
+        if plan.get("metric") and plan["metric"] not in metrics:
+            warnings.append(f"Metric '{plan['metric']}' not available for {plan['table']}.")
+        return {"active": True, "notes": notes, "warnings": warnings}
 
-    def _risk_specialist(self, plan: dict[str, Any]) -> dict[str, Any]:
+    def _risk_specialist(self, plan: dict[str, Any], catalog: dict[str, Any]) -> dict[str, Any]:
         if not any(k in plan["metric"] for k in ["refund", "mt103"]):
-            return {"active": False, "notes": []}
-        return {
-            "active": True,
-            "notes": [
-                "Risk metrics should report rate and count where available.",
-            ],
-        }
+            return {"active": False, "notes": [], "warnings": []}
+        notes = ["Risk metrics should report rate and count where available."]
+        warnings: list[str] = []
+        # If asking for amount on mt103/refund, verify filter is applied
+        if "amount" in plan.get("metric", ""):
+            value_filters = plan.get("value_filters", [])
+            filter_cols = {vf.get("column") for vf in value_filters}
+            if "mt103" in plan["metric"] and "has_mt103" not in filter_cols:
+                warnings.append("MT103 amount requested without has_mt103 filter.")
+            if "refund" in plan["metric"] and "has_refund" not in filter_cols:
+                warnings.append("Refund amount requested without has_refund filter.")
+        return {"active": True, "notes": notes, "warnings": warnings}
 
     def _governance_precheck(self, goal: str) -> dict[str, Any]:
         lower = goal.lower()
@@ -4227,7 +4598,9 @@ class AgenticAnalyticsTeam:
         plan: dict[str, Any],
         specialist_findings: list[dict[str, Any]],
     ) -> dict[str, Any]:
-        del specialist_findings  # reserved for richer planner integration.
+        # Specialist findings are now used upstream for warnings; notes reserved
+        # for future SQL-enrichment integration.
+        _ = specialist_findings
 
         table = plan["table"]
         metric_expr = plan["metric_expr"]
@@ -4846,7 +5219,7 @@ class AgenticAnalyticsTeam:
                 if isinstance(item, str) and item.strip():
                     dims.append(item.strip())
         if dims:
-            cleaned["dimensions"] = dims[:2]
+            cleaned["dimensions"] = dims[:MAX_DIMENSIONS]
             if "dimension" not in cleaned:
                 cleaned["dimension"] = dims[0]
 
