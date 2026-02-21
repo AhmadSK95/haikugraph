@@ -818,7 +818,7 @@ class SemanticLayerManager:
             ],
             "datada_mart_quotes": ["status", "from_currency", "to_currency", "purpose_code"],
             "datada_dim_customers": ["type", "address_country", "address_state", "status"],
-            "datada_mart_bookings": ["currency", "deal_type", "status", "linked_txn_status", "deal_id"],
+            "datada_mart_bookings": ["currency", "deal_type", "status", "linked_txn_status"],
         }
 
         for mart, dimensions in dim_map.items():
@@ -4484,15 +4484,23 @@ class AgenticAnalyticsTeam:
                     if resolved:
                         break
                 if not resolved:
-                    # Fallback: try id columns too if nothing better found
-                    for w in words_to_try:
-                        for col in sorted(available_dim_cols):
-                            if w in col or col in w:
-                                if col not in dimensions and col not in resolved_dims:
-                                    resolved = col
-                                    break
-                        if resolved:
-                            break
+                    # Check if the phrase's words already match columns
+                    # that are in dimensions (the phrase is already covered,
+                    # so don't fall back to id/key columns).
+                    _already_covered = any(
+                        any(w in col or col in w for col in dimensions)
+                        for w in words_to_try
+                    )
+                    if not _already_covered:
+                        # Fallback: try id columns too if nothing better found
+                        for w in words_to_try:
+                            for col in sorted(available_dim_cols):
+                                if w in col or col in w:
+                                    if col not in dimensions and col not in resolved_dims:
+                                        resolved = col
+                                        break
+                            if resolved:
+                                break
                 if resolved:
                     dimensions.append(resolved)
                     resolved_dims.add(resolved)
