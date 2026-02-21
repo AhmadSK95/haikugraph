@@ -145,6 +145,8 @@ _BUILTIN_DOMAIN_KNOWLEDGE: dict[str, Any] = {
         "transfers": "transactions",
         "remittance": "transactions",
         "wire": "transactions",
+        "transaction": "transactions",
+        "transactions": "transactions",
         "fx": "quotes",
         "rate": "quotes",
         "deal": "bookings",
@@ -275,6 +277,15 @@ class SemanticLayerManager:
         self._catalog: dict[str, Any] | None = None
         self._lock = threading.RLock()
 
+    # Mart names managed by the semantic layer -- used to avoid
+    # self-referential view creation and to clean up before rebuilds.
+    _MART_NAMES = frozenset({
+        "datada_mart_transactions",
+        "datada_mart_quotes",
+        "datada_dim_customers",
+        "datada_mart_bookings",
+    })
+
     def prepare(self, *, force: bool = False) -> dict[str, Any]:
         with self._lock:
             if not self.db_path.exists():
@@ -286,11 +297,20 @@ class SemanticLayerManager:
 
             conn = duckdb.connect(str(self.db_path), read_only=False)
             try:
+                # Drop existing mart objects to prevent self-referential
+                # views when _detect_source_tables re-discovers them.
+                self._drop_marts(conn)
+
                 source_tables = self._detect_source_tables(conn)
                 self._build_customers_view(conn, source_tables.get("customers"))
                 self._build_transactions_view(conn, source_tables.get("transactions"))
                 self._build_quotes_view(conn, source_tables.get("quotes"))
                 self._build_bookings_view(conn, source_tables.get("bookings"))
+
+                # Validate that all mart objects can be queried without
+                # recursion errors before building the catalog.
+                self._validate_marts(conn)
+
                 catalog = self._build_catalog(conn, source_tables)
             finally:
                 conn.close()
@@ -299,12 +319,31 @@ class SemanticLayerManager:
             self._prepared_mtime = mtime
             return catalog
 
+    @staticmethod
+    def _drop_marts(conn: duckdb.DuckDBPyConnection) -> None:
+        """Drop all managed mart/dim objects regardless of their type."""
+        existing = {
+            row[0]: row[1]
+            for row in conn.execute(
+                "SELECT table_name, table_type FROM information_schema.tables "
+                "WHERE table_schema='main' AND table_name LIKE 'datada_%'"
+            ).fetchall()
+        }
+        for mart in SemanticLayerManager._MART_NAMES:
+            if mart not in existing:
+                continue
+            if existing[mart] == "VIEW":
+                conn.execute(f"DROP VIEW {_q(mart)}")
+            else:
+                conn.execute(f"DROP TABLE {_q(mart)}")
+
     def _detect_source_tables(self, conn: duckdb.DuckDBPyConnection) -> dict[str, str]:
         tables = [
             t
             for (t,) in conn.execute(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
             ).fetchall()
+            if not t.startswith("datada_")  # exclude managed mart/dim objects
         ]
         columns_by_table: dict[str, set[str]] = {}
         for table in tables:
@@ -388,35 +427,34 @@ class SemanticLayerManager:
         if not table:
             conn.execute(
                 """
-                CREATE OR REPLACE VIEW datada_mart_transactions AS
-                SELECT
-                    ''::VARCHAR AS transaction_key,
-                    NULL::VARCHAR AS transaction_id,
-                    NULL::VARCHAR AS customer_id,
-                    NULL::VARCHAR AS payee_id,
-                    NULL::VARCHAR AS platform_name,
-                    NULL::VARCHAR AS state,
-                    NULL::VARCHAR AS txn_flow,
-                    NULL::VARCHAR AS payment_status,
-                    NULL::VARCHAR AS account_details_status,
-                    NULL::VARCHAR AS deal_details_status,
-                    NULL::VARCHAR AS quote_status,
-                    NULL::TIMESTAMP AS event_ts,
-                    NULL::TIMESTAMP AS mt103_created_ts,
-                    NULL::TIMESTAMP AS payment_created_ts,
-                    NULL::TIMESTAMP AS created_ts,
-                    NULL::TIMESTAMP AS updated_ts,
-                    0.0::DOUBLE AS payment_amount,
-                    0.0::DOUBLE AS deal_amount,
-                    0.0::DOUBLE AS amount_collected,
-                    0.0::DOUBLE AS amount,
-                    FALSE::BOOLEAN AS has_mt103,
-                    FALSE::BOOLEAN AS has_refund,
-                    NULL::VARCHAR AS address_country,
-                    NULL::VARCHAR AS address_state,
-                    NULL::VARCHAR AS customer_type,
-                    NULL::BOOLEAN AS is_university
-                WHERE FALSE
+                CREATE TABLE datada_mart_transactions (
+                    transaction_key VARCHAR,
+                    transaction_id VARCHAR,
+                    customer_id VARCHAR,
+                    payee_id VARCHAR,
+                    platform_name VARCHAR,
+                    state VARCHAR,
+                    txn_flow VARCHAR,
+                    payment_status VARCHAR,
+                    account_details_status VARCHAR,
+                    deal_details_status VARCHAR,
+                    quote_status VARCHAR,
+                    event_ts TIMESTAMP,
+                    mt103_created_ts TIMESTAMP,
+                    payment_created_ts TIMESTAMP,
+                    created_ts TIMESTAMP,
+                    updated_ts TIMESTAMP,
+                    payment_amount DOUBLE,
+                    deal_amount DOUBLE,
+                    amount_collected DOUBLE,
+                    amount DOUBLE,
+                    has_mt103 BOOLEAN,
+                    has_refund BOOLEAN,
+                    address_country VARCHAR,
+                    address_state VARCHAR,
+                    customer_type VARCHAR,
+                    is_university BOOLEAN
+                )
                 """
             )
             return
@@ -475,8 +513,10 @@ class SemanticLayerManager:
             c.type AS customer_type,
             c.is_university
         FROM base b
-        LEFT JOIN datada_dim_customers c
-            ON b.customer_id = c.customer_id
+        LEFT JOIN (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY customer_key) AS _dedup_rn
+            FROM datada_dim_customers
+        ) c ON b.customer_id = c.customer_id AND c._dedup_rn = 1
         """
         conn.execute(sql)
 
@@ -484,29 +524,28 @@ class SemanticLayerManager:
         if not table:
             conn.execute(
                 """
-                CREATE OR REPLACE VIEW datada_mart_quotes AS
-                SELECT
-                    ''::VARCHAR AS quote_key,
-                    NULL::VARCHAR AS quote_id,
-                    NULL::VARCHAR AS ref_id,
-                    NULL::VARCHAR AS customer_id,
-                    NULL::VARCHAR AS status,
-                    NULL::VARCHAR AS from_currency,
-                    NULL::VARCHAR AS to_currency,
-                    NULL::VARCHAR AS purpose_code,
-                    NULL::VARCHAR AS transaction_range,
-                    NULL::TIMESTAMP AS created_ts,
-                    NULL::TIMESTAMP AS updated_ts,
-                    0.0::DOUBLE AS amount_at_source,
-                    0.0::DOUBLE AS amount_at_destination,
-                    0.0::DOUBLE AS total_amount_to_be_paid,
-                    0.0::DOUBLE AS exchange_rate,
-                    0.0::DOUBLE AS total_additional_charges,
-                    0.0::DOUBLE AS forex_markup,
-                    0.0::DOUBLE AS amount_without_markup,
-                    0.0::DOUBLE AS swift_charges,
-                    0.0::DOUBLE AS platform_charges
-                WHERE FALSE
+                CREATE TABLE datada_mart_quotes (
+                    quote_key VARCHAR,
+                    quote_id VARCHAR,
+                    ref_id VARCHAR,
+                    customer_id VARCHAR,
+                    status VARCHAR,
+                    from_currency VARCHAR,
+                    to_currency VARCHAR,
+                    purpose_code VARCHAR,
+                    transaction_range VARCHAR,
+                    created_ts TIMESTAMP,
+                    updated_ts TIMESTAMP,
+                    amount_at_source DOUBLE,
+                    amount_at_destination DOUBLE,
+                    total_amount_to_be_paid DOUBLE,
+                    exchange_rate DOUBLE,
+                    total_additional_charges DOUBLE,
+                    forex_markup DOUBLE,
+                    amount_without_markup DOUBLE,
+                    swift_charges DOUBLE,
+                    platform_charges DOUBLE
+                )
                 """
             )
             return
@@ -566,20 +605,19 @@ class SemanticLayerManager:
         if not table:
             conn.execute(
                 """
-                CREATE OR REPLACE VIEW datada_dim_customers AS
-                SELECT
-                    ''::VARCHAR AS customer_key,
-                    ''::VARCHAR AS payee_key,
-                    NULL::VARCHAR AS customer_id,
-                    NULL::VARCHAR AS payee_id,
-                    NULL::BOOLEAN AS is_university,
-                    NULL::VARCHAR AS type,
-                    NULL::VARCHAR AS address_country,
-                    NULL::VARCHAR AS address_state,
-                    NULL::VARCHAR AS status,
-                    NULL::TIMESTAMP AS created_ts,
-                    NULL::TIMESTAMP AS updated_ts
-                WHERE FALSE
+                CREATE TABLE datada_dim_customers (
+                    customer_key VARCHAR,
+                    payee_key VARCHAR,
+                    customer_id VARCHAR,
+                    payee_id VARCHAR,
+                    is_university BOOLEAN,
+                    type VARCHAR,
+                    address_country VARCHAR,
+                    address_state VARCHAR,
+                    status VARCHAR,
+                    created_ts TIMESTAMP,
+                    updated_ts TIMESTAMP
+                )
                 """
             )
             return
@@ -625,22 +663,22 @@ class SemanticLayerManager:
         if not table:
             conn.execute(
                 """
-                CREATE OR REPLACE VIEW datada_mart_bookings AS
-                SELECT
-                    ''::VARCHAR AS booking_key,
-                    NULL::VARCHAR AS customer_id,
-                    NULL::TIMESTAMP AS booked_ts,
-                    NULL::DATE AS value_date,
-                    NULL::VARCHAR AS currency,
-                    NULL::VARCHAR AS deal_type,
-                    NULL::VARCHAR AS status,
-                    NULL::VARCHAR AS linked_txn_status,
-                    0.0::DOUBLE AS booked_amount,
-                    0.0::DOUBLE AS available_balance,
-                    0.0::DOUBLE AS amount_on_hold,
-                    0.0::DOUBLE AS linked_txn_amount,
-                    0.0::DOUBLE AS rate
-                WHERE FALSE
+                CREATE TABLE datada_mart_bookings (
+                    booking_key VARCHAR,
+                    customer_id VARCHAR,
+                    booked_ts TIMESTAMP,
+                    value_date DATE,
+                    currency VARCHAR,
+                    deal_type VARCHAR,
+                    status VARCHAR,
+                    linked_txn_status VARCHAR,
+                    booked_amount DOUBLE,
+                    available_balance DOUBLE,
+                    amount_on_hold DOUBLE,
+                    linked_txn_amount DOUBLE,
+                    rate DOUBLE,
+                    deal_id VARCHAR
+                )
                 """
             )
             return
@@ -650,6 +688,7 @@ class SemanticLayerManager:
         CREATE OR REPLACE VIEW datada_mart_bookings AS
         WITH base AS (
             SELECT
+                {self._txt(cols, 'deal_id')},
                 {self._txt(cols, 'customer_id')},
                 {self._ts(cols, 'booked_at', 'booked_ts')},
                 {self._txt(cols, 'value_date', 'value_date_raw')},
@@ -677,10 +716,22 @@ class SemanticLayerManager:
             COALESCE(available_balance_num, 0.0) AS available_balance,
             COALESCE(amount_on_hold_num, 0.0) AS amount_on_hold,
             COALESCE(linked_txn_amount_num, 0.0) AS linked_txn_amount,
-            COALESCE(rate_num, 0.0) AS rate
+            COALESCE(rate_num, 0.0) AS rate,
+            deal_id
         FROM base
         """
         conn.execute(sql)
+
+    def _validate_marts(self, conn: duckdb.DuckDBPyConnection) -> None:
+        """Run a lightweight SELECT on each mart to catch recursion errors early."""
+        for mart in self._MART_NAMES:
+            try:
+                conn.execute(f"SELECT 1 FROM {_q(mart)} LIMIT 0")
+            except duckdb.BinderException as exc:
+                raise RuntimeError(
+                    f"Mart validation failed for {mart}: {exc}. "
+                    "This usually means a view references itself."
+                ) from exc
 
     def _build_catalog(
         self,
@@ -705,9 +756,9 @@ class SemanticLayerManager:
                     "unique_customers": "COUNT(DISTINCT customer_id)",
                     "total_amount": "SUM(amount)",
                     "avg_amount": "AVG(amount)",
-                    "refund_count": "SUM(CASE WHEN has_refund THEN 1 ELSE 0 END)",
+                    "refund_count": "COUNT(DISTINCT CASE WHEN has_refund THEN transaction_key END)",
                     "refund_rate": "AVG(CASE WHEN has_refund THEN 1.0 ELSE 0.0 END)",
-                    "mt103_count": "SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END)",
+                    "mt103_count": "COUNT(DISTINCT CASE WHEN has_mt103 THEN transaction_key END)",
                     "mt103_rate": "AVG(CASE WHEN has_mt103 THEN 1.0 ELSE 0.0 END)",
                 },
                 "datada_mart_quotes": {
@@ -724,7 +775,7 @@ class SemanticLayerManager:
                     "university_count": "SUM(CASE WHEN is_university THEN 1 ELSE 0 END)",
                 },
                 "datada_mart_bookings": {
-                    "booking_count": "COUNT(DISTINCT booking_key)",
+                    "booking_count": "COUNT(DISTINCT deal_id)",
                     "total_booked_amount": "SUM(booked_amount)",
                     "avg_rate": "AVG(rate)",
                 },
@@ -767,7 +818,7 @@ class SemanticLayerManager:
             ],
             "datada_mart_quotes": ["status", "from_currency", "to_currency", "purpose_code"],
             "datada_dim_customers": ["type", "address_country", "address_state", "status"],
-            "datada_mart_bookings": ["currency", "deal_type", "status", "linked_txn_status"],
+            "datada_mart_bookings": ["currency", "deal_type", "status", "linked_txn_status", "deal_id"],
         }
 
         for mart, dimensions in dim_map.items():
@@ -2977,7 +3028,7 @@ class AgenticAnalyticsTeam:
                 "mt103_count": int(
                     self._profile_sql_value(
                         """
-                        SELECT SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS metric_value
+                        SELECT COUNT(DISTINCT CASE WHEN has_mt103 THEN transaction_key END) AS metric_value
                         FROM datada_mart_transactions
                         """,
                         default=0,
@@ -2987,7 +3038,7 @@ class AgenticAnalyticsTeam:
                 "refund_count": int(
                     self._profile_sql_value(
                         """
-                        SELECT SUM(CASE WHEN has_refund THEN 1 ELSE 0 END) AS metric_value
+                        SELECT COUNT(DISTINCT CASE WHEN has_refund THEN transaction_key END) AS metric_value
                         FROM datada_mart_transactions
                         """,
                         default=0,
@@ -3727,6 +3778,8 @@ class AgenticAnalyticsTeam:
             "university",
             "document",
             "pdf",
+            "currency pair",
+            "currency combination",
         ]
         metric_terms = [
             "count",
@@ -3740,6 +3793,8 @@ class AgenticAnalyticsTeam:
             "revenue",
             "value",
             "volume",
+            "most common",
+            "most popular",
         ]
         has_domain_term = any(t in lower for t in domain_terms)
         has_metric_term = any(t in lower for t in metric_terms)
@@ -4213,6 +4268,9 @@ class AgenticAnalyticsTeam:
             intent = "yoy_growth"
         elif any(k in lower for k in ["correlation", "correlate"]):
             intent = "correlation"
+        # RC5: Superlative patterns like "which country has the most payees"
+        elif re.search(r'\bwhich\s+\w+\s+(?:has|have|had)\s+(?:the\s+)?(?:most|least|highest|lowest|fewest|largest|smallest)', lower):
+            intent = "grouped_metric"
         elif any(
             k in lower
             for k in [
@@ -4265,6 +4323,8 @@ class AgenticAnalyticsTeam:
                 "markup",
                 "charge",
                 "spread",
+                "currency pair",
+                "currency combination",
             ]
         ):
             domain = "quotes"
@@ -4290,7 +4350,7 @@ class AgenticAnalyticsTeam:
         # ── GAP 13: Multi-domain detection (early, needed by dimension discovery) ──
         domain_keyword_lists = {
             "transactions": ["transaction", "payment", "transfer", "mt103", "refund", "swift"],
-            "quotes": ["quote", "forex", "exchange rate", "amount to be paid", "markup", "charge", "spread"],
+            "quotes": ["quote", "forex", "exchange rate", "amount to be paid", "markup", "charge", "spread", "currency pair", "currency combination"],
             "bookings": ["booking", "booked", "deal type", "value date"],
             "customers": ["customer", "payee", "university", "address", "beneficiary"],
         }
@@ -4332,6 +4392,15 @@ class AgenticAnalyticsTeam:
             if has_amount_words and not has_count_words and (has_mt103 or has_refund):
                 metric = "total_amount"
 
+        # RC4a: Detect "currency pair" as compound dimension for quotes domain
+        _currency_pair_detected = False
+        if domain == "quotes" and any(kw in lower for kw in ["currency pair", "currency combination", "most common currency"]):
+            _currency_pair_detected = True
+            if any(kw in lower for kw in ["most common", "top", "most popular"]):
+                intent = "grouped_metric"
+                if metric == "quote_count" or not metric:
+                    metric = "quote_count"
+
         dim_candidates = self._build_dim_candidates_from_catalog(domain, catalog)
 
         dimensions: list[str] = []
@@ -4347,6 +4416,10 @@ class AgenticAnalyticsTeam:
         has_trend_signal = bool(re.search(r"\btrends?\b", lower))
         if domain != "documents" and has_month_signal:
             dimensions.append("__month__")
+
+        # RC4a (cont): Inject virtual currency_pair dimension
+        if _currency_pair_detected and "currency_pair" not in dimensions:
+            dimensions.append("currency_pair")
 
         matched_dim_keys: set[str] = set()
         for key, col in dim_candidates.items():
@@ -4561,6 +4634,14 @@ class AgenticAnalyticsTeam:
         out = dict(parsed)
         lower = goal.lower()
 
+        # RC6: Hard domain guard — explicit entity nouns override LLM drift
+        if "transaction" in lower and not any(k in lower for k in ["booking", "booked", "deal type", "value date"]):
+            if out.get("domain") != "transactions":
+                self._pipeline_warnings.append(
+                    f"Domain corrected from '{out.get('domain')}' to 'transactions' -- goal explicitly mentions 'transaction'."
+                )
+                out["domain"] = "transactions"
+
         # GAP 20 / GAP 30: Preserve deterministic complex-analytic intents.
         # In LLM mode, trust the LLM's classification for complex intents
         # since the LLM now knows all 12+ intent types.
@@ -4636,9 +4717,11 @@ class AgenticAnalyticsTeam:
                 sec_mart = DOMAIN_TO_MART.get(sec_d, "")
                 sec_cols = set(catalog.get("marts", {}).get(sec_mart, {}).get("columns", []))
                 available_cols |= sec_cols
+        # Virtual dimensions that are expanded at query time (e.g., currency_pair)
+        _VIRTUAL_DIMS = {"__month__", "currency_pair"}
         dims: list[str] = []
         for dim in raw_dims:
-            if dim == "__month__" or dim in available_cols:
+            if dim in _VIRTUAL_DIMS or dim in available_cols:
                 if dim not in dims:
                     dims.append(dim)
             elif available_cols:
@@ -5060,10 +5143,11 @@ class AgenticAnalyticsTeam:
             sec_table = DOMAIN_TO_MART.get(sec_domain, "")
             sec_meta = catalog.get("marts", {}).get(sec_table, {})
             secondary_cols.update(sec_meta.get("columns", []))
+        _virtual_dims = {"__month__", "currency_pair"}
         for dim in raw_dims:
             if not isinstance(dim, str):
                 continue
-            if dim == "__month__":
+            if dim in _virtual_dims:
                 dimensions.append(dim)
                 continue
             if dim in retrieval["columns"]:
@@ -5146,7 +5230,7 @@ class AgenticAnalyticsTeam:
                 if llm_refinement.get("dimensions") and isinstance(llm_refinement["dimensions"], list):
                     valid_dims = [
                         d for d in llm_refinement["dimensions"]
-                        if d in retrieval.get("columns", []) or d == "__month__"
+                        if d in retrieval.get("columns", []) or d in _virtual_dims
                     ]
                     if valid_dims:
                         deterministic_plan["dimensions"] = valid_dims[:MAX_DIMENSIONS]
@@ -5987,9 +6071,10 @@ class AgenticAnalyticsTeam:
                             "reason": f"Business rule '{rule_name}' requires {filt['column']}={filt['value']} filter",
                         })
         # Validate dimensions against schema
+        _virtual_dims = {"__month__", "currency_pair"}
         available = set(plan.get("available_columns", []))
         for dim in plan.get("dimensions", []):
-            if dim != "__month__" and dim not in available:
+            if dim not in _virtual_dims and dim not in available:
                 warnings.append(f"Dimension '{dim}' not found in {plan['table']}.")
         # Validate metric
         metrics = catalog.get("metrics_by_table", {}).get(plan["table"], {})
@@ -6009,9 +6094,11 @@ class AgenticAnalyticsTeam:
         if ("country" in goal_lower or "region" in goal_lower) and "address_country" not in dims:
             notes.append("Consider adding address_country as a dimension for geographic breakdown.")
         # GAP 37a: Detect unique intent for customer-domain queries
+        # Only override when the goal is actually about customers, not transactions
         unique_rule = self._domain_knowledge.get("business_rules", {}).get("unique_intent", {})
         unique_triggers = unique_rule.get("triggers", ["unique", "distinct", "different", "individual"])
-        if any(t in goal_lower for t in unique_triggers):
+        _is_txn_goal = any(k in goal_lower for k in ["transaction", "payment", "transfer", "wire", "remittance"])
+        if any(t in goal_lower for t in unique_triggers) and not _is_txn_goal:
             entity_key_map = unique_rule.get("entity_key_map", {})
             target_col = entity_key_map.get("customers", "customer_id")
             directives.append({
@@ -6020,9 +6107,10 @@ class AgenticAnalyticsTeam:
                 "reason": f"User asked for unique customers — forcing COUNT(DISTINCT {target_col})",
             })
         # Validate dimensions
+        _virtual_dims = {"__month__", "currency_pair"}
         available = set(plan.get("available_columns", []))
         for dim in plan.get("dimensions", []):
-            if dim != "__month__" and dim not in available:
+            if dim not in _virtual_dims and dim not in available:
                 warnings.append(f"Dimension '{dim}' not found in {plan['table']}.")
         return {"active": True, "notes": notes, "warnings": warnings, "directives": directives}
 
@@ -6168,6 +6256,11 @@ class AgenticAnalyticsTeam:
                     select_parts.append(f"DATE_TRUNC('month', {time_col}) AS month_bucket")
                 elif dim == "__month__":
                     select_parts.append("'unknown_month' AS month_bucket")
+                elif dim == "currency_pair":
+                    # RC4b: Expand virtual compound dimension
+                    select_parts.append(
+                        "CONCAT(COALESCE(from_currency, '?'), '->', COALESCE(to_currency, '?')) AS currency_pair"
+                    )
                 else:
                     # Keep semantic dimension names in output for readability.
                     select_parts.append(f"{_q(dim)} AS {_q(dim)}")
@@ -6869,6 +6962,15 @@ class AgenticAnalyticsTeam:
         score -= 0.08 * max(0.0, 1.0 - concept_coverage)
         if not schema_grounded:
             score -= 0.08
+
+        # RC7: Semantic risk penalties
+        # Penalize when domain was corrected by consistency enforcement
+        if any("Domain corrected" in w for w in warnings):
+            score -= 0.20
+        # Penalize when specialist overrode the metric (signals ambiguity)
+        if plan.get("_specialist_metric_override"):
+            score -= 0.10
+
         score = max(0.0, min(1.0, score))
 
         # ── GAP 19: LLM-enhanced audit ──────────────────
