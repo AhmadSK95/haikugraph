@@ -124,7 +124,7 @@ def _run_unified_ingest(data_dir: str, db_path: str, sheet: str | None, force: b
     "--data-dir",
     default="./data",
     type=click.Path(file_okay=False, dir_okay=True),
-    help="Directory containing Excel files (default: ./data)",
+    help="Directory containing data files (default: ./data)",
 )
 @click.option(
     "--db-path",
@@ -135,7 +135,7 @@ def _run_unified_ingest(data_dir: str, db_path: str, sheet: str | None, force: b
 @click.option(
     "--sheet",
     default=None,
-    help="Sheet name or index to read (default: first sheet)",
+    help="Sheet name or index to read (Excel files only; default: first sheet)",
 )
 @click.option(
     "--force",
@@ -144,7 +144,7 @@ def _run_unified_ingest(data_dir: str, db_path: str, sheet: str | None, force: b
     help="Overwrite existing tables (default: True)",
 )
 def ingest(data_dir: str, db_path: str, sheet: str | None, force: bool):
-    """Ingest Excel files into DuckDB using the unified smart-ingest pipeline."""
+    """Ingest data files (Excel, CSV, Parquet) into DuckDB."""
     _run_unified_ingest(data_dir, db_path, sheet, force)
 
 

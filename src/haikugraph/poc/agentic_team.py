@@ -4521,6 +4521,21 @@ class AgenticAnalyticsTeam:
                 else:
                     add_value_filter(bool_col, "true")
 
+        # Detect unresolved MT-code filters
+        mt_match = re.search(r'\bmt\d{3}\b', lower)
+        if mt_match:
+            mt_code = mt_match.group(0)
+            expected_col = f"has_{mt_code}"
+            already_filtered = any(vf.get("column") == expected_col for vf in value_filters)
+            if expected_col not in mart_cols and not already_filtered:
+                available_bool = [c for c in sorted(mart_cols) if c.startswith("has_") or c.startswith("is_")]
+                self._pipeline_warnings.append(
+                    f"Filter for '{mt_code.upper()}' transactions requested, but column "
+                    f"'{expected_col}' does not exist in the data. Results include ALL "
+                    f"transactions, not just {mt_code.upper()}. "
+                    f"Available boolean filters: {available_bool}"
+                )
+
         return {
             "goal": g,
             "intent": intent,

@@ -12,6 +12,19 @@ import duckdb
 import pandas as pd
 
 
+def _read_file(file_path: Path, sheet=None) -> pd.DataFrame:
+    """Read a data file into a DataFrame based on its extension."""
+    suffix = file_path.suffix.lower()
+    if suffix in (".xlsx", ".xls"):
+        return pd.read_excel(file_path, sheet_name=sheet if sheet is not None else 0)
+    elif suffix == ".csv":
+        return pd.read_csv(file_path)
+    elif suffix in (".parquet", ".pq"):
+        return pd.read_parquet(file_path)
+    else:
+        raise ValueError(f"Unsupported file format: {suffix}")
+
+
 def detect_file_groups(excel_files: list[Path]) -> dict[str, list[Path]]:
     """
     Analyze Excel files to detect groups that should be merged.
@@ -31,7 +44,7 @@ def detect_file_groups(excel_files: list[Path]) -> dict[str, list[Path]]:
     for f in excel_files:
         try:
             # Load full file - need complete key columns for overlap analysis
-            df = pd.read_excel(f)
+            df = _read_file(f)
             file_data[f] = {
                 'df': df,
                 'columns': set(df.columns),
@@ -134,7 +147,7 @@ def merge_files_on_key(files: list[Path], key_column: str = None) -> pd.DataFram
         raise ValueError("No files to merge")
     
     if len(files) == 1:
-        return pd.read_excel(files[0])
+        return _read_file(files[0])
     
     # Load all files
     dfs = []
@@ -142,7 +155,7 @@ def merge_files_on_key(files: list[Path], key_column: str = None) -> pd.DataFram
     
     for file_path in files:
         try:
-            df = pd.read_excel(file_path)
+            df = _read_file(file_path)
             dfs.append(df)
             all_columns.update(df.columns)
         except Exception:
@@ -198,22 +211,22 @@ def smart_ingest_excel_to_duckdb(
     data_dir = Path(data_dir)
     db_path = Path(db_path)
     
-    # Find Excel files
-    excel_patterns = ["*.xlsx", "*.xls"]
-    excel_files = []
-    for pattern in excel_patterns:
-        excel_files.extend(data_dir.glob(pattern))
-    
-    if not excel_files:
+    # Find data files
+    supported_patterns = ["*.xlsx", "*.xls", "*.csv", "*.parquet", "*.pq"]
+    data_files = []
+    for pattern in supported_patterns:
+        data_files.extend(data_dir.glob(pattern))
+
+    if not data_files:
         return {
             "status": "no_files",
-            "message": f"No Excel files found in {data_dir}",
+            "message": f"No data files found in {data_dir} (supported: .xlsx, .xls, .csv, .parquet)",
             "tables": [],
         }
-    
+
     # Detect file groups
-    print("Analyzing Excel files for relationships...")
-    file_groups = detect_file_groups(excel_files)
+    print("Analyzing data files for relationships...")
+    file_groups = detect_file_groups(data_files)
     
     # Process results
     results = {
@@ -243,7 +256,7 @@ def smart_ingest_excel_to_duckdb(
                 df = merge_files_on_key(files)
             else:
                 # Single file, no merge needed
-                df = pd.read_excel(files[0], sheet_name=sheet if sheet is not None else 0)
+                df = _read_file(files[0], sheet=sheet)
             
             # Drop table if exists and force is True
             if force:
@@ -305,7 +318,7 @@ def format_smart_ingestion_summary(results: dict) -> str:
     
     if results["status"] == "no_files":
         lines.append(f"❌ {results['message']}")
-        lines.append("\nPlace Excel files (.xlsx, .xls) in the data directory to ingest.")
+        lines.append("\nPlace data files (.xlsx, .xls, .csv, .parquet) in the data directory to ingest.")
         return "\n".join(lines)
     
     lines.append("✅ Smart ingestion complete\n")
