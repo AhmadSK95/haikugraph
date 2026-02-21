@@ -1,8 +1,8 @@
 # dataDa Agentic Pipeline — Capability Report
 
 **Generated**: 2026-02-20
-**Pipeline Version**: 2.0.0-poc (post-GAP 12-21 implementation)
-**Test Suite**: 250 original + ~85 new tests (stress, quality, complex)
+**Pipeline Version**: 2.1.0-poc (post-GAP 12-29 implementation, Phase F complete)
+**Test Suite**: 250 original + ~85 new tests (stress, quality, complex) + 73 benchmark tests
 
 ---
 
@@ -152,6 +152,30 @@ dataDa is a **deterministic linear pipeline with agent-shaped steps** that relia
 | 20: Complex SQL Patterns | **PARTIAL** | trend_analysis, percentile, ranked_grouped added |
 | 21: LLM-Enhanced Scoring | **DONE** | 70/30 blend with deterministic floor |
 
+### Phase F — Benchmark-Driven Improvements (Gaps 22-29)
+
+| Gap | Status | Impact |
+|---|---|---|
+| 22: LLM Latency Optimization | **DONE** | Per-provider timeouts, redundant call elimination |
+| 23: Audit Warning Noise Filtering | **DONE** | Regex noise filter + improved audit prompt; warnings 47→8 |
+| 24: Local Model Accuracy Tuning | **DONE** | Improved planning prompt prevents unrequested GROUP BY |
+| 25: Boolean Filter Schema Gap | **DONE** | Catalog-driven boolean column detection (is_university) |
+| 26: Narrative Quality Parity | **DONE** | Improved narrator prompt with FORMAT/ACCURACY rules |
+| 27: OpenAI Latency Variance | **DONE** | Per-provider timeouts in router.py |
+| 28: Model Version Health Management | **DONE** | Health endpoint, fallback chains, updated model IDs |
+| 29: Intelligent Mode Selection | **DONE** | Auto mode priority: anthropic > ollama > openai |
+
+### 4-Mode Benchmark Results (After Phase F)
+
+| Mode | Correctness | Confidence | Latency | Narrative | **Composite** |
+|------|-------------|------------|---------|-----------|---------------|
+| deterministic | 100% | 100% | 99.55% | 100% | **99.93%** |
+| anthropic | 100% | 100% | 73.72% | 98.33% | **95.72%** |
+| openai | 100% | 100% | 69.08% | 97.50% | **94.86%** |
+| local | 100% | 100% | 51.15% | 99.17% | **92.51%** |
+
+**100% correctness across all 4 modes** on 18 ground-truth queries (6 categories).
+
 ### Recommendation
 
-The system is production-ready for **structured analytical queries over single data domains** in deterministic mode. For cross-domain, causal, or multi-step analytical workflows, significant architectural investment is needed — specifically, replacing the linear pipeline with a true planning/execution loop that can decompose goals, reason about strategies, and iterate on results.
+The system is production-ready for **structured analytical queries over single data domains** across all LLM modes. The deterministic core provides near-perfect scoring (99.93%), while LLM modes add narrative quality and intelligent handling of complex/ambiguous queries at the cost of latency. For cross-domain, causal, or multi-step analytical workflows, the remaining partial gaps (14, 20) need completion — specifically, a full multi-table query engine and complex SQL patterns (CTEs, subqueries, window functions).

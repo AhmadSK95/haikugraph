@@ -2289,14 +2289,18 @@ class AgenticAnalyticsTeam:
             {
                 "role": "system",
                 "content": (
-                    "You are the Chief Analyst agent. Analyze the user's goal and return JSON with keys: "
-                    "detected_domains (list), analysis_type (string), specialists (list), reasoning (string). "
-                    f"Available marts: {available_marts}"
+                    "You are the Chief Analyst agent. Analyze the user's data question and determine:\n"
+                    "1. Which data domains are needed (transactions, customers, quotes, bookings)\n"
+                    "2. What type of analysis: metric, grouped, comparison, trend, ranking\n"
+                    "3. Whether the question is ambiguous or needs clarification\n\n"
+                    "Return JSON with keys: detected_domains (list), analysis_type (string), "
+                    "specialists (list), reasoning (string), is_ambiguous (bool).\n\n"
+                    f"Available data tables: {available_marts}"
                 ),
             },
             {
                 "role": "user",
-                "content": f"Goal: {goal}\nDeterministic analysis: {json.dumps(deterministic_result)}\nRefine if needed. JSON only.",
+                "content": f"Question: {goal}\nInitial analysis: {json.dumps(deterministic_result)}\nRefine if needed. JSON only.",
             },
         ]
         try:
@@ -3097,6 +3101,13 @@ class AgenticAnalyticsTeam:
             reasons.append("time_reference_without_business_scope")
         if not has_domain_term and metric == "transaction_count" and len(tokens) <= 9:
             reasons.append("default_metric_fallback_without_explicit_domain")
+        # Detect when value filters reference terms not in the schema
+        vf_terms = [str(vf.get("value", "")).lower() for vf in (intake.get("value_filters") or [])]
+        if not vf_terms and has_domain_term:
+            # Check if goal mentions filtering concepts that couldn't be resolved
+            filter_hints = ["only", "just", "specific", "particular", "where"]
+            if any(h in lower for h in filter_hints) and not any(t in lower for t in metric_terms):
+                reasons.append("possible_filter_intent_unresolved")
 
         needs_clarification = bool(reasons)
         questions: list[str] = []
@@ -3147,17 +3158,27 @@ class AgenticAnalyticsTeam:
             {
                 "role": "system",
                 "content": (
-                    "You are IntakeAgent in an analytics team. "
-                    "Return only JSON with keys: intent, domain, metric, dimension, dimensions, "
-                    "top_n, time_filter, and value_filters."
+                    "You are IntakeAgent in a data analytics pipeline. Parse the user's question into a structured query plan.\n\n"
+                    "Return ONLY valid JSON with these keys:\n"
+                    "- intent: one of 'metric', 'grouped_metric', 'comparison', 'lookup', 'trend_analysis', 'percentile', 'ranked_grouped'\n"
+                    "- domain: one of 'transactions', 'customers', 'quotes', 'bookings'\n"
+                    "- metric: the metric name (e.g. 'transaction_count', 'total_amount', 'avg_amount', 'refund_count', 'mt103_count')\n"
+                    "- dimensions: list of column names to GROUP BY (empty list if not a grouped query)\n"
+                    "- time_filter: time period if mentioned (e.g. 'december', 'last month'), null if not\n"
+                    "- value_filters: list of {column, operator, value} for WHERE conditions\n\n"
+                    "RULES:\n"
+                    "- Only add dimensions if the user explicitly asks for a breakdown/grouping\n"
+                    "- For 'how many' or 'total' questions WITHOUT 'by/per/split', use intent='metric' with empty dimensions\n"
+                    "- For 'average' questions, use the avg_ metric variant, NOT the total with a GROUP BY\n"
+                    "- Preserve the domain from the fallback parse unless clearly wrong\n"
                 ),
             },
             {
                 "role": "user",
                 "content": (
                     f"Question: {goal}\n"
-                    f"Fallback parse: {json.dumps(fallback)}\n"
-                    "Refine this parse. Output JSON only."
+                    f"Current parse: {json.dumps(fallback)}\n"
+                    "Refine if needed. JSON only."
                 ),
             },
         ]
@@ -3171,7 +3192,7 @@ class AgenticAnalyticsTeam:
             )
         except Exception as exc:
             self._pipeline_warnings.append(
-                f"LLM intake refinement failed ({type(exc).__name__}); using deterministic parse."
+                f"LLM intake refinement failed ({type(exc).__name__}: {exc})"
             )
             return None
         return _extract_json_payload(raw)
@@ -3514,16 +3535,18 @@ class AgenticAnalyticsTeam:
         else:
             metric = self._resolve_metric_from_catalog(lower, domain, catalog)
 
-            # Targeted post-resolution overrides for composite boolean cases
-            if domain == "transactions":
-                if "refund rate" in lower:
-                    metric = "refund_rate"
-                elif has_mt103 and any(k in lower for k in ["rate", "coverage", "%"]):
-                    metric = "mt103_rate"
-                elif has_refund and has_amount_words and not has_count_words:
-                    metric = "total_amount"
-                elif has_mt103 and has_amount_words and not has_count_words:
-                    metric = "total_amount"
+            # Rate metric override: when user asks for a rate/ratio, prefer _rate variant
+            if any(k in lower for k in ["rate", "ratio", "percentage", "coverage", "%"]):
+                rate_metrics = [m for m in catalog.get("metrics_by_table", {}).get(
+                    DOMAIN_TO_MART.get(domain, ""), {}) if m.endswith("_rate")]
+                for rm in rate_metrics:
+                    prefix = rm.replace("_rate", "")
+                    if prefix in lower:
+                        metric = rm
+                        break
+            # Amount override: when asking about amount of filtered items
+            if has_amount_words and not has_count_words and (has_mt103 or has_refund):
+                metric = "total_amount"
 
         dim_candidates = self._build_dim_candidates_from_catalog(domain, catalog)
 
@@ -3653,22 +3676,22 @@ class AgenticAnalyticsTeam:
                     return
             value_filters.append({"column": column, "value": value})
 
-        if domain == "transactions":
-            if "without mt103" in lower or "excluding mt103" in lower:
-                add_value_filter("has_mt103", "false")
-            elif has_mt103 and (
-                "with mt103" in lower
-                or "mt103 transactions" in lower
-                or "mt103 only" in lower
-                or "only mt103" in lower
-                or has_amount_words
-            ):
-                add_value_filter("has_mt103", "true")
-
-            if "without refund" in lower or "excluding refund" in lower:
-                add_value_filter("has_refund", "false")
-            elif has_refund and ("with refund" in lower or "refund only" in lower or has_amount_words):
-                add_value_filter("has_refund", "true")
+        # Boolean filter inference: detect boolean columns from catalog and match
+        # keywords rather than hardcoding every "if mt103 do that" pattern.
+        mart_cols = set(catalog.get("marts", {}).get(domain_table, {}).get("columns", []))
+        _BOOLEAN_COLUMN_KEYWORDS = {
+            "has_mt103": ["mt103"],
+            "has_refund": ["refund"],
+            "is_university": ["university", "universities"],
+        }
+        for bool_col, keywords in _BOOLEAN_COLUMN_KEYWORDS.items():
+            if bool_col not in mart_cols:
+                continue
+            if any(kw in lower for kw in keywords):
+                if any(neg in lower for neg in ["without", "excluding", "no ", "non-"]):
+                    add_value_filter(bool_col, "false")
+                else:
+                    add_value_filter(bool_col, "true")
 
         # ── GAP 13: Multi-domain detection ──────────────────
         domain_keyword_lists = {
@@ -3740,13 +3763,19 @@ class AgenticAnalyticsTeam:
             if not has_filter(col, val):
                 value_filters.append({"column": col, "value": val})
 
-        if out.get("domain") == "transactions":
-            if "with mt103" in lower or ("mt103" in lower and any(t in lower for t in amount_terms)):
-                add_filter("has_mt103", "true")
-                if any(t in lower for t in amount_terms) and not has_count_words:
-                    out["metric"] = "total_amount"
-            if "with refund" in lower or ("refund" in lower and any(t in lower for t in amount_terms)):
-                add_filter("has_refund", "true")
+        # Infer boolean filters from goal keywords using catalog-aware pattern
+        _BOOL_KW = {"has_mt103": ["mt103"], "has_refund": ["refund"], "is_university": ["university", "universities"]}
+        mart_name_for_filter = DOMAIN_TO_MART.get(out.get("domain", ""), "")
+        filter_cols = set(catalog.get("marts", {}).get(mart_name_for_filter, {}).get("columns", [])) if catalog else set()
+        for bool_col, kws in _BOOL_KW.items():
+            if bool_col not in filter_cols:
+                continue
+            if any(kw in lower for kw in kws):
+                if any(neg in lower for neg in ["without", "excluding", "no ", "non-"]):
+                    add_filter(bool_col, "false")
+                else:
+                    add_filter(bool_col, "true")
+                # When asking for amount of filtered items, ensure metric matches
                 if any(t in lower for t in amount_terms) and not has_count_words:
                     out["metric"] = "total_amount"
 
@@ -4261,20 +4290,26 @@ class AgenticAnalyticsTeam:
         runtime: RuntimeSelection,
     ) -> dict[str, Any] | None:
         """Use LLM to evaluate and optionally refine the deterministic plan."""
+        plan_summary = {k: v for k, v in plan.items() if k not in ("available_columns", "row_count_hint")}
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are PlanningAgent. Evaluate the query plan and suggest refinements. "
-                    "Return JSON with keys: metric (string or null), dimensions (list or null), "
-                    "reasoning (string). Only suggest changes if the current plan seems misaligned "
-                    f"with the goal. Available metrics: {list(retrieval['metrics'].keys())}. "
+                    "You are PlanningAgent. Evaluate the query plan and suggest refinements.\n\n"
+                    "Return JSON with keys: metric (string or null), dimensions (list or null), reasoning (string).\n\n"
+                    "RULES:\n"
+                    "- Only suggest changes if the current plan is clearly misaligned with the question\n"
+                    "- Do NOT add dimensions/GROUP BY unless the user explicitly asks for a breakdown (by/per/split/grouped)\n"
+                    "- For scalar questions ('what is the average', 'how many total'), dimensions MUST be empty []\n"
+                    "- For 'average' questions, ensure the metric is an avg_ variant, not a sum grouped by something\n"
+                    "- Return null for metric/dimensions if no change is needed\n\n"
+                    f"Available metrics: {list(retrieval['metrics'].keys())}\n"
                     f"Available columns: {retrieval.get('columns', [])}"
                 ),
             },
             {
                 "role": "user",
-                "content": f"Goal: {plan.get('goal', '')}\nCurrent plan: {json.dumps({k: v for k, v in plan.items() if k != 'available_columns'})}\nJSON only.",
+                "content": f"Question: {plan.get('goal', '')}\nCurrent plan: {json.dumps(plan_summary)}\nJSON only.",
             },
         ]
         try:
@@ -5312,7 +5347,7 @@ class AgenticAnalyticsTeam:
             value = vf.get("value", "")
             if not col:
                 continue
-            safe_value = value.replace("'", "''")
+            safe_value = str(value).replace("'", "''")
             clauses.append(
                 f"LOWER(COALESCE(CAST({_q(col)} AS VARCHAR), '')) = LOWER('{safe_value}')"
             )
@@ -5577,7 +5612,7 @@ class AgenticAnalyticsTeam:
                 score = max(0.0, min(1.0, score + adj))
                 extra_warnings = llm_audit.get("additional_warnings", [])
                 if isinstance(extra_warnings, list):
-                    warnings.extend(extra_warnings)
+                    warnings.extend(self._filter_noise_warnings(extra_warnings))
 
         query_columns_used = [c for c in available_columns if c in sql_lower]
         return {
@@ -5616,15 +5651,23 @@ class AgenticAnalyticsTeam:
             {
                 "role": "system",
                 "content": (
-                    "You are AuditAgent. Evaluate query quality. Return JSON with keys: "
-                    "score_adjustment (float between -0.3 and 0.2), "
-                    "additional_warnings (list of strings), reasoning (string)."
+                    "You are AuditAgent evaluating whether a SQL query correctly answers the user's question. "
+                    "Focus ONLY on data correctness:\n"
+                    "1. Does the query retrieve the right data for the question?\n"
+                    "2. Are the filters and aggregations correct?\n"
+                    "3. Does the result answer what was asked?\n\n"
+                    "Do NOT flag SQL style issues (WHERE 1=1, DISTINCT usage, LIMIT clauses, "
+                    "code smells, unnecessary clauses). These are template artifacts, not bugs.\n"
+                    "Do NOT warn about missing time filters unless the question explicitly asks about a time period.\n"
+                    "Do NOT suggest performance optimizations.\n\n"
+                    "Return JSON with keys: score_adjustment (float between -0.3 and 0.2), "
+                    "additional_warnings (list — only genuine data correctness issues), reasoning (string)."
                 ),
             },
             {
                 "role": "user",
                 "content": (
-                    f"Goal: {plan.get('goal', '')}\n"
+                    f"Question: {plan.get('goal', '')}\n"
                     f"SQL: {query_plan.get('sql', '')}\n"
                     f"Success: {execution.get('success')}, Rows: {execution.get('row_count')}\n"
                     f"Deterministic score: {deterministic_score:.2f}\n"
@@ -5646,6 +5689,29 @@ class AgenticAnalyticsTeam:
                 f"Audit LLM enhancement failed ({type(exc).__name__}); using deterministic score."
             )
         return None
+
+    # ── GAP 23: Warning noise filter ────────────────────
+    _WARNING_NOISE_PATTERNS = re.compile(
+        r"WHERE\s+1\s*=\s*1|"
+        r"code\s*smell|"
+        r"may\s+be\s+unnecessary|"
+        r"consider\s+(removing|verifying|using)|"
+        r"ensure\s+that|"
+        r"DISTINCT.*may\s+be|"
+        r"auto-generated|"
+        r"templated\s+SQL|"
+        r"performance\s+implications|"
+        r"better\s+index\s+utilization|"
+        r"not\s+a\s+valid\s+option|"
+        r"NULLS\s+LAST.*may\s+not\s+be\s+supported|"
+        r"redundant\s+and\s+suggests|"
+        r"can\s+be\s+removed",
+        re.IGNORECASE,
+    )
+
+    def _filter_noise_warnings(self, warnings: list[str]) -> list[str]:
+        """Remove code-style and template-artifact warnings; keep data correctness issues."""
+        return [w for w in warnings if not self._WARNING_NOISE_PATTERNS.search(w)]
 
     def _narrative_agent(
         self,
@@ -5683,12 +5749,18 @@ class AgenticAnalyticsTeam:
             {
                 "role": "system",
                 "content": (
-                    "You are NarrativeAgent in a data analytics team. "
-                    "Write clear, friendly answers. Avoid jargon. "
-                    "If style is storyteller, explain insights as a short story with context and next action. "
-                    "Ground every statement in provided SQL result rows only; do not claim missing data unless row_count is 0. "
-                    "Keep it succinct: max 90 words and no more than 3 bullets. "
-                    "Return JSON only with keys: answer_markdown and suggested_questions."
+                    "You are NarrativeAgent — a data analyst writing answers for business users.\n\n"
+                    "FORMAT RULES:\n"
+                    "- Lead with the key number/metric in **bold** on the first line\n"
+                    "- Use markdown formatting: **bold** for numbers, bullet points for breakdowns\n"
+                    "- Keep it concise: max 80 words, max 3 bullet points\n"
+                    "- For grouped data, use a markdown table or bullet list\n"
+                    "- End with one actionable insight or observation\n\n"
+                    "ACCURACY RULES:\n"
+                    "- ONLY use numbers from the provided SQL result rows — never invent data\n"
+                    "- If row_count is 0, say 'No data found' — do not speculate\n"
+                    "- Include the actual values from the result, not approximations\n\n"
+                    "Return JSON with keys: answer_markdown (string), suggested_questions (list of 2-3 strings)."
                 ),
             },
             {
@@ -5741,8 +5813,10 @@ class AgenticAnalyticsTeam:
                     "suggested_questions": self._suggested_questions(plan),
                     "llm_narrative_used": True,
                 }
-        except Exception:
-            pass
+        except Exception as exc:
+            self._pipeline_warnings.append(
+                f"LLM narrative generation failed ({type(exc).__name__}: {exc})"
+            )
 
         fallback["suggested_questions"] = self._suggested_questions(plan)
         fallback["llm_narrative_used"] = False
@@ -5950,6 +6024,9 @@ class AgenticAnalyticsTeam:
                     continue
                 col = item.get("column")
                 val = item.get("value")
+                # Convert non-string values (e.g. JSON boolean true → "true")
+                if val is not None and not isinstance(val, str):
+                    val = str(val).lower()
                 if isinstance(col, str) and col.strip() and isinstance(val, str) and val.strip():
                     value_filters.append({"column": col.strip(), "value": val.strip()})
         if value_filters:

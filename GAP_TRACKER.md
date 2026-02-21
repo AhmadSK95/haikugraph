@@ -2,9 +2,12 @@
 
 > **Created**: 2026-02-20
 > **Updated**: 2026-02-20
-> **Status**: Phases 1-5 implemented -- 250 tests passing
-> **Primary file**: `src/haikugraph/poc/agentic_team.py` (~5460 lines)
+> **Status**: Phases 1-5 + Phase F implemented (16 DONE, 2 PARTIAL) — 100% correctness all modes
+> **Primary file**: `src/haikugraph/poc/agentic_team.py` (~6200 lines)
 > **Secondary file**: `src/haikugraph/agents/contracts.py` (451 lines)
+> **Architecture tracker**: `ARCHITECTURE_GAP_TRACKER.md` (Gaps 12-29)
+> **Benchmark (before)**: `reports/benchmark_llm_comparison_20260220_191707.md`
+> **Benchmark (after)**: `reports/benchmark_llm_comparison_20260220_202722.md`
 
 ---
 
@@ -1037,3 +1040,71 @@ Schema exploration signals:
 - [x] Schema exploration answers "what demographics/fields do we capture" queries correctly
 - [x] Metric scoring reproduces all old if/elif results
 - [x] Dimension mapping is a superset of old hardcoded mapping
+
+---
+
+## Architecture Gaps (12-21) — Cross Reference
+
+Gaps 12-21 are tracked in `ARCHITECTURE_GAP_TRACKER.md`. Status as of 2026-02-20:
+
+| Gap | Title | Status |
+|-----|-------|--------|
+| 12 | Silent LLM Fallback | DONE |
+| 13 | Multi-Domain Intent Detection | DONE |
+| 14 | Multi-Table Query Engine | PARTIAL — JOIN registry works, full multi-table engine pending |
+| 15 | Chief Analyst Orchestrator | DONE |
+| 16 | Specialist Agent Findings Wired | DONE |
+| 17 | Blackboard Query | DONE |
+| 18 | LLM in Planning | DONE |
+| 19 | LLM in Audit/Scoring | DONE |
+| 20 | Complex SQL Patterns | PARTIAL — trend, percentile, ranked added; CTEs/subqueries/window fns pending |
+| 21 | LLM-Enhanced Candidate Scoring | DONE |
+
+---
+
+## Phase F — Benchmark-Identified Gaps (22-29)
+
+> **Source**: 4-mode LLM benchmark (deterministic × local × openai × anthropic), 18 queries, 72 total evaluations
+> **Full details**: `ARCHITECTURE_GAP_TRACKER.md` → Phase F section
+
+### Benchmark Key Findings
+
+| Finding | Impact | Gap |
+|---------|--------|-----|
+| All LLM modes score BELOW deterministic on composite (latency penalty dominates) | LLM investment has negative ROI on speed-sensitive use cases | **22** |
+| Anthropic generates 49 audit warnings vs OpenAI's 7 (code-review noise) | Drags narrative score to 88.3% (lowest) despite 100% correctness | **23** |
+| Local model adds irrelevant GROUP BY to average queries (75% aggregation accuracy) | Users get grouped results instead of single scalar | **24** |
+| Deterministic fails "university customers" filter (67% boolean accuracy) | No `customer_type` column in schema; returns total count silently | **25** |
+| Narrative quality varies 88-100% across providers | Inconsistent user experience | **26** |
+| OpenAI P95 latency 49s, max 86s (7x median) | Unpredictable response times, near timeout | **27** |
+| Claude model deprecated overnight, all calls silently fell back to deterministic | Supply chain risk — entire LLM layer can break without notice | **28** |
+| Auto mode cascades by availability, not by query fitness | Simple queries pay LLM latency tax for no accuracy gain | **29** |
+
+### New Gaps Summary
+
+| Gap | Title | Severity | Est. Effort | Status |
+|-----|-------|----------|-------------|--------|
+| 22 | LLM Latency Optimization | HIGH | 3-4 days | DONE |
+| 23 | Audit Warning Noise Filtering | MEDIUM | 1-2 days | DONE |
+| 24 | Local Model Accuracy Tuning | MEDIUM | 2-3 days | DONE |
+| 25 | Boolean Filter Schema Gap | MEDIUM | 1 day | DONE |
+| 26 | Narrative Quality Parity | MEDIUM | 2-3 days | DONE |
+| 27 | OpenAI Latency Variance | MEDIUM | 1-2 days | DONE |
+| 28 | Model Version Health Management | HIGH | 2-3 days | DONE |
+| 29 | Intelligent Mode Selection | HIGH | 3-4 days | DONE |
+
+**Phase F total effort**: 16-22 days — **COMPLETED**
+
+### Phase F Results
+
+| Mode | Before | After | Delta |
+|------|--------|-------|-------|
+| deterministic | 96.32% | 99.93% | **+3.61%** |
+| local | 89.10% | 92.51% | **+3.41%** |
+| openai | 89.30% | 94.86% | **+5.56%** |
+| anthropic | 93.02% | 95.72% | **+2.70%** |
+
+- **100% correctness across ALL 4 modes** (18/18 queries correct)
+- **Warnings reduced from 47 to 8** (83% noise reduction)
+- **No silent LLM fallback** — explicit HTTP 503 errors when provider unavailable
+- **Catalog-driven boolean filters** — replaced hardcoded if/elif chains

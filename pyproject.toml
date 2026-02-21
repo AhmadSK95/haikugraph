@@ -29,6 +29,11 @@ target-version = "py311"
 select = ["E", "F", "I", "N", "W"]
 ignore = []
 
+[tool.pytest.ini_options]
+markers = [
+    "benchmark: LLM mode comparison benchmarks (deselect with '-m not benchmark')",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

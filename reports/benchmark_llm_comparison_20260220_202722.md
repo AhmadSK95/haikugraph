@@ -1,0 +1,112 @@
+# LLM Mode Benchmark Report — 20260220_202722
+
+## Provider Availability
+
+| Provider | Available |
+|----------|-----------|
+| anthropic | Yes |
+| deterministic | Yes |
+| local | Yes |
+| openai | Yes |
+
+## Overall Intelligence Scores
+
+| Mode | Correctness (50%) | Confidence (15%) | Latency (15%) | Narrative (20%) | **Composite** |
+|------|-------------------|------------------|---------------|-----------------|---------------|
+| deterministic | 100.00% | 100.00% | 99.55% | 100.00% | **99.93%** |
+| local | 100.00% | 100.00% | 51.15% | 99.17% | **92.51%** |
+| openai | 100.00% | 100.00% | 69.08% | 97.50% | **94.86%** |
+| anthropic | 100.00% | 100.00% | 73.72% | 98.33% | **95.72%** |
+
+## Accuracy by Category
+
+| Category | deterministic | local | openai | anthropic |
+|----------|------|------|------|------|
+| aggregations | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) |
+| boolean_filters | 100% (3/3) | 100% (3/3) | 100% (3/3) | 100% (3/3) |
+| complex | 100% (2/2) | 100% (2/2) | 100% (2/2) | 100% (2/2) |
+| grouping | 100% (3/3) | 100% (3/3) | 100% (3/3) | 100% (3/3) |
+| simple_counts | 100% (4/4) | 100% (4/4) | 100% (4/4) | 100% (4/4) |
+| time_filters | 100% (2/2) | 100% (2/2) | 100% (2/2) | 100% (2/2) |
+
+## Latency Comparison
+
+| Mode | Median (ms) | Mean (ms) | Min (ms) | Max (ms) | P95 (ms) |
+|------|-------------|-----------|----------|----------|----------|
+| deterministic | 135 | 136 | 124 | 158 | 151 |
+| local | 14702 | 14654 | 12040 | 18740 | 16804 |
+| openai | 9321 | 9277 | 7955 | 10548 | 10138 |
+| anthropic | 7790 | 7884 | 6343 | 10045 | 9520 |
+
+## Head-to-Head Comparison
+
+**local vs deterministic** — Uplift: -7.42%
+
+- deterministic_wins: 0
+- local_wins: 0
+- ties: 18
+- deterministic_composite: 0.9993
+- local_composite: 0.9251
+
+**openai vs deterministic** — Uplift: -5.07%
+
+- deterministic_wins: 0
+- openai_wins: 0
+- ties: 18
+- deterministic_composite: 0.9993
+- openai_composite: 0.9486
+
+**anthropic vs deterministic** — Uplift: -4.21%
+
+- deterministic_wins: 0
+- anthropic_wins: 0
+- ties: 18
+- deterministic_composite: 0.9993
+- anthropic_composite: 0.9572
+
+**openai vs local** — Uplift: +2.35%
+
+- local_wins: 0
+- openai_wins: 0
+- ties: 18
+- local_composite: 0.9251
+- openai_composite: 0.9486
+
+**anthropic vs local** — Uplift: +3.21%
+
+- local_wins: 0
+- anthropic_wins: 0
+- ties: 18
+- local_composite: 0.9251
+- anthropic_composite: 0.9572
+
+**anthropic vs openai** — Uplift: +0.86%
+
+- openai_wins: 0
+- anthropic_wins: 0
+- ties: 18
+- openai_composite: 0.9486
+- anthropic_composite: 0.9572
+
+## LLM Step Activation
+
+| Mode | Queries | Intake Used | Narrative Used | Effective |
+|------|---------|-------------|----------------|-----------|
+| deterministic | 18 | 0 | 0 | 0 |
+| local | 18 | 18 | 18 | 18 |
+| openai | 18 | 18 | 17 | 18 |
+| anthropic | 18 | 18 | 18 | 18 |
+
+## Warnings & Issues
+
+- [local] time_dec_total: The query filters transactions based on the year and month of `event_ts`, but it does not specify that `event_ts` should be a date or timestamp. If `event_ts` is stored as an integer or another type, this filter may not work correctly.
+- [openai] agg_quote_total: The query uses COUNT(*) which counts the number of rows instead of summing the total amount to be paid across all quotes.
+- [openai] bool_mt103: The filter for 'has_mt103' is incorrect. The query checks for 'LOWER(COALESCE(CAST("has_mt103" AS VARCHAR), '')) = LOWER('true')', which may not correctly identify boolean values.
+- [openai] bool_refund: The query incorrectly uses a CASE statement to count transactions with refunds. Instead, it should count the rows where 'has_refund' is true directly.
+- [anthropic] bool_mt103: Query uses redundant logic: SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) counts rows where has_mt103 is true, but then filters WHERE has_mt103 = 'true' (string comparison). This creates a logical contradiction - the CASE statement checks boolean truthiness while the WHERE clause compares the string representation. The result will be 0 or incorrect because rows matching the CASE condition won't satisfy the WHERE filter.
+- [anthropic] bool_mt103: The WHERE clause converts has_mt103 to VARCHAR and compares to string 'true', which suggests the column may be stored as a string. If so, the CASE WHEN has_mt103 will fail to match string values correctly.
+- [anthropic] cplx_mt103_plat: Query filters WHERE has_mt103 = 'true' (string comparison) but then uses SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) which treats has_mt103 as boolean. This creates a logical inconsistency - the WHERE clause pre-filters to only rows where has_mt103='true', making the CASE WHEN condition redundant and potentially incorrect if has_mt103 is actually a boolean column.
+- [anthropic] cplx_mt103_plat: The WHERE clause converts has_mt103 to VARCHAR and compares to string 'true', which suggests data type confusion. If has_mt103 is boolean, this comparison may not work as intended across all database systems.
+
+---
+*Generated by test_benchmark_llm_modes.py*

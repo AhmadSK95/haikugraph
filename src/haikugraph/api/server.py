@@ -41,6 +41,7 @@ class LLMMode(str, Enum):
     AUTO = "auto"
     LOCAL = "local"
     OPENAI = "openai"
+    ANTHROPIC = "anthropic"
     DETERMINISTIC = "deterministic"
 
 
@@ -1289,6 +1290,20 @@ def _openai_check() -> ProviderCheck:
     return ProviderCheck(available=True, reason="package + key detected")
 
 
+def _anthropic_check() -> ProviderCheck:
+    if not _has_module("anthropic"):
+        return ProviderCheck(available=False, reason="anthropic package not installed")
+    key = os.environ.get("HG_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        return ProviderCheck(available=False, reason="missing ANTHROPIC_API_KEY")
+    try:
+        with socket.create_connection(("api.anthropic.com", 443), timeout=1.5):
+            pass
+    except Exception as exc:  # pragma: no cover
+        return ProviderCheck(available=False, reason=f"anthropic network unreachable: {exc}")
+    return ProviderCheck(available=True, reason="package + key detected")
+
+
 def _providers_snapshot() -> ProvidersResponse:
     raw_default = os.environ.get("HG_DEFAULT_LLM_MODE", LLMMode.AUTO.value).lower()
     default_mode = LLMMode(raw_default) if raw_default in {m.value for m in LLMMode} else LLMMode.AUTO
@@ -1296,10 +1311,13 @@ def _providers_snapshot() -> ProvidersResponse:
     checks = {
         "ollama": _ollama_check(),
         "openai": _openai_check(),
+        "anthropic": _anthropic_check(),
     }
 
     if checks["ollama"].available:
         recommended = LLMMode.LOCAL
+    elif checks["anthropic"].available:
+        recommended = LLMMode.ANTHROPIC
     elif checks["openai"].available:
         recommended = LLMMode.OPENAI
     else:
@@ -1314,6 +1332,8 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
     local_narrator_model = os.environ.get("HG_OLLAMA_NARRATOR_MODEL")
     openai_intent_model = DEFAULT_MODELS.get("openai", {}).get("intent", "gpt-4o-mini")
     openai_narrator_model = DEFAULT_MODELS.get("openai", {}).get("narrator", "gpt-4o-mini")
+    anthropic_intent_model = DEFAULT_MODELS.get("anthropic", {}).get("intent", "claude-haiku-4-5-20251001")
+    anthropic_narrator_model = DEFAULT_MODELS.get("anthropic", {}).get("narrator", "claude-haiku-4-5-20251001")
 
     if mode == LLMMode.DETERMINISTIC:
         return RuntimeSelection(
@@ -1326,81 +1346,57 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
             narrator_model=None,
         )
 
-    if mode == LLMMode.LOCAL:
-        if providers.checks["ollama"].available:
+    # ── Explicit LLM modes: fail if provider unavailable (no silent fallback) ──
+    _explicit_modes = {
+        LLMMode.LOCAL: ("ollama", local_intent_model, local_narrator_model),
+        LLMMode.OPENAI: ("openai", openai_intent_model, openai_narrator_model),
+        LLMMode.ANTHROPIC: ("anthropic", anthropic_intent_model, anthropic_narrator_model),
+    }
+    if mode in _explicit_modes:
+        provider_key, intent_m, narrator_m = _explicit_modes[mode]
+        check = providers.checks[provider_key]
+        if check.available:
             return RuntimeSelection(
                 requested_mode=mode.value,
                 mode=mode.value,
                 use_llm=True,
-                provider="ollama",
-                reason="local ollama selected",
-                intent_model=local_intent_model,
-                narrator_model=local_narrator_model,
+                provider=provider_key if provider_key != "ollama" else "ollama",
+                reason=f"{provider_key} selected",
+                intent_model=intent_m,
+                narrator_model=narrator_m,
             )
-        return RuntimeSelection(
-            requested_mode=mode.value,
-            mode=LLMMode.DETERMINISTIC.value,
-            use_llm=False,
-            provider=None,
-            reason=f"ollama unavailable: {providers.checks['ollama'].reason}",
-            intent_model=None,
-            narrator_model=None,
-            fallback_warning=f"LLM mode 'local' requested but Ollama unavailable ({providers.checks['ollama'].reason}). Running in deterministic mode.",
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"LLM provider '{mode.value}' is unavailable: {check.reason}. "
+                f"Fix the provider configuration or use 'deterministic' mode."
+            ),
         )
 
-    if mode == LLMMode.OPENAI:
-        if providers.checks["openai"].available:
+    # auto mode — priority: anthropic (best accuracy+latency) > ollama (local, no cost) > openai
+    _auto_priority = [
+        ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model),
+        ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model),
+        ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model),
+    ]
+    for prov_key, llm_mode, intent_m, narrator_m in _auto_priority:
+        if providers.checks[prov_key].available:
             return RuntimeSelection(
                 requested_mode=mode.value,
-                mode=mode.value,
+                mode=llm_mode.value,
                 use_llm=True,
-                provider="openai",
-                reason="openai selected",
-                intent_model=openai_intent_model,
-                narrator_model=openai_narrator_model,
+                provider=prov_key if prov_key != "ollama" else "ollama",
+                reason=f"auto selected {prov_key} (best available)",
+                intent_model=intent_m,
+                narrator_model=narrator_m,
             )
-        return RuntimeSelection(
-            requested_mode=mode.value,
-            mode=LLMMode.DETERMINISTIC.value,
-            use_llm=False,
-            provider=None,
-            reason=f"openai unavailable: {providers.checks['openai'].reason}",
-            intent_model=None,
-            narrator_model=None,
-            fallback_warning=f"LLM mode 'openai' requested but OpenAI unavailable ({providers.checks['openai'].reason}). Running in deterministic mode.",
-        )
 
-    # auto mode
-    if providers.checks["ollama"].available:
-        return RuntimeSelection(
-            requested_mode=mode.value,
-            mode=LLMMode.LOCAL.value,
-            use_llm=True,
-            provider="ollama",
-            reason="auto selected local ollama",
-            intent_model=local_intent_model,
-            narrator_model=local_narrator_model,
-        )
-    if providers.checks["openai"].available:
-        return RuntimeSelection(
-            requested_mode=mode.value,
-            mode=LLMMode.OPENAI.value,
-            use_llm=True,
-            provider="openai",
-            reason="auto selected openai",
-            intent_model=openai_intent_model,
-            narrator_model=openai_narrator_model,
-        )
-
-    return RuntimeSelection(
-        requested_mode=mode.value,
-        mode=LLMMode.DETERMINISTIC.value,
-        use_llm=False,
-        provider=None,
-        reason="no llm provider available",
-        intent_model=None,
-        narrator_model=None,
-        fallback_warning="LLM mode 'auto' requested but no provider available. Running in deterministic mode.",
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "LLM mode 'auto' requested but no provider is available. "
+            "Ensure at least one LLM provider (Ollama, OpenAI, or Anthropic) is configured and reachable."
+        ),
     )
 
 
@@ -1842,6 +1838,25 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/assistant/providers", response_model=ProvidersResponse)
     async def providers() -> ProvidersResponse:
         return _providers_snapshot()
+
+    @app.get("/api/assistant/model-health")
+    async def model_health():
+        """Check health of all configured LLM models."""
+        from haikugraph.llm.router import check_model_health, DEFAULT_MODELS
+        providers_snap = _providers_snapshot()
+        results = {}
+        for provider_name in ("anthropic", "openai", "ollama"):
+            check = providers_snap.checks.get(provider_name)
+            if not check or not check.available:
+                results[provider_name] = {"available": False, "reason": check.reason if check else "unknown"}
+                continue
+            provider_health = {"available": True, "models": {}}
+            for role in ("planner", "intent", "narrator"):
+                model_id = DEFAULT_MODELS.get(provider_name, {}).get(role)
+                if model_id:
+                    provider_health["models"][role] = {"model": model_id, "status": "configured"}
+            results[provider_name] = provider_health
+        return results
 
     @app.get("/api/assistant/models/local", response_model=LocalModelsResponse)
     async def local_models() -> LocalModelsResponse:

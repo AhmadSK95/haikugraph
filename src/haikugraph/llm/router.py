@@ -31,9 +31,9 @@ DEFAULT_MODELS = {
         "intent": "qwen2.5:14b-instruct",
     },
     "anthropic": {
-        "planner": "claude-3-5-sonnet-20241022",
-        "narrator": "claude-3-5-haiku-20241022",
-        "intent": "claude-3-5-haiku-20241022",
+        "planner": "claude-sonnet-4-6",
+        "narrator": "claude-haiku-4-5-20251001",
+        "intent": "claude-haiku-4-5-20251001",
     },
     "openai": {
         "planner": "gpt-4o",
@@ -45,6 +45,27 @@ DEFAULT_MODELS = {
 # Legacy defaults for backward compatibility
 DEFAULT_PLANNER_MODEL = "qwen2.5:14b-instruct"
 DEFAULT_NARRATOR_MODEL = "llama3.1:8b"
+
+# Model fallback chains — try in order if primary model fails
+MODEL_FALLBACKS: dict[str, dict[str, list[str]]] = {
+    "anthropic": {
+        "planner": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+        "narrator": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"],
+        "intent": ["claude-haiku-4-5-20251001", "claude-sonnet-4-6"],
+    },
+    "openai": {
+        "planner": ["gpt-4o", "gpt-4o-mini"],
+        "narrator": ["gpt-4o-mini", "gpt-4o"],
+        "intent": ["gpt-4o-mini", "gpt-4o"],
+    },
+}
+
+# Per-provider timeout defaults
+PROVIDER_TIMEOUTS: dict[str, int] = {
+    "anthropic": 30,
+    "openai": 45,
+    "ollama": 30,
+}
 
 
 def _call_anthropic(
@@ -181,18 +202,25 @@ def call_llm(
     if temperature_override is not None:
         temperature = temperature_override
     
+    # Apply per-provider timeout defaults if caller used default
+    effective_timeout = timeout
+    if timeout == 60:  # caller used default
+        effective_timeout = PROVIDER_TIMEOUTS.get(resolved_provider, timeout)
+    if role == "narrator":
+        effective_timeout = max(effective_timeout, 45)
+
     # Route to appropriate provider
     if resolved_provider == "anthropic":
-        return _call_anthropic(messages, role_model, temperature, max_tokens, timeout)
+        return _call_anthropic(messages, role_model, temperature, max_tokens, effective_timeout)
     elif resolved_provider == "openai":
-        return _call_openai(messages, role_model, temperature, max_tokens, timeout)
+        return _call_openai(messages, role_model, temperature, max_tokens, effective_timeout)
     elif resolved_provider == "ollama":
         return ollama_chat(
             messages,
             model=role_model,
             temperature=temperature,
             max_tokens=max_tokens,
-            timeout=timeout,
+            timeout=effective_timeout,
         )
     else:
         raise ValueError(
@@ -204,6 +232,28 @@ def call_llm(
 def _has_module(module_name: str) -> bool:
     """Return True when a module is installed in the current environment."""
     return importlib.util.find_spec(module_name) is not None
+
+
+def check_model_health(provider: str, role: str) -> dict[str, Any]:
+    """Verify that a model responds to a minimal request.
+
+    Returns dict with ``healthy`` (bool), ``model`` (str), and ``error`` (str|None).
+    """
+    model = DEFAULT_MODELS.get(provider, {}).get(role)
+    if not model:
+        return {"healthy": False, "model": None, "error": f"no default model for {provider}/{role}"}
+    try:
+        call_llm(
+            [{"role": "user", "content": "Reply with the single word OK."}],
+            role=role,
+            provider=provider,
+            model=model,
+            max_tokens=5,
+            timeout=10,
+        )
+        return {"healthy": True, "model": model, "error": None}
+    except Exception as exc:
+        return {"healthy": False, "model": model, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def get_available_providers() -> list[str]:
