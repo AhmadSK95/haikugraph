@@ -10,6 +10,8 @@ if [ -d ".venv" ]; then
   source .venv/bin/activate
 fi
 
+export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH:-}"
+
 echo "Launching dataDa..."
 echo "Web UI:   http://localhost:8000"
 echo "API docs: http://localhost:8000/docs"

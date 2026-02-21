@@ -2,7 +2,7 @@
 
 > **Created**: 2026-02-20
 > **Updated**: 2026-02-20
-> **Status**: Phases A-F implemented (16 DONE, 2 PARTIAL) — All benchmark-identified gaps closed
+> **Status**: Phases A-H implemented (25 DONE, 0 PARTIAL) — All gaps closed
 > **Primary file**: `src/haikugraph/poc/agentic_team.py` (~6200 lines)
 > **Secondary files**: `src/haikugraph/api/server.py`, `src/haikugraph/llm/router.py`, `src/haikugraph/agents/contracts.py`
 > **Benchmark (before)**: `reports/benchmark_llm_comparison_20260220_191707.md`
@@ -131,13 +131,13 @@ No agent can: call another agent, modify execution flow, request clarification m
 |-----|-------|----------|----------|--------|
 | **12** | Silent LLM Fallback | CRITICAL | Transparency | DONE |
 | **13** | Single-Domain Mutual Exclusion | CRITICAL | Architecture | DONE |
-| **14** | Single-Table Query Engine | CRITICAL | Architecture | PARTIAL |
+| **14** | Single-Table Query Engine | CRITICAL | Architecture | DONE |
 | **15** | Chief Analyst Is a Stub | HIGH | Intelligence | DONE |
 | **16** | Specialist Agents Are Discarded | HIGH | Intelligence | DONE |
 | **17** | Blackboard Is Tracing-Only | HIGH | Communication | DONE |
 | **18** | No LLM in Planning | HIGH | Intelligence | DONE |
 | **19** | No LLM in Audit/Scoring | MEDIUM | Intelligence | DONE |
-| **20** | No Complex Analytical Patterns | HIGH | Capability | PARTIAL |
+| **20** | No Complex Analytical Patterns | HIGH | Capability | DONE |
 | **21** | Deterministic Candidate Scoring | MEDIUM | Intelligence | DONE |
 | **22** | LLM Latency Optimization | HIGH | Performance | DONE |
 | **23** | Audit Warning Noise Filtering | MEDIUM | Quality | DONE |
@@ -147,6 +147,13 @@ No agent can: call another agent, modify execution flow, request clarification m
 | **27** | OpenAI Latency Variance | MEDIUM | Performance | DONE |
 | **28** | Model Version Health Management | HIGH | Operations | DONE |
 | **29** | Intelligent Mode Selection | HIGH | Intelligence | DONE |
+| **35** | Domain Expertise Knowledge Base | MEDIUM | Intelligence | DONE |
+| **36** | Multi-Domain Detection Fix | HIGH | Architecture | DONE |
+| **37** | Specialist Directives That Modify SQL | HIGH | Intelligence | DONE |
+| **38** | Clarification Agent Intelligence | MEDIUM | Intelligence | DONE |
+| **39** | Decision Transparency in Trace | MEDIUM | Transparency | DONE |
+| **40** | UI Provider Completeness | LOW | UI | DONE |
+| **41** | Memory Agent Enhancement | MEDIUM | Intelligence | DONE |
 
 ---
 
@@ -214,11 +221,11 @@ No agent can: call another agent, modify execution flow, request clarification m
 | 19 | LLM in Audit/Scoring | 2-3 days | DONE |
 | 15 | Chief Analyst Orchestrator | 3-4 days | DONE |
 
-### Phase C — Cross-Domain Intelligence  PARTIAL
+### Phase C — Cross-Domain Intelligence  DONE
 | Gap | Title | Est. Effort | Status |
 |-----|-------|-------------|--------|
 | 13 | Multi-Domain Intent Detection | 3-4 days | DONE |
-| 14 | Multi-Table Query Engine | 5-7 days | PARTIAL |
+| 14 | Multi-Table Query Engine | 5-7 days | DONE |
 
 ### Phase D — Agent Collaboration  DONE
 | Gap | Title | Est. Effort | Status |
@@ -227,10 +234,10 @@ No agent can: call another agent, modify execution flow, request clarification m
 | 17 | Functional Blackboard | 3-4 days | DONE |
 | 21 | LLM-Evaluated Scoring | 2-3 days | DONE |
 
-### Phase E — Complex Analytics  PARTIAL
+### Phase E — Complex Analytics  DONE
 | Gap | Title | Est. Effort | Status |
 |-----|-------|-------------|--------|
-| 20 | Complex Analytical Patterns | 5-7 days | PARTIAL |
+| 20 | Complex Analytical Patterns | 5-7 days | DONE |
 
 ### Phase F — Benchmark-Identified Gaps  DONE
 | Gap | Title | Est. Effort | Status |
@@ -244,7 +251,27 @@ No agent can: call another agent, modify execution flow, request clarification m
 | 28 | Model Version Health Management | 2-3 days | DONE — model health endpoint, fallback chains, updated model IDs |
 | 29 | Intelligent Mode Selection | 3-4 days | DONE — auto mode priority: anthropic > ollama > openai |
 
-**Total estimated effort**: 30-40 days (Phases A-E) + 16-22 days (Phase F) = ~46-62 days
+### Phase G — Smart LLM Mode  DONE
+| Gap | Title | Est. Effort | Status |
+|-----|-------|-------------|--------|
+| 30 | LLM Intent Classification | 1-2 days | DONE — full 12+ intent classifier with schema + domain synonyms |
+| 31 | LLM SQL Generation | 2-3 days | DONE — LLM SQL for complex intents, validated + probe-tested |
+| 32 | Multi-Part Decomposition | 3-4 days | DONE — decompose → sub-query → merge (solves Gap 15) |
+| 33 | SQL Error Recovery | 0.5-1 day | DONE — LLM diagnoses failed SQL + single retry with validation |
+| 34 | LLM-Enhanced Audit Retry | 1-2 days | DONE — LLM root-cause analysis replaces 3-entry hint dict |
+
+### Phase H — Domain Intelligence & Agent Effectiveness  DONE
+| Gap | Title | Est. Effort | Status |
+|-----|-------|-------------|--------|
+| 35 | Domain Expertise Knowledge Base | 1-2 days | DONE — domain_knowledge.yaml + loader + builtin fallback |
+| 36 | Multi-Domain Detection Fix | 1-2 days | DONE — synonym enrichment + multi_domain_hint consumption |
+| 37 | Specialist Directives That Modify SQL | 2-3 days | DONE — typed directives (override_metric_expr, add_filter) + column qualification for JOINs |
+| 38 | Clarification Agent Intelligence | 1-2 days | DONE — unique intent, cross-domain, metric-domain mismatch checks |
+| 39 | Decision Transparency in Trace | 1-2 days | DONE — reasoning field in trace + UI gold-highlight rendering |
+| 40 | UI Provider Completeness | 0.5 day | DONE — Anthropic option + provider status dots |
+| 41 | Memory Agent Enhancement | 0.5-1 day | DONE — learned corrections for explicit queries |
+
+**Total estimated effort**: 30-40 days (Phases A-E) + 16-22 days (Phase F) + 8-12 days (Phase G) + 7-10 days (Phase H) = ~61-84 days
 
 ---
 
@@ -1630,8 +1657,13 @@ Intelligent mode selection should route simple queries (where deterministic gets
 | **27** | F | 1-2 days | LOW — timeout/retry is standard pattern | Circuit breaker prevents cascading failures |
 | **28** | F | 2-3 days | MEDIUM — startup health check adds latency | Cache health results; async health check; configurable skip |
 | **29** | F | 3-4 days | HIGH — routing changes affect all auto-mode queries | A/B test against fixed modes; measure composite uplift |
+| **30** | G | 1-2 days | HIGH — changes LLM intake classification globally | Synonym tests; deterministic mode regression suite |
+| **31** | G | 2-3 days | MEDIUM — LLM SQL must be validated and probed | Guardrail validation + execute_probe before use |
+| **32** | G | 3-4 days | HIGH — multi-part changes run() control flow | Max 4 sub-questions; full governance on each; fallback to single |
+| **33** | G | 0.5-1 day | LOW — only triggers on failure path | Single retry; validated SQL only; zero cost on success |
+| **34** | G | 1-2 days | LOW — only triggers on audit_score < 0.5 | Catalog-validated suggestions; existing score comparison kept |
 
-**Total estimated effort**: 30-40 days (Phases A-E) + 16-22 days (Phase F) = ~46-62 days
+**Total estimated effort**: 30-40 days (Phases A-E) + 16-22 days (Phase F) + 8-12 days (Phase G) = ~54-74 days
 
 ---
 
@@ -1698,3 +1730,5 @@ After each phase:
 4. **Phase D** (8-11 days): Make agents real — specialists that influence, blackboard that communicates — **DONE**
 5. **Phase E** (5-7 days): Go beyond SELECT COUNT — analytical patterns for real questions — **PARTIAL** (trend, percentile, ranked added; CTEs, subqueries, window functions still needed)
 6. **Phase F** (16-22 days): Benchmark-driven optimization — latency, accuracy, model management, intelligent routing — **DONE** (100% correctness all modes, warnings 47→8, composites all improved)
+7. **Phase G** (8-12 days): Smart LLM mode — genuine intelligence for intent, SQL, multi-part, recovery, audit — **DONE** (5 new capabilities, deterministic untouched)
+8. **Phase H** (7-10 days): Domain intelligence — structured knowledge base, specialist directives that modify SQL, decision transparency, provider completeness — **DONE** (7 gaps, 49 tests, 0 failures)

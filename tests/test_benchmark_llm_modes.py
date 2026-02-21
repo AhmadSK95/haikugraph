@@ -136,6 +136,19 @@ QUERIES: list[QuerySpec] = [
     QuerySpec("cplx_mt103_plat", "complex",
               "Show MT103 transaction count by platform",
               "rows>=1"),
+    # --- GAP 30-34: Paraphrased & multi-part (4) ---
+    QuerySpec("para_tx_count", "paraphrased",
+              "How many money transfers are there?",
+              ("8",)),
+    QuerySpec("para_quote_total", "paraphrased",
+              "Total currency exchange amounts?",
+              ("6500", "6,500", "6500.0", "6500.00")),
+    QuerySpec("multi_count_avg", "multi_part",
+              "How many transactions and what is the average amount?",
+              ("8", "1993", "1994", "1993.75", "1,993.75")),
+    QuerySpec("complex_above_avg", "complex_analytical",
+              "Which customers spent above average?",
+              "rows>=2"),
 ]
 
 

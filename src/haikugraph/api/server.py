@@ -3024,6 +3024,14 @@ def get_ui_html() -> str:
     .settings-panel select,.settings-panel input[type="text"]{width:100%;padding:8px 12px;font-size:13px;border-radius:8px}
     .settings-panel .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0}
     .settings-panel .toggle-label{font-size:13px;color:var(--text)}
+    .provider-status{font-size:12px}
+    .provider-status .provider-title{font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:8px}
+    .provider-row{display:flex;align-items:center;gap:8px;padding:4px 0}
+    .provider-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+    .provider-dot.available{background:#4caf50}
+    .provider-dot.unavailable{background:#f44336}
+    .provider-name{color:var(--text);font-size:12px}
+    .provider-reason{color:var(--text-dim);font-size:10px;margin-left:auto}
     .settings-close{align-self:flex-end}
     .sep{height:1px;background:var(--border)}
 
@@ -3072,6 +3080,7 @@ def get_ui_html() -> str:
     .tl-agent{font-size:12px;font-weight:600;color:var(--text)}
     .tl-summary{font-size:11px;color:var(--text-muted);margin-top:2px}
     .tl-meta{font-size:10px;color:var(--text-dim);font-family:var(--mono);margin-top:2px}
+    .tl-reasoning{font-size:10px;color:var(--gold);font-family:var(--mono);margin-top:4px;padding:4px 8px;background:rgba(255,193,7,0.08);border-radius:4px}
 
     /* ---- responsive ---- */
     @media(max-width:640px){
@@ -3138,9 +3147,12 @@ def get_ui_html() -> str:
         <option value="auto">Auto</option>
         <option value="local">Local (Ollama)</option>
         <option value="openai">Cloud (OpenAI)</option>
+        <option value="anthropic">Cloud (Anthropic)</option>
         <option value="deterministic">Deterministic</option>
       </select>
     </div>
+    <div class="sep"></div>
+    <div id="providerStatus" class="provider-status"></div>
     <div class="sep"></div>
     <div class="toggle-row">
       <span class="toggle-label">Storyteller mode</span>
@@ -3282,7 +3294,9 @@ def get_ui_html() -> str:
         const st = (t.status || '').toLowerCase();
         const dot = st === 'failed' ? 'fail' : st === 'warning' ? 'warn' : 'ok';
         const ms = t.duration_ms != null ? Math.round(t.duration_ms) + 'ms' : '';
-        return `<div class="trace-item"><span class="trace-dot ${dot}"></span><span class="trace-name">${esc(t.agent || t.role || '')}</span><span class="trace-summary">${esc(t.summary || '')}</span><span class="trace-time">${ms}</span></div>`;
+        const reason = t.reasoning ? esc(t.reasoning) : '';
+        const titleAttr = reason ? ` title="${reason}"` : '';
+        return `<div class="trace-item"${titleAttr}><span class="trace-dot ${dot}"></span><span class="trace-name">${esc(t.agent || t.role || '')}</span><span class="trace-summary">${esc(t.summary || '')}</span><span class="trace-time">${ms}</span></div>`;
       }).join('') + '</div>';
     }
 
@@ -3398,7 +3412,8 @@ def get_ui_html() -> str:
           const st = (t.status || '').toLowerCase();
           const dot = st === 'failed' ? 'fail' : st === 'warning' ? 'warn' : 'ok';
           const ms = t.duration_ms != null ? Math.round(t.duration_ms) + 'ms' : '';
-          html += `<div class="tl-item"><div class="tl-dot ${dot}"></div><div class="tl-body"><div class="tl-agent">${esc(t.agent || t.role || '')}</div><div class="tl-summary">${esc(t.summary || '')}</div>${ms ? '<div class="tl-meta">' + ms + '</div>' : ''}</div></div>`;
+          const reasonHtml = t.reasoning ? `<div class="tl-reasoning">${esc(t.reasoning)}</div>` : '';
+          html += `<div class="tl-item"><div class="tl-dot ${dot}"></div><div class="tl-body"><div class="tl-agent">${esc(t.agent || t.role || '')}</div>${reasonHtml}<div class="tl-summary">${esc(t.summary || '')}</div>${ms ? '<div class="tl-meta">' + ms + '</div>' : ''}</div></div>`;
         });
         html += '</div></div>';
       }
@@ -3578,6 +3593,36 @@ def get_ui_html() -> str:
       }
     }
 
+    /* ---- GAP 40c: provider status ---- */
+    async function loadProviders() {
+      try {
+        const r = await fetch('/api/assistant/providers');
+        const d = await r.json();
+        const el = $('providerStatus');
+        if (!el) return;
+        const checks = d.checks || {};
+        const providerMap = {ollama: 'local', openai: 'openai', anthropic: 'anthropic'};
+        let html = '<div class="provider-title">Provider Status</div>';
+        for (const [key, label] of [['ollama', 'Ollama (Local)'], ['openai', 'OpenAI'], ['anthropic', 'Anthropic']]) {
+          const check = checks[key] || {};
+          const avail = check.available === true;
+          const dotCls = avail ? 'available' : 'unavailable';
+          const reason = avail ? '' : (check.reason || 'not configured');
+          html += `<div class="provider-row"><span class="provider-dot ${dotCls}"></span><span class="provider-name">${label}</span>${reason ? '<span class="provider-reason">' + esc(reason) + '</span>' : ''}</div>`;
+          // Disable unavailable options in modeSelect
+          const sel = $('modeSelect');
+          if (sel && providerMap[key]) {
+            const opt = sel.querySelector('option[value="' + providerMap[key] + '"]');
+            if (opt && !avail) {
+              opt.disabled = true;
+              opt.textContent += ' (unavailable)';
+            }
+          }
+        }
+        el.innerHTML = html;
+      } catch(e) {}
+    }
+
     /* ---- init ---- */
     function init() {
       $('settingsBtn').onclick = openSettings;
@@ -3596,6 +3641,7 @@ def get_ui_html() -> str:
 
       renderThread();
       loadConnections();
+      loadProviders();
       checkHealth();
     }
 

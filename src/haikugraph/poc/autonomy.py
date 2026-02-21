@@ -571,8 +571,7 @@ class AgentMemoryStore:
             except Exception:
                 value_filters = []
 
-            scored.append(
-                {
+            entry = {
                     "similarity": round(sim, 4),
                     "goal": past_goal,
                     "resolved_goal": str(row[1] or ""),
@@ -587,8 +586,11 @@ class AgentMemoryStore:
                     "row_count": int(row[10] or 0),
                     "runtime_mode": str(row[11] or ""),
                     "created_at": str(row[12] or ""),
-                }
-            )
+            }
+            # GAP 41c: Flag entries that represent learned corrections
+            if entry["correction_applied"] and entry["confidence_score"] >= 0.6:
+                entry["was_learned_correction"] = True
+            scored.append(entry)
 
         scored.sort(
             key=lambda x: (
