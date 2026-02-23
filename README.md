@@ -79,6 +79,8 @@ cd /Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph
 python3 -m venv .venv
 source .venv/bin/activate
 pip install .
+# If packaging is unavailable in your environment, run commands with:
+# PYTHONPATH=src python -m haikugraph.cli ...
 ```
 
 ### 2. Ingest data (Excel files)
