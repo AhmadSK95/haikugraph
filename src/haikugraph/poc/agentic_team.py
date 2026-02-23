@@ -1114,6 +1114,8 @@ class AgenticAnalyticsTeam:
         self._pipeline_warnings: list[str] = []
         if runtime.fallback_warning:
             self._pipeline_warnings.append(runtime.fallback_warning)
+        _contract_spec: dict[str, Any] = {}
+        _contract_validation: dict[str, Any] = {}
 
         # ── HARD GATE: Run policy gates on ORIGINAL goal before any rewriting ──
         _early_verdicts = run_all_policy_gates(goal)
@@ -1277,6 +1279,10 @@ class AgenticAnalyticsTeam:
                         plan, query_plan, execution, audit = self._merge_multi_part_results(
                             effective_goal, sub_results, runtime,
                         )
+                        _contract_spec = self._build_contract_spec(plan)
+                        _contract_validation = self._validate_contract_against_sql(
+                            _contract_spec, query_plan.get("sql", ""), plan,
+                        )
                         # Build multi-part narrative from sub-results
                         narr_parts: list[str] = []
                         for r in sub_results:
@@ -1389,6 +1395,8 @@ class AgenticAnalyticsTeam:
                                 f"Tell me more about: {r['sub_goal']}" for r in sub_results[:3]
                             ],
                             warnings=self._pipeline_warnings,
+                            contract_spec=_contract_spec,
+                            contract_validation=_contract_validation,
                         )
 
             clarification = self._run_agent(
@@ -2260,6 +2268,10 @@ class AgenticAnalyticsTeam:
             query_plan = autonomy_result.get("query_plan", query_plan)
             execution = autonomy_result.get("execution", execution)
             audit = autonomy_result.get("audit", audit)
+            _contract_spec = self._build_contract_spec(plan)
+            _contract_validation = self._validate_contract_against_sql(
+                _contract_spec, query_plan.get("sql", ""), plan,
+            )
 
             narration = self._run_agent(
                 trace,
@@ -2501,11 +2513,7 @@ class AgenticAnalyticsTeam:
                         }
                     )
 
-            # ── BRD WP-1/WP-4: Build contract spec, validate, decision flow ──
-            _contract_spec = self._build_contract_spec(plan)
-            _contract_validation = self._validate_contract_against_sql(
-                _contract_spec, query_plan.get("sql", ""), plan,
-            )
+            # ── BRD WP-1/WP-4: Build decision flow from contract + execution ──
             _decision_flow = self._build_decision_flow(
                 effective_goal, intake, _contract_spec, _contract_validation,
                 plan, query_plan, execution, audit, autonomy_result,
@@ -5316,10 +5324,27 @@ class AgenticAnalyticsTeam:
         and exclusions. This is used for pre-execution validation (FR-1) and
         post-execution explainability (FR-6).
         """
+        table = str(plan.get("table") or "").strip()
+        domain = str(plan.get("domain") or "").strip()
+        if not domain and table:
+            domain = next((d for d, mart in DOMAIN_TO_MART.items() if mart == table), "")
+
         # ── G1: Delegate to contract-first module for structured contract ────
         try:
             structured = build_contract_from_pipeline(plan)
-            plan["_structured_contract"] = structured.to_dict()
+            structured_dict = structured.to_dict()
+            if (not structured_dict.get("domain") or structured_dict.get("domain") == "unknown") and domain:
+                structured_dict["domain"] = domain
+            if (not structured_dict.get("metric") or structured_dict.get("metric") == "unknown") and plan.get("metric_expr"):
+                structured_dict["metric"] = str(plan.get("metric_expr"))
+            if not structured_dict.get("grain"):
+                dims = list(plan.get("dimensions") or [])
+                structured_dict["grain"] = [
+                    ("month" if d == "__month__" else str(d))
+                    for d in dims
+                    if isinstance(d, str)
+                ]
+            plan["_structured_contract"] = structured_dict
         except Exception as _sc_exc:
             self._pipeline_warnings.append(
                 f"Structured contract build failed ({type(_sc_exc).__name__}: {_sc_exc}); "
@@ -5347,8 +5372,8 @@ class AgenticAnalyticsTeam:
         return {
             "metric": plan.get("metric", ""),
             "metric_expr": plan.get("metric_expr", ""),
-            "domain": plan.get("domain", ""),
-            "table": plan.get("table", ""),
+            "domain": domain,
+            "table": table,
             "dimensions": list(plan.get("dimensions") or []),
             "time_scope": time_scope,
             "time_filter": time_filter,

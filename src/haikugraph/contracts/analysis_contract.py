@@ -44,23 +44,79 @@ class AnalysisContract:
         filters: list[dict[str, Any]] = []
         exclusions: list[str] = []
 
+        # Modern runtime plan shape (agentic_team PlanningAgent output)
+        plan_table = str(plan.get("table") or "").strip()
+        if plan_table:
+            domain = _table_to_domain(plan_table)
+
+        plan_domain = str(plan.get("domain") or "").strip()
+        if plan_domain:
+            domain = plan_domain
+
+        plan_metric_expr = str(plan.get("metric_expr") or "").strip()
+        plan_metric = str(plan.get("metric") or "").strip()
+        if plan_metric_expr:
+            metric = plan_metric_expr
+        elif plan_metric and plan_metric != "unknown":
+            metric = plan_metric
+
+        for dim in list(plan.get("dimensions") or []):
+            if not isinstance(dim, str):
+                continue
+            normalized = "month" if dim == "__month__" else dim
+            if normalized and normalized not in grain:
+                grain.append(normalized)
+
+        time_filter = plan.get("time_filter")
+        if isinstance(time_filter, dict):
+            kind = str(time_filter.get("kind") or "").lower()
+            if kind == "month_year":
+                month = time_filter.get("month")
+                year = time_filter.get("year")
+                if month is not None:
+                    time_scope["month"] = int(month)
+                if year is not None:
+                    time_scope["year"] = int(year)
+            elif kind == "year_only":
+                year = time_filter.get("year")
+                if year is not None:
+                    time_scope["year"] = int(year)
+            elif kind == "explicit_comparison":
+                year = time_filter.get("year")
+                if year is not None:
+                    time_scope["year"] = int(year)
+            elif kind == "relative":
+                value = time_filter.get("value")
+                if value:
+                    time_scope["relative"] = str(value)
+
+        for vf in list(plan.get("value_filters") or []):
+            if isinstance(vf, dict):
+                fil: dict[str, Any] = {}
+                for key in ("column", "op", "value"):
+                    if key in vf:
+                        fil[key] = vf[key]
+                filters.append(fil or {"expression": str(vf)})
+            else:
+                filters.append({"expression": str(vf)})
+
         subquestions = plan.get("subquestions", [])
         if subquestions:
             sq = subquestions[0]
             # Domain from tables
             tables = sq.get("tables", [])
-            if tables:
+            if tables and domain == "unknown":
                 domain = _table_to_domain(tables[0])
 
             # Metric from aggregations
             aggs = sq.get("aggregations", [])
-            if aggs:
+            if aggs and metric == "unknown":
                 agg = aggs[0]
                 metric = f"{agg.get('agg', 'count')}({agg.get('col', '*')})"
 
             # Grain from group_by
             group_by = sq.get("group_by", [])
-            if group_by:
+            if group_by and not grain:
                 for g in group_by:
                     if isinstance(g, str):
                         grain.append(g)
@@ -74,7 +130,8 @@ class AnalysisContract:
                 ctype = c.get("type", "")
                 expr = c.get("expression", "")
                 if ctype in ("time", "time_month"):
-                    time_scope = _parse_time_expression(expr)
+                    if not time_scope:
+                        time_scope = _parse_time_expression(expr)
                 elif ctype == "filter":
                     filters.append({"expression": expr})
 
@@ -82,6 +139,9 @@ class AnalysisContract:
         if intake:
             if intake.get("exclusions"):
                 exclusions = intake["exclusions"]
+        for exclusion in list(plan.get("_exclusions") or []):
+            if exclusion not in exclusions:
+                exclusions.append(exclusion)
 
         return cls(
             metric=metric,
