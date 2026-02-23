@@ -301,6 +301,7 @@ class SourceTruthResponse(BaseModel):
     exact_matches: int
     accuracy_pct: float
     avg_latency_ms: float
+    parity_summary: dict[str, Any] = Field(default_factory=dict)
     runs: list[SourceTruthCaseResult] = Field(default_factory=list)
 
 
@@ -1314,14 +1315,18 @@ def _providers_snapshot() -> ProvidersResponse:
         "anthropic": _anthropic_check(),
     }
 
-    if checks["ollama"].available:
-        recommended = LLMMode.LOCAL
-    elif checks["anthropic"].available:
-        recommended = LLMMode.ANTHROPIC
-    elif checks["openai"].available:
-        recommended = LLMMode.OPENAI
-    else:
-        recommended = LLMMode.DETERMINISTIC
+    order_map = {
+        "openai": LLMMode.OPENAI,
+        "anthropic": LLMMode.ANTHROPIC,
+        "ollama": LLMMode.LOCAL,
+    }
+    pref_raw = os.environ.get("HG_AUTO_MODE_PRIORITY", "openai,anthropic,ollama")
+    pref = [p.strip().lower() for p in pref_raw.split(",") if p.strip()]
+    recommended = LLMMode.DETERMINISTIC
+    for provider in pref:
+        if provider in checks and checks[provider].available:
+            recommended = order_map.get(provider, LLMMode.DETERMINISTIC)
+            break
 
     return ProvidersResponse(default_mode=default_mode, recommended_mode=recommended, checks=checks)
 
@@ -1373,12 +1378,21 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
             ),
         )
 
-    # auto mode — priority: anthropic (best accuracy+latency) > ollama (local, no cost) > openai
-    _auto_priority = [
-        ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model),
-        ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model),
-        ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model),
-    ]
+    # auto mode — policy-controlled provider preference.
+    pref_raw = os.environ.get("HG_AUTO_MODE_PRIORITY", "openai,anthropic,ollama")
+    pref = [p.strip().lower() for p in pref_raw.split(",") if p.strip()]
+    options = {
+        "openai": ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model),
+        "anthropic": ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model),
+        "ollama": ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model),
+    }
+    _auto_priority = [options[p] for p in pref if p in options]
+    if not _auto_priority:
+        _auto_priority = [
+            ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model),
+            ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model),
+            ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model),
+        ]
     for prov_key, llm_mode, intent_m, narrator_m in _auto_priority:
         if providers.checks[prov_key].available:
             return RuntimeSelection(
@@ -1391,12 +1405,14 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
                 narrator_model=narrator_m,
             )
 
-    raise HTTPException(
-        status_code=503,
-        detail=(
-            "LLM mode 'auto' requested but no provider is available. "
-            "Ensure at least one LLM provider (Ollama, OpenAI, or Anthropic) is configured and reachable."
-        ),
+    return RuntimeSelection(
+        requested_mode=mode.value,
+        mode=LLMMode.DETERMINISTIC.value,
+        use_llm=False,
+        provider=None,
+        reason="auto fallback to deterministic (no provider available)",
+        intent_model=None,
+        narrator_model=None,
     )
 
 
@@ -2692,6 +2708,7 @@ def _register_routes(app: FastAPI) -> None:
             exact_matches=int(payload.get("exact_matches") or 0),
             accuracy_pct=float(payload.get("accuracy_pct") or 0.0),
             avg_latency_ms=float(payload.get("avg_latency_ms") or 0.0),
+            parity_summary=dict(payload.get("parity_summary") or {}),
             runs=[SourceTruthCaseResult(**row) for row in payload.get("runs", [])],
         )
 
@@ -3081,6 +3098,12 @@ def get_ui_html() -> str:
     .tl-summary{font-size:11px;color:var(--text-muted);margin-top:2px}
     .tl-meta{font-size:10px;color:var(--text-dim);font-family:var(--mono);margin-top:2px}
     .tl-reasoning{font-size:10px;color:var(--gold);font-family:var(--mono);margin-top:4px;padding:4px 8px;background:rgba(255,193,7,0.08);border-radius:4px}
+    .flow-lane{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    .flow-node{font-size:11px;color:var(--text);padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)}
+    .flow-arrow{font-size:12px;color:var(--gold)}
+    details.raw-debug{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:8px 10px}
+    details.raw-debug > summary{cursor:pointer;color:var(--text-muted);font-size:11px;user-select:none}
+    details.raw-debug pre{margin-top:8px;max-height:220px;overflow:auto;padding:10px;background:#121212;border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-muted)}
 
     /* ---- responsive ---- */
     @media(max-width:640px){
@@ -3361,10 +3384,8 @@ def get_ui_html() -> str:
         const hasStats = r.stats_analysis && r.stats_analysis.summary;
         const hasExplain = hasSql || hasTrace || hasChecks || hasStats;
 
-        const rowCount = r.row_count != null ? `<span class="meta-chip">${fmt(r.row_count)} rows</span><span class="meta-sep"></span>` : '';
-        const execTime = r.execution_time_ms != null ? `<span class="meta-chip">${Math.round(r.execution_time_ms)}ms</span>` : '';
-        const mode = r.runtime && r.runtime.mode ? `<span class="meta-chip">${esc(r.runtime.mode)}</span><span class="meta-sep"></span>` : '';
-        const explainBtn = hasExplain ? `<span class="meta-sep"></span><button class="explain-btn" onclick="openExplain(${i})">Explain</button>` : '';
+        const rowCount = r.row_count != null ? `<span class="meta-chip">${fmt(r.row_count)} rows returned</span>` : '';
+        const explainBtn = hasExplain ? `<button class="explain-btn" onclick="openExplain(${i})">Explain Yourself</button>` : '';
 
         html += `<div class="turn-assistant"><div class="card">
           <div class="card-body">
@@ -3373,24 +3394,24 @@ def get_ui_html() -> str:
             ${chart}${table}
             ${suggestions ? '<div class="suggestions">' + suggestions + '</div>' : ''}
           </div>
-          <div class="card-meta">${mode}${rowCount}${execTime}${explainBtn}</div>
+          <div class="card-meta">${rowCount}${rowCount && explainBtn ? '<span class="meta-sep"></span>' : ''}${explainBtn}</div>
         </div></div>`;
         html += `</div>`;
         return html;
       }).join('');
 
-      /* auto-scroll to latest only when a new message was just added */
+      /* newest turn is rendered first; keep viewport pinned to top if user is near top */
       if (_shouldAutoScroll) {
-        requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+        requestAnimationFrame(() => { el.scrollTop = 0; });
       }
     }
 
-    /* detect if user has scrolled up — disable auto-scroll so history stays in view */
+    /* detect if user moved away from top (older history) and avoid jump-to-top */
     document.addEventListener('DOMContentLoaded', () => {
       const el = $('thread');
       if (el) el.addEventListener('scroll', () => {
-        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        _shouldAutoScroll = atBottom;
+        const nearTop = el.scrollTop < 80;
+        _shouldAutoScroll = nearTop;
       });
     });
 
@@ -3405,8 +3426,19 @@ def get_ui_html() -> str:
       /* question */
       html += `<div><div class="inspect-label">Question</div><p style="color:var(--text);font-size:14px">${esc(turn.goal)}</p></div>`;
 
-      /* agent trace as timeline */
+      /* agent decision flow */
       if (r.agent_trace && r.agent_trace.length) {
+        const flowNames = r.agent_trace.map(t => (t.agent || t.role || '').trim()).filter(Boolean);
+        const dedupFlow = flowNames.filter((name, idx) => idx === 0 || flowNames[idx - 1] !== name).slice(0, 14);
+        if (dedupFlow.length) {
+          html += `<div><div class="inspect-label">Decision Flow</div><div class="flow-lane">`;
+          dedupFlow.forEach((name, idx) => {
+            html += `<span class="flow-node">${esc(name)}</span>`;
+            if (idx < dedupFlow.length - 1) html += `<span class="flow-arrow">&rarr;</span>`;
+          });
+          html += `</div></div>`;
+        }
+
         html += `<div><div class="inspect-label">Agent Trace</div><div class="timeline">`;
         r.agent_trace.forEach(t => {
           const st = (t.status || '').toLowerCase();
@@ -3464,6 +3496,13 @@ def get_ui_html() -> str:
         html += sh;
       }
 
+      if (r.runtime || r.data_quality) {
+        html += `<details class="raw-debug"><summary>Raw diagnostics (optional)</summary><pre>${esc(JSON.stringify({
+          runtime: r.runtime || {},
+          data_quality: r.data_quality || {}
+        }, null, 2))}</pre></details>`;
+      }
+
       /* confidence + meta footer */
       const confPct = Math.round((r.confidence_score || 0) * 100);
       html += `<div style="border-top:1px solid var(--border);padding-top:14px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">`;
@@ -3500,7 +3539,7 @@ def get_ui_html() -> str:
       $('runBtn').disabled = true;
 
       const turn = { goal, response: null, timestamp: Date.now() };
-      state.turns.push(turn);
+      state.turns.unshift(turn);
       _shouldAutoScroll = true;
       renderThread();
       persistThread();
@@ -3520,13 +3559,41 @@ def get_ui_html() -> str:
           role: 'analyst'
         };
 
-        const resp = await fetch('/api/assistant/query', {
+        const accepted = await fetch('/api/assistant/query/async', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        const data = await resp.json();
-        turn.response = data;
+        const acceptedJson = await accepted.json();
+        if (!accepted.ok) {
+          const reason = acceptedJson.detail || acceptedJson.message || 'Failed to queue async query';
+          throw new Error(reason);
+        }
+        const jobId = acceptedJson.job_id;
+        if (!jobId) throw new Error('Async query was accepted without a job id.');
+
+        const pollStarted = Date.now();
+        const pollTimeoutMs = 180000;
+        while (Date.now() - pollStarted < pollTimeoutMs) {
+          await new Promise(resolve => setTimeout(resolve, 850));
+          const statusResp = await fetch(`/api/assistant/query/async/${encodeURIComponent(jobId)}`);
+          const statusJson = await statusResp.json();
+          if (!statusResp.ok) {
+            const reason = statusJson.detail || statusJson.message || 'Failed to fetch async job status';
+            throw new Error(reason);
+          }
+          const status = String(statusJson.status || '').toLowerCase();
+          if (status === 'completed') {
+            turn.response = statusJson.response || { success: false, error: 'Async job completed without payload.' };
+            break;
+          }
+          if (status === 'failed' || status === 'canceled') {
+            throw new Error(statusJson.error || `Query ${status}.`);
+          }
+        }
+        if (!turn.response) {
+          throw new Error('Query timed out while waiting for completion.');
+        }
       } catch (e) {
         turn.response = { success: false, error: e.message || 'Network error' };
       }

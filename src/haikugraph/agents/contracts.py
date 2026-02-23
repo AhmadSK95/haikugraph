@@ -448,3 +448,22 @@ class AssistantQueryResponse(BaseModel):
 
     # Suggestions
     suggested_questions: list[str] = Field(default_factory=list, description="Follow-up questions")
+
+    # BRD: Semantic contract (FR-1, FR-6, closure criterion #1)
+    contract_spec: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Semantic contract binding: metric, domain, dimensions, time_scope, filters, exclusions.",
+    )
+    contract_validation: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Contract-vs-SQL validation result: valid, violations, checks.",
+    )
+
+    # BRD: Decision flow (FR-6, closure criterion #6)
+    decision_flow: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Explain-yourself decision timeline: each entry is a step "
+            "(question, contract, rejected_alternatives, sql, audit, confidence_decomposition)."
+        ),
+    )

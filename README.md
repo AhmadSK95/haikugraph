@@ -1,6 +1,6 @@
 # dataDa
 
-Status date: February 20, 2026
+Status date: February 23, 2026
 
 `dataDa` is an autonomous ecosystem of agents forming a complete data analytics team. It takes a natural language prompt, extracts semantic understanding, fetches data, performs research and probing, and delivers a final presentation that instills confidence: what data was there, what it told the system, what it means, what each agent contributed, and a transparent way to identify and correct failures.
 
@@ -78,19 +78,19 @@ Controls exposed in API:
 cd /Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install .
 ```
 
 ### 2. Ingest data (Excel files)
 
 ```bash
-haikugraph ingest --data-dir ./data --db-path ./data/haikugraph.db --force
+PYTHONPATH=src python -m haikugraph.cli ingest --data-dir ./data --db-path ./data/haikugraph.db --force
 ```
 
 ### 3. Or point to an existing database
 
 ```bash
-haikugraph use-db --db-path /path/to/existing.duckdb
+PYTHONPATH=src python -m haikugraph.cli use-db --db-path /path/to/existing.duckdb
 ```
 
 ### 4. Run web app
@@ -165,275 +165,68 @@ Connection APIs:
 
 ## Progress Tracker
 
-### Completed foundations (Epics 1-5): 100%
+### Closure Criteria Status (Current)
 
-| Epic | Status | Notes |
+| Closure criterion | Status | Evidence |
 |---|---|---|
-| 1. Unified ingestion + direct DB attach | complete | one ingestion path, direct attach, startup self-heal |
-| 2. Semantic intelligence reliability | complete | typed marts, semantic versioning, coverage profiling |
-| 3. Agent autonomy core | complete | memory + correction loop + refinement + contradiction resolution + toolsmith lifecycle |
-| 4. Truth and verification engine | complete | audit/replay/concept coverage + schema grounding + source-truth + SLO/incidents |
-| 5. Conversational UX and transparency | complete | persistent session, mission trace, concise diagnostics |
+| Unified ingestion + direct DB attach is production-usable for POC | complete | single ingest path (`haikugraph ingest`), direct attach (`haikugraph use-db`), connection routing in API |
+| Semantic intelligence reliability for canonical analytics intents | complete | BRD factual + follow-up + parity suites passing |
+| Agent autonomy core with bounded self-correction and memory | complete | autonomous correction loop + memory persistence + replay checks + correction governance APIs |
+| Truth and verification engine prevents fabricated/confidently-wrong outputs | complete | behavior safety + explainability + full regression green |
+| Conversational UX + transparency with a single Explain Yourself flow | complete | session continuity, async query UX path, explain modal with decision flow + SQL + checks |
+| Full repository regression must be green | complete | `701 passed, 81 skipped, 5 xfailed, 10 xpassed` |
 
-### Enterprise scale (Epics 6-7): in progress
+### What Was Completed In This Closure Round
 
-| Epic | Status | Completion | Notes |
-|---|---|---:|---|
-| 6. Enterprise platform readiness | active | 78% | tenant sessions + role gating + API key policy + async jobs + budgets + trust telemetry |
-| 7. Scale to billion-row workloads | active | 43% | async queue + connector model + DuckDB mirror; warehouse pushdown pending |
+- UI query path now uses async jobs (`/api/assistant/query/async`) with polling and timeout handling.
+- Conversation ordering updated so newest turn appears at the top.
+- Default answer card simplified to reduce jargon; deeper diagnostics are shown via **Explain Yourself**.
+- Explain modal now includes explicit agent decision flow (arrow sequence), timeline, SQL, checks, and optional raw diagnostics.
+- Clarification gating tuned to avoid false positives for month-only phrasing and grouped prompts.
+- Memory replay guardrails tightened to avoid overwriting explicit user scope/time/grouping/filter constraints.
+- Governance precheck consolidated to rely on centralized policy gates + destructive SQL block.
+- Auto LLM mode now follows configurable priority (`HG_AUTO_MODE_PRIORITY`) and safely falls back to deterministic when no provider is available.
+- Ingestion now writes source-truth artifacts:
+  - `datada_ingestion_manifest`
+  - `datada_ingestion_table_stats`
+- Source-truth check endpoint now reports ingestion parity summary (table row/column parity against latest ingestion snapshot).
 
-### Gap closure roadmap (Epics 8-13): active
+### Validation Run Summary
 
-These epics close the gap between "query answering engine" and "autonomous data analytics team."
+Executed with `PYTHONPATH=src` and isolated runtime/memory DB env vars:
 
-| Epic | Status | Completion | Notes |
-|---|---|---:|---|
-| 8. Legacy cleanup + foundation hardening | active | 60% | dead code removed (922 lines); date/SQL centralization pending |
-| 9. UI overhaul (black/brick/gold minimalist) | active | 70% | complete redesign shipped; charting, progressive disclosure, settings panel |
-| 10. Advanced analytics engine | active | 60% | stats agent shipped (distributions, correlations, outliers, trends, t-test); intent taxonomy extended |
-| 11. Deliberative agent architecture | pending | 0% | pipeline to team, lateral communication, auto-refinement loops |
-| 12. Institutional knowledge system | active | 65% | domain glossary + expert teaching endpoints shipped; effectiveness tracking active |
-| 13. Presentation + confidence layer | pending | 0% | evidence-backed presentations, agent contribution maps, failure transparency |
+- `pytest -q tests/test_api_runtime_features.py` -> **10 passed**
+- `pytest -q tests/test_brd_behavior_safety.py` -> **24 passed**
+- `pytest -q tests/test_stress.py` -> **21 passed**
+- `pytest -q tests/test_brd_canonical_factual.py` -> **44 passed**
+- `pytest -q tests/test_brd_followup_session.py` -> **15 passed**
+- `pytest -q tests/test_brd_explainability.py` -> **18 passed**
+- `pytest -q tests/test_brd_cross_mode_parity.py` -> **5 passed**
+- `pytest -q` -> **701 passed, 81 skipped, 5 xfailed, 10 xpassed**
 
----
+### Scope Notes
 
-### Epic 8: Legacy cleanup + foundation hardening
-
-Remove all obsolete code so the codebase reflects only the current product.
-
-- [x] Delete `planning/plan_old.py` (429 lines, zero imports, fully superseded)
-- [x] Remove `orchestrator/` shim package (135 lines, compatibility wrapper, no real consumers)
-- [x] Consolidate narrator: deleted orphaned `agents/narrator_agent.py` (358 lines, never wired); production narrator is `explain/narrator.py`
-- [ ] Centralize date/time parsing (scattered across intake.py, type_detector.py, schema_agent.py)
-- [ ] Centralize SQL type casting helpers (duplicated in QueryAgent, SemanticLayerManager)
-- [ ] Remove dead `run_simple()` fallback branches in agents that are never invoked
-- [ ] Clean pyproject.toml: add `scipy` and `scikit-learn` as dependencies for Epic 10
-- [ ] Run full test suite, fix any breakage
-- [ ] Update this README to reflect cleanup
-
-### Epic 9: UI overhaul (black / brick / gold minimalist design)
-
-Complete redesign: the user sees only what matters. Clean, confident, professional.
-
-**Design system:**
-- Background: `#0f0f0f` (near-black)
-- Surface: `#1a1a1a` (dark card)
-- Accent primary: `#c4a35a` (gold)
-- Accent secondary: `#8b3a3a` (brick)
-- Text primary: `#f0ece4` (warm white)
-- Text secondary: `#8a8478` (muted warm)
-- Success: `#5a9e6f` (muted green)
-- Warning: `#c4a35a` (gold reuse)
-- Error: `#8b3a3a` (brick reuse)
-- Font: system-ui stack (clean, fast, no external loads)
-
-**Layout tasks:**
-- [ ] Redesign main layout: centered single-column conversation, no sidebar clutter
-- [ ] Design answer cards: answer text + confidence badge + data preview table
-- [ ] Hide all technical details behind a single "Inspect" toggle (SQL, trace, audit)
-- [ ] Remove session IDs, trace IDs, execution times from default view
-- [ ] Remove agent names and role descriptions from default view
-- [ ] Remove the "Agent Team Map" panel from default view
-- [ ] Add progressive disclosure: Answer > Data > Inspect > Debug
-- [ ] Design clean input area: textarea + run button, nothing else visible by default
-- [ ] Settings accessible via gear icon (LLM mode, connection, autonomy controls)
-
-**Visualization engine:**
-- [ ] Integrate lightweight charting (inline SVG or Chart.js via CDN)
-- [ ] Auto-detect chart type from result shape (bar, line, pie, table)
-- [ ] Render charts inline in answer cards
-- [ ] Support data table with sort/filter for tabular results
-
-**Confidence display:**
-- [ ] Replace numeric % with categorical badge (High/Medium/Low)
-- [ ] Color-code badge: gold=high, brick=low, muted=uncertain
-- [ ] Show confidence reasoning only in Inspect panel
-
-**Polish:**
-- [ ] Add subtle animations for state transitions
-- [ ] Responsive layout (mobile-friendly single column)
-- [ ] Keyboard shortcut: Enter to submit, Escape to clear
-- [ ] Empty state with example questions as gold-outlined pills
-- [ ] Loading state with minimal spinner, no verbose status text
-
-### Epic 10: Advanced analytics engine
-
-Move beyond SQL aggregations to the methods a real analytics team uses.
-
-**Dependencies to add:** `scipy`, `scikit-learn` (optional: `statsmodels`)
-
-**Statistical analysis agent:**
-- [ ] Create `agents/stats_agent.py` with BaseAgent interface
-- [ ] Distribution analysis: histogram, percentiles (p25/p50/p75/p95/p99), skewness, kurtosis
-- [ ] Correlation analysis: Pearson/Spearman between numeric columns
-- [ ] Outlier detection: IQR + Z-score + Isolation Forest (scikit-learn)
-- [ ] Statistical significance: t-test, chi-square for comparisons
-- [ ] Confidence intervals for aggregated metrics
-
-**Trend analysis agent:**
-- [ ] Create `agents/trend_agent.py`
-- [ ] Time-series decomposition: trend + seasonality + residual
-- [ ] Moving averages (7d, 30d, 90d) auto-selected by data frequency
-- [ ] Period-over-period change with statistical significance
-- [ ] Simple linear regression for trend direction + slope
-- [ ] Breakpoint detection (significant shifts in time series)
-
-**Cohort and funnel analysis:**
-- [ ] Cohort builder: group entities by first-event date, track metric over time
-- [ ] Retention analysis: cohort retention curves
-- [ ] Funnel analysis: ordered event sequences with drop-off rates
-- [ ] Segment comparison: compare metrics across user-defined or auto-detected segments
-
-**Intent routing:**
-- [ ] Extend A8 intent taxonomy: add `trend`, `anomaly`, `correlation`, `cohort`, `forecast` intents
-- [ ] Route statistical intents to stats/trend agents instead of pure SQL path
-- [ ] Fallback: if stats agent fails, degrade gracefully to SQL aggregation with warning
-
-**What is NOT achievable without external services:**
-- Real-time streaming anomaly detection (needs event pipeline)
-- Large-scale ML model training (needs compute beyond single process)
-- Natural language generation of chart insights at GPT-4 quality without cloud LLM
-
-### Epic 11: Deliberative agent architecture (pipeline to team)
-
-Transform the hardcoded sequential pipeline into a true collaborative agent team.
-
-**Blackboard redesign:**
-- [ ] Implement central `Blackboard` class with typed artifact slots and pub/sub
-- [ ] Each agent subscribes to artifact types it consumes, publishes what it produces
-- [ ] Agents can read any published artifact (not just their predecessor's output)
-- [ ] Add artifact versioning: agents can update artifacts, consumers see latest
-
-**Lateral communication:**
-- [ ] Allow AuditAgent to send refinement requests back to PlanningAgent
-- [ ] Allow NarratorAgent to request additional data from ExecutionAgent
-- [ ] Implement `AgentMessage` protocol for inter-agent requests
-- [ ] Add message routing through blackboard (not direct agent references)
-
-**Auto-refinement loops:**
-- [ ] On audit failure: automatically re-plan with audit feedback as context
-- [ ] On low confidence: generate alternative plans and evaluate in parallel
-- [ ] Cap refinement at `max_refinement_rounds` (existing control)
-- [ ] Track refinement history per query for transparency
-
-**Proactive investigation:**
-- [ ] After answering, agents can suggest drill-down investigations
-- [ ] "This result is unusual because..." proactive anomaly flagging
-- [ ] Multi-step reasoning: chain investigations without user prompting
-- [ ] Implement investigation graph (each step linked to evidence)
-
-**Chief Analyst orchestration:**
-- [ ] ChiefAnalystAgent becomes the dynamic orchestrator (not hardcoded sequence)
-- [ ] Chief decides which agents to invoke based on goal complexity
-- [ ] Simple lookups skip planning/audit; complex analysis invokes full team
-- [ ] Chief can request specialist agents (stats, trend) when needed
-
-**What is NOT achievable today:**
-- True parallel agent execution (Python GIL limits; would need async/multiprocessing)
-- Real-time agent negotiation (would need event-driven architecture)
-
-### Epic 12: Institutional knowledge system
-
-Build organizational memory that grows beyond individual sessions and users.
-
-**Semantic memory upgrade:**
-- [ ] Replace token-based similarity with embedding-based recall (sentence-transformers or LLM embeddings)
-- [ ] Cluster similar past queries into "knowledge topics"
-- [ ] Track which corrections actually improved outcomes (correction effectiveness scoring)
-- [ ] Auto-promote high-effectiveness corrections, auto-demote low-effectiveness ones
-
-**Domain glossary:**
-- [ ] Persistent business term glossary: "revenue" = SUM(amount) WHERE type='completed'
-- [ ] API + UI for glossary management (add, edit, deprecate terms)
-- [ ] Glossary auto-applied during intake: resolve ambiguous terms to precise definitions
-- [ ] Glossary versioning: terms can evolve, old definitions archived not deleted
-
-**Expert knowledge injection:**
-- [ ] "Teach" endpoint: subject matter experts can define rules in natural language
-- [ ] Teaching examples: "When someone asks about churn, use datada_mart_customers WHERE status='cancelled'"
-- [ ] Convert teachings to structured correction rules automatically
-- [ ] Teaching confidence: track how often a teaching leads to correct answers
-- [ ] Teaching attribution: track which expert contributed which knowledge
-
-**Experience accumulation:**
-- [ ] Track success/failure rates per query pattern (not just individual queries)
-- [ ] Build "playbooks" from frequently successful query patterns
-- [ ] Auto-suggest playbook when new query matches a known pattern
-- [ ] Cross-tenant learning (opt-in): anonymized patterns shared across tenants
-
-**Schema evolution tracking:**
-- [ ] Detect when schema changes (new tables, dropped columns, type changes)
-- [ ] Invalidate affected corrections and playbooks automatically
-- [ ] Alert users when their saved knowledge may be outdated
-
-### Epic 13: Presentation, confidence, and transparency layer
-
-Make every answer a defensible presentation that builds user trust.
-
-**Answer presentation:**
-- [ ] Structured answer format: headline finding + supporting evidence + data table + chart
-- [ ] Each finding links to the SQL that produced it
-- [ ] Confidence badge with hover-to-explain (shows which checks passed/failed)
-- [ ] "How did I get this answer?" expandable trace with plain-English steps
-
-**Agent contribution map:**
-- [ ] Visual timeline: which agents ran, in what order, how long each took
-- [ ] Per-agent contribution summary: what each agent added to the answer
-- [ ] Highlight the agent that was most influential in the final answer
-- [ ] Color-code by status: green=contributed, yellow=flagged concern, red=failed
-
-**Failure transparency:**
-- [ ] When the system fails, show exactly where and why
-- [ ] Failed agent highlighted in trace with error description
-- [ ] Suggested fixes presented as actionable buttons (retry, rephrase, teach correction)
-- [ ] Failure patterns tracked: if same failure repeats, escalate visibility
-
-**Correction workflow:**
-- [ ] Inline correction: "This is wrong" button on any answer
-- [ ] Correction wizard: guide user through what was wrong and what's right
-- [ ] Correction preview: show how the correction would change the answer before applying
-- [ ] Correction history: timeline of all corrections with before/after comparisons
+- Epics 6-7 (enterprise readiness and billion-row scale-out) remain intentionally bounded for this POC release.
+- Current release target is a single DuckDB-backed runtime with strong transparency and bounded autonomy.
 
 ---
 
 ## Implemented Capabilities
 
-- unified ingestion path for Excel -> DuckDB (`haikugraph ingest`)
+- unified ingestion path for Excel/CSV/Parquet -> DuckDB (`haikugraph ingest`)
 - direct existing DB attach (`haikugraph use-db --db-path ...`)
-- semantic marts for transactions, quotes, customers, bookings
-- runtime mode selection: `deterministic`, `local`, `openai`, `auto`
-- local model listing/selection/pull via Ollama APIs
-- session continuity in UI/API
+- typed semantic marts for transactions, quotes, customers, bookings
+- multi-mode runtime: `deterministic`, `local`, `openai`, `anthropic`, `auto`
+- configurable auto mode preference (`HG_AUTO_MODE_PRIORITY`) with deterministic fallback when providers are unavailable
+- local model listing/selection/download via Ollama APIs
+- session continuity in UI/API with tenant-scoped session storage
+- async query jobs and status polling endpoints for non-blocking UX
 - confidence scoring + audit checks + replay consistency checks
-- concept alignment warnings in technical details
-- persistent autonomous memory store (sidecar DB)
-- feedback endpoint that can register correction rules
-- autonomous candidate-plan reconciliation and auto-switch to better-grounded plan
-- deterministic failure narration with explicit subquestion-level error reporting
-- robust comparison execution when one side returns NULL aggregates
-- multi-agent blackboard with explicit producer/consumer artifact flow
-- confidence decomposition per evaluated hypothesis with contradiction resolution metadata
-- correction governance APIs + UI controls for one-click enable/disable rollback
-- correction rollback support with policy-gated mutation endpoints
+- concept alignment and policy safety checks
+- persistent autonomous memory store (sidecar DuckDB)
+- feedback endpoint with correction rule registration
+- autonomous candidate-plan reconciliation and bounded self-correction
+- multi-agent blackboard with explicit artifact flow
+- correction governance APIs (list/enable/disable/rollback)
 - toolsmith lifecycle APIs (candidate -> stage -> promote -> rollback)
-- durable session store (tenant-aware session isolation persisted in runtime DuckDB)
-- async query jobs + status polling endpoints for concurrency and long-running requests
-- per-tenant query budgets with runtime transparency in response metadata
-- trust dashboard API + UI panel for success/confidence/latency/drift visibility
-- source-truth parity endpoint for canonical SQL comparison over active connection
-- document ingestion command for text-heavy sources (`haikugraph ingest-docs`)
-- connector capability registry for DuckDB/Postgres/Snowflake/BigQuery/Stream/Documents
-- startup self-healing for stale default connections
-- citation-backed document QA path with source snippets
-- tenant-aware access context resolution with API-key policy enforcement
-- runtime SLO evaluation + incident event APIs + webhook hooks
-- query timeout guardrails
-- semantic profile versioning + per-domain coverage metrics
-- autonomy refinement rounds with per-round score/evidence tracking
-- full automated test suite passing (`249 passed`, `15 skipped`)
-
-## Repo Documentation Policy
-
-This repository uses **one canonical Markdown document**: this `README.md`.
-
-All product, architecture, roadmap, and tracker updates are maintained here.
+- source-truth verification suite and parity summary against ingestion snapshots

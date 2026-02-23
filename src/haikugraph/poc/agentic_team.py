@@ -31,22 +31,39 @@ from haikugraph.llm.router import call_llm
 import yaml
 
 from haikugraph.poc.autonomy import AutonomyConfig, AgentMemoryStore
+from haikugraph.contracts.analysis_contract import (
+    AnalysisContract,
+    ContractValidationResult,
+    build_contract_from_pipeline,
+    validate_sql_against_contract,
+)
+from haikugraph.safety.policy_gate import (
+    run_all_policy_gates,
+    get_blocking_verdict,
+    format_refusal_response,
+)
+from haikugraph.scoring.calibrated_confidence import (
+    compute_calibrated_confidence,
+)
+from haikugraph.explain.explain_yourself import (
+    build_explain_yourself,
+)
 from haikugraph.sql.safe_executor import SafeSQLExecutor
 
 
 MONTH_MAP = {
-    "january": 1,
-    "february": 2,
-    "march": 3,
-    "april": 4,
+    "january": 1, "jan": 1,
+    "february": 2, "feb": 2,
+    "march": 3, "mar": 3,
+    "april": 4, "apr": 4,
     "may": 5,
-    "june": 6,
-    "july": 7,
-    "august": 8,
-    "september": 9,
-    "october": 10,
-    "november": 11,
-    "december": 12,
+    "june": 6, "jun": 6,
+    "july": 7, "jul": 7,
+    "august": 8, "aug": 8,
+    "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10,
+    "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
 }
 
 MAX_DIMENSIONS = 3
@@ -1098,6 +1115,42 @@ class AgenticAnalyticsTeam:
         if runtime.fallback_warning:
             self._pipeline_warnings.append(runtime.fallback_warning)
 
+        # ── HARD GATE: Run policy gates on ORIGINAL goal before any rewriting ──
+        _early_verdicts = run_all_policy_gates(goal)
+        _early_blocking = get_blocking_verdict(_early_verdicts)
+        if _early_blocking:
+            trace.append({
+                "agent": "GovernanceAgent",
+                "role": "early_policy_gate",
+                "status": "blocked",
+                "duration_ms": 0.0,
+                "summary": f"Policy gate [{_early_blocking.gate}] blocked: {_early_blocking.reason}",
+            })
+            return AssistantQueryResponse(
+                success=False,
+                answer_markdown=format_refusal_response(_early_blocking),
+                confidence=ConfidenceLevel.UNCERTAIN,
+                confidence_score=0.0,
+                definition_used=goal,
+                evidence=[],
+                sanity_checks=[
+                    SanityCheck(
+                        check_name="early_policy_gate",
+                        passed=False,
+                        message=_early_blocking.reason,
+                    )
+                ],
+                trace_id=trace_id,
+                runtime=self._runtime_payload(
+                    runtime,
+                    llm_intake_used=False,
+                    autonomy=autonomy_cfg,
+                ),
+                agent_trace=trace,
+                suggested_questions=["Ask about transactions, quotes, customers, or bookings instead."],
+                warnings=[f"Blocked by policy gate: {_early_blocking.gate}"],
+            )
+
         try:
             effective_goal = self._run_agent(
                 trace,
@@ -1247,6 +1300,24 @@ class AgenticAnalyticsTeam:
                             if narr
                         )
                         confidence_score = max(0.0, min(1.0, float(audit.get("score", 0.6))))
+                        # ── G3: Calibrated confidence ──────────────────────────
+                        try:
+                            _cal = compute_calibrated_confidence(
+                                contract_validation=_contract_validation,
+                                audit_result=audit,
+                                intake_confidence=float(intake.get("confidence", 0.5)),
+                                goal_text=effective_goal,
+                                sql_text=query_plan.get("sql", ""),
+                                fallback_used=bool(plan.get("_fallback_used")),
+                                row_count=execution.get("row_count", 0),
+                            )
+                            confidence_score = _cal.overall
+                        except Exception as _cal_exc:
+                            self._pipeline_warnings.append(
+                                f"Calibrated confidence failed ({type(_cal_exc).__name__}); "
+                                f"capping raw score at 0.6 as safety measure."
+                            )
+                            confidence_score = min(confidence_score, 0.6)
                         confidence = self._to_confidence(confidence_score)
                         total_ms = (time.perf_counter() - started) * 1000
                         trace.append({
@@ -1844,6 +1915,90 @@ class AgenticAnalyticsTeam:
                     warnings=self._pipeline_warnings,
                 )
 
+            # ── QA-R4 Fix 5: Insight synthesis fast-path ────────────────
+            if intake.get("intent") == "insight_synthesis":
+                insight_result = self._run_agent(
+                    trace,
+                    "InsightSynthesisAgent",
+                    "multi_metric_synthesis",
+                    self._insight_synthesis_agent,
+                    effective_goal,
+                    catalog,
+                    runtime,
+                    storyteller_mode,
+                )
+                self._blackboard_post(
+                    blackboard,
+                    producer="InsightSynthesisAgent",
+                    artifact_type="insight_synthesis",
+                    payload=insight_result,
+                    consumed_by=["ChiefAnalystAgent"],
+                )
+                total_ms = (time.perf_counter() - started) * 1000
+                trace.append({
+                    "agent": "ChiefAnalystAgent",
+                    "role": "finalize_response",
+                    "status": "success",
+                    "duration_ms": round(total_ms, 2),
+                    "summary": "insight synthesis response assembled",
+                })
+                _insight_score = insight_result.get("confidence_score", 0.72)
+                self._memory_write_turn(
+                    trace=trace, trace_id=trace_id, goal=goal,
+                    resolved_goal=effective_goal, tenant_id=tenant_id,
+                    runtime=runtime, success=True,
+                    confidence_score=_insight_score,
+                    row_count=insight_result.get("query_count", 0),
+                    plan={"table": "", "metric": "", "dimensions": [],
+                          "time_filter": None, "value_filters": []},
+                    sql=insight_result.get("sql_used"),
+                    audit_warnings=[],
+                    correction_applied=False, correction_reason="",
+                    metadata={"autonomy_mode": autonomy_cfg.mode,
+                              "insight_synthesis": True},
+                )
+                return AssistantQueryResponse(
+                    success=True,
+                    answer_markdown=insight_result.get("answer_markdown", ""),
+                    confidence=self._to_confidence(_insight_score),
+                    confidence_score=_insight_score,
+                    definition_used="multi-metric insight synthesis",
+                    evidence=insight_result.get("evidence", []),
+                    sanity_checks=[
+                        SanityCheck(
+                            check_name="insight_queries_executed",
+                            passed=bool(insight_result.get("query_count", 0)),
+                            message=f"{insight_result.get('query_count', 0)} analytical queries executed.",
+                        )
+                    ],
+                    sql=insight_result.get("sql_used"),
+                    row_count=insight_result.get("query_count", 0),
+                    columns=[],
+                    sample_rows=[],
+                    execution_time_ms=total_ms,
+                    trace_id=trace_id,
+                    runtime=self._runtime_payload(runtime, autonomy=autonomy_cfg)
+                    | {"blackboard_entries": len(blackboard)},
+                    agent_trace=trace,
+                    chart_spec=None,
+                    evidence_packets=[
+                        {"agent": "InsightSynthesisAgent",
+                         "queries": insight_result.get("query_count", 0)},
+                        {"agent": "Blackboard",
+                         "artifact_count": len(blackboard),
+                         "artifacts": blackboard,
+                         "edges": self._blackboard_edges(blackboard)},
+                    ],
+                    data_quality={
+                        **catalog.get("quality", {}),
+                        "insight_synthesis": True,
+                        "blackboard": {"artifact_count": len(blackboard),
+                                       "edges": self._blackboard_edges(blackboard)},
+                    },
+                    suggested_questions=insight_result.get("suggested_questions", []),
+                    warnings=self._pipeline_warnings,
+                )
+
             retrieval = self._run_agent(
                 trace,
                 "SemanticRetrievalAgent",
@@ -2143,6 +2298,24 @@ class AgenticAnalyticsTeam:
             )
 
             confidence_score = max(0.0, min(1.0, float(audit.get("score", 0.6))))
+            # ── G3: Calibrated confidence ──────────────────────────
+            try:
+                _cal = compute_calibrated_confidence(
+                    contract_validation=_contract_validation,
+                    audit_result=audit,
+                    intake_confidence=float(intake.get("confidence", 0.5)),
+                    goal_text=effective_goal,
+                    sql_text=query_plan.get("sql", ""),
+                    fallback_used=bool(plan.get("_fallback_used")),
+                    row_count=execution.get("row_count", 0),
+                )
+                confidence_score = _cal.overall
+            except Exception as _cal_exc:
+                self._pipeline_warnings.append(
+                    f"Calibrated confidence failed ({type(_cal_exc).__name__}); "
+                    f"capping raw score at 0.6 as safety measure."
+                )
+                confidence_score = min(confidence_score, 0.6)
             confidence = self._to_confidence(confidence_score)
 
             # ── GAP 11: Build contribution map from trace ─────────
@@ -2161,11 +2334,28 @@ class AgenticAnalyticsTeam:
             grounding = audit.get("grounding", {})
             coverage_pct = grounding.get("concept_coverage_pct", 100.0)
             misses = grounding.get("goal_term_misses", [])
+            # BRD-FR7: Rich confidence decomposition
+            _conf_factors: list[str] = []
+            _conf_factors.append(f"base_score=0.82")
+            if not execution["success"]:
+                _conf_factors.append("execution_failed=-0.64")
+            elif execution["row_count"] == 0:
+                _conf_factors.append("zero_rows=-0.25")
+            if audit_warnings:
+                _conf_factors.append(f"audit_warnings({len(audit_warnings)})=-{0.10*len(audit_warnings):.2f}")
+            if misses:
+                _conf_factors.append(f"concept_misses={misses}")
+            _pw_all = getattr(self, "_pipeline_warnings", [])
+            if any("Metric unrecognized" in w for w in _pw_all):
+                _conf_factors.append("unrecognized_metric=-0.30,cap=0.49")
+            _tf_check = plan.get("time_filter")
+            if isinstance(_tf_check, dict) and _tf_check.get("kind") == "future_blocked":
+                _conf_factors.append(f"future_blocked({_tf_check.get('year')}),cap=0.25")
             confidence_reasoning = (
                 f"Score {confidence_score:.2f} ({confidence.value}). "
-                f"Concept coverage {coverage_pct}%"
-                + (f", missed terms: {misses}" if misses else "")
-                + (f", {len(audit_warnings)} audit warning(s)" if audit_warnings else "")
+                f"Concept coverage {coverage_pct}%. "
+                f"Factors: [{', '.join(_conf_factors)}]"
+                + (f". {len(audit_warnings)} audit warning(s)" if audit_warnings else "")
                 + "."
             )
 
@@ -2311,6 +2501,16 @@ class AgenticAnalyticsTeam:
                         }
                     )
 
+            # ── BRD WP-1/WP-4: Build contract spec, validate, decision flow ──
+            _contract_spec = self._build_contract_spec(plan)
+            _contract_validation = self._validate_contract_against_sql(
+                _contract_spec, query_plan.get("sql", ""), plan,
+            )
+            _decision_flow = self._build_decision_flow(
+                effective_goal, intake, _contract_spec, _contract_validation,
+                plan, query_plan, execution, audit, autonomy_result,
+            )
+
             return AssistantQueryResponse(
                 success=execution["success"],
                 answer_markdown=narration["answer_markdown"],
@@ -2357,6 +2557,9 @@ class AgenticAnalyticsTeam:
                 stats_analysis=stats_dict,
                 suggested_questions=narration.get("suggested_questions", []),
                 warnings=self._pipeline_warnings,
+                contract_spec=_contract_spec,
+                contract_validation=_contract_validation,
+                decision_flow=_decision_flow,
             )
         except Exception as exc:
             total_ms = (time.perf_counter() - started) * 1000
@@ -2892,8 +3095,16 @@ class AgenticAnalyticsTeam:
         if not followup:
             return goal
 
-        last_turn = conversation_context[-1]
-        last_goal = str(last_turn.get("goal") or last_turn.get("user_goal") or "").strip()
+        # Walk backward through context to find the last user goal
+        last_goal = ""
+        for turn in reversed(conversation_context):
+            _g = turn.get("goal") or turn.get("user_goal") or ""
+            if not _g and turn.get("role") == "user":
+                _g = turn.get("content", "")
+            _g = str(_g).strip()
+            if _g:
+                last_goal = _g
+                break
         if not last_goal:
             return goal
 
@@ -3365,6 +3576,179 @@ class AgenticAnalyticsTeam:
             )
         return profile
 
+    # ── QA-R4 Fix 5: Insight synthesis agent ────────────────────────
+    def _insight_synthesis_agent(
+        self,
+        goal: str,
+        catalog: dict[str, Any],
+        runtime: RuntimeSelection,
+        storyteller_mode: bool = False,
+    ) -> dict[str, Any]:
+        """Run multiple pre-defined analytical queries across available marts
+        and synthesize numbered business insights with evidence."""
+        marts = catalog.get("marts", {})
+        metrics_by_table = catalog.get("metrics_by_table", {})
+
+        # Define a set of analytical probes across all available marts.
+        probes: list[dict[str, str]] = []
+        for mart_name, mart_meta in marts.items():
+            metrics = metrics_by_table.get(mart_name, {})
+            cols = mart_meta.get("columns", [])
+            time_col = None
+            for c in cols:
+                if c.endswith("_ts") or c == "event_ts" or c == "created_at":
+                    time_col = c
+                    break
+            # Total count probe
+            first_metric = next(iter(metrics), None)
+            if first_metric:
+                metric_expr = metrics[first_metric]
+                probes.append({
+                    "label": f"Total {first_metric} in {mart_name}",
+                    "sql": f"SELECT {metric_expr} AS metric_value FROM {mart_name} WHERE 1=1",
+                    "mart": mart_name,
+                    "metric": first_metric,
+                })
+                # Time-based trend probe (last 3 months)
+                if time_col:
+                    probes.append({
+                        "label": f"{first_metric} trend (last 3 months) in {mart_name}",
+                        "sql": (
+                            f"SELECT DATE_TRUNC('month', {time_col}) AS month_bucket, "
+                            f"{metric_expr} AS metric_value "
+                            f"FROM {mart_name} "
+                            f"WHERE {time_col} >= CURRENT_DATE - INTERVAL '90 days' "
+                            f"AND {time_col} IS NOT NULL "
+                            f"GROUP BY 1 ORDER BY 1"
+                        ),
+                        "mart": mart_name,
+                        "metric": first_metric,
+                    })
+            # Top dimension probe (first non-key string-like column)
+            skip_cols = {"customer_key", "transaction_key", "quote_key", "booking_key"}
+            dim_col = None
+            for c in cols:
+                if c not in skip_cols and not c.endswith("_ts") and not c.endswith("_key") and not c.endswith("_id"):
+                    dim_col = c
+                    break
+            if dim_col and first_metric:
+                probes.append({
+                    "label": f"{first_metric} by {dim_col} in {mart_name}",
+                    "sql": (
+                        f"SELECT {dim_col}, {metrics[first_metric]} AS metric_value "
+                        f"FROM {mart_name} WHERE 1=1 "
+                        f"GROUP BY 1 ORDER BY 2 DESC LIMIT 5"
+                    ),
+                    "mart": mart_name,
+                    "metric": first_metric,
+                })
+
+        # Execute probes and collect results
+        results: list[dict[str, Any]] = []
+        evidence: list[EvidenceItem] = []
+        sqls: list[str] = []
+        for probe in probes[:12]:  # Cap at 12 probes for performance
+            res = self.executor.execute(probe["sql"])
+            if res.success and res.row_count > 0:
+                results.append({
+                    "label": probe["label"],
+                    "rows": res.rows[:10],
+                    "columns": res.columns,
+                    "row_count": res.row_count,
+                    "mart": probe["mart"],
+                    "metric": probe["metric"],
+                })
+                evidence.append(EvidenceItem(
+                    description=probe["label"],
+                    value=str(res.rows[0] if res.rows else "N/A"),
+                    source=probe["mart"],
+                    sql_reference=probe["sql"],
+                ))
+                sqls.append(probe["sql"])
+
+        # Synthesize insights from collected data
+        lines: list[str] = ["## Business Insights\n"]
+        insight_num = 0
+
+        # Extract key findings
+        for r in results:
+            if insight_num >= 5:
+                break
+            if r["row_count"] == 1 and len(r["columns"]) <= 2:
+                # Scalar metric
+                val = r["rows"][0] if r["rows"] else {}
+                metric_val = val.get("metric_value", val.get(r["columns"][-1], "N/A")) if isinstance(val, dict) else val
+                insight_num += 1
+                lines.append(
+                    f"**{insight_num}. {r['label']}:** {_fmt_number(metric_val) if isinstance(metric_val, (int, float)) else metric_val}"
+                )
+            elif r["row_count"] > 1:
+                # Multi-row: summarize top entries
+                insight_num += 1
+                top_entries = []
+                for row in r["rows"][:3]:
+                    if isinstance(row, dict):
+                        parts = [f"{k}={v}" for k, v in row.items() if k != "metric_value"]
+                        val = row.get("metric_value", "")
+                        top_entries.append(f"{', '.join(parts)} → {_fmt_number(val) if isinstance(val, (int, float)) else val}")
+                    else:
+                        top_entries.append(str(row))
+                lines.append(f"**{insight_num}. {r['label']}:**")
+                for entry in top_entries:
+                    lines.append(f"   - {entry}")
+
+        if insight_num == 0:
+            lines.append("No significant data patterns found across available marts.")
+
+        lines.append("\n---\n*Insights synthesized from multiple analytical queries across available data marts.*")
+
+        # If LLM is available, let it refine the narrative
+        answer_md = "\n".join(lines)
+        if runtime and runtime.use_llm and runtime.provider and results:
+            try:
+                data_summary = "\n".join(
+                    f"- {r['label']}: {r['rows'][:3]}" for r in results[:8]
+                )
+                messages = [
+                    {"role": "system", "content": (
+                        "You are a business analyst synthesizing data into actionable insights. "
+                        "Given the following analytical results, produce 3-5 numbered insights "
+                        "with specific numbers and actionable recommendations. "
+                        "Format as markdown with bold insight titles."
+                    )},
+                    {"role": "user", "content": (
+                        f"Original question: {goal}\n\n"
+                        f"Analytical results:\n{data_summary}\n\n"
+                        "Provide concise, data-backed insights."
+                    )},
+                ]
+                llm_response = call_llm(
+                    messages,
+                    role="narrative",
+                    provider=runtime.provider,
+                    model=getattr(runtime, "narrative_model", None) or getattr(runtime, "intent_model", None),
+                    timeout=20,
+                )
+                if llm_response:
+                    answer_md = llm_response
+            except Exception:
+                pass  # Fall back to deterministic insights
+
+        suggested = [
+            "What are the key trends over the last quarter?",
+            "Which segment is growing fastest?",
+            "Show me a breakdown by platform",
+        ]
+
+        return {
+            "answer_markdown": answer_md,
+            "query_count": len(results),
+            "evidence": evidence,
+            "sql_used": "; ".join(sqls[:3]) if sqls else None,
+            "confidence_score": min(0.78, 0.50 + 0.07 * len(results)),
+            "suggested_questions": suggested,
+        }
+
     def _data_overview_agent(
         self,
         goal: str,
@@ -3795,6 +4179,8 @@ class AgenticAnalyticsTeam:
             "volume",
             "most common",
             "most popular",
+            "unique",
+            "distinct",
         ]
         has_domain_term = any(t in lower for t in domain_terms)
         has_metric_term = any(t in lower for t in metric_terms)
@@ -3812,27 +4198,47 @@ class AgenticAnalyticsTeam:
                 "ambiguity_score": 0.0,
             }
 
-        if followup_signal and not conversation_context and not (has_domain_term or has_metric_term):
+        # Follow-ups WITH conversation history have context-enriched goals —
+        # skip brief-goal checks since ContextAgent already resolved them.
+        _has_history = bool(conversation_context)
+        if followup_signal and not _has_history and not (has_domain_term or has_metric_term):
             reasons.append("follow_up_without_history")
-        if (
-            grouped_signal
-            and not has_metric_term
-            and not has_domain_term
-            and metric in {"transaction_count", "quote_count", "booking_count"}
-        ):
-            reasons.append("grouping_without_metric_choice")
-        if len(tokens) <= 7 and not has_domain_term and not has_metric_term:
-            reasons.append("goal_too_brief_without_scope")
-        if lower in {"only december", "this month", "last month", "what about this month"}:
-            reasons.append("time_reference_without_business_scope")
-        if not has_domain_term and metric == "transaction_count" and len(tokens) <= 9:
-            reasons.append("default_metric_fallback_without_explicit_domain")
+        if not _has_history:
+            if (
+                grouped_signal
+                and not has_metric_term
+                and not has_domain_term
+                and metric in {"transaction_count", "quote_count", "booking_count"}
+            ):
+                reasons.append("grouping_without_metric_choice")
+            if len(tokens) <= 7 and not has_domain_term and not has_metric_term:
+                reasons.append("goal_too_brief_without_scope")
+            if lower in {"only december", "this month", "last month", "what about this month"}:
+                reasons.append("time_reference_without_business_scope")
+            if not has_domain_term and metric == "transaction_count" and len(tokens) <= 9:
+                reasons.append("default_metric_fallback_without_explicit_domain")
         # Detect when value filters reference terms not in the schema
         vf_terms = [str(vf.get("value", "")).lower() for vf in (intake.get("value_filters") or [])]
         if not vf_terms and has_domain_term:
             # Check if goal mentions filtering concepts that couldn't be resolved
             filter_hints = ["only", "just", "specific", "particular", "where"]
-            if any(h in lower for h in filter_hints) and not any(t in lower for t in metric_terms):
+            active_filter_hints = [h for h in filter_hints if h in lower]
+            # "only" around temporal refs is time scoping (e.g. "Dec-2025 only")
+            if "only" in active_filter_hints:
+                if re.search(
+                    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|20\d{2}|this month|last month|this year|last year)\b(?:\s*[-/]\s*\d{2,4})?\s+only\b",
+                    lower,
+                ) or re.search(
+                    r"\bonly\s+(?:for\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|20\d{2}|this month|last month|this year|last year)\b",
+                    lower,
+                ):
+                    active_filter_hints = [h for h in active_filter_hints if h != "only"]
+
+            # Grouped prompts with clear domain should proceed; specialists/audit will refine.
+            if active_filter_hints and grouped_signal and has_domain_term:
+                active_filter_hints = []
+
+            if active_filter_hints and not any(t in lower for t in metric_terms):
                 reasons.append("possible_filter_intent_unresolved")
 
         # ── GAP 38a: Unique intent without DISTINCT ──────────────────
@@ -4129,6 +4535,75 @@ class AgenticAnalyticsTeam:
                 best_score = score
                 best_metric = metric_name
 
+        # ── QA-R4 Fix 3: Flag unrecognized metrics ──────────────────────
+        if best_score == 0:
+            self._pipeline_warnings.append(
+                f"Metric unrecognized: no catalog metric matched the goal "
+                f"(domain='{domain}'). Falling back to default '{best_metric}'. "
+                "The answer may not reflect what was asked."
+            )
+        else:
+            # ── QA-R5 Fix 4: Detect unmatched concept tokens ─────────────
+            # If the best metric matched on a common token (e.g. "customer")
+            # but goal contains concept words absent from ANY catalog metric,
+            # flag it — the selected metric may not reflect the user's intent.
+            _stopwords = {
+                "the", "a", "an", "of", "for", "in", "on", "to", "and", "or",
+                "is", "are", "was", "were", "be", "been", "with", "at", "from",
+                "by", "how", "what", "which", "that", "this", "it", "do", "does",
+                "i", "we", "my", "our", "me", "us", "can", "will", "would",
+                "should", "could", "has", "have", "had", "all", "no", "not",
+                "get", "give", "show", "list", "return", "find", "display",
+                "there", "many", "much", "some", "any", "available", "about",
+                "also", "just", "only", "per", "each", "every", "more", "most",
+                "than", "these", "those", "its", "their", "them", "up", "down",
+                "plausible", "please", "tell", "compute", "calculate",
+            }
+            _metric_kw = {
+                "count", "total", "sum", "average", "avg", "mean", "rate",
+                "revenue", "amount", "value", "volume", "number", "top",
+                "bottom", "rank", "unique", "distinct",
+            }
+            _time_kw = {
+                "month", "year", "quarter", "week", "day", "weekly", "monthly",
+                "yearly", "quarterly", "daily", "trend", "over", "time",
+                "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug",
+                "sep", "sept", "oct", "nov", "dec",
+                "january", "february", "march", "april", "june", "july",
+                "august", "september", "october", "november", "december",
+            }
+            _domain_kw = {
+                "transaction", "transactions", "quote", "quotes",
+                "booking", "bookings", "customer", "customers",
+                "document", "documents", "pdf",
+                "refund", "refunds", "refunded", "mt103",
+                "forex", "markup", "payee", "payees", "university",
+            }
+            # Known dimension/column terms that are not alien concepts
+            _dim_kw = {
+                "platform", "country", "state", "status", "type", "flow",
+                "currency", "name", "source", "target", "deal", "payment",
+                "split", "breakdown", "grouped", "group", "aggregated",
+                "comparison", "compare", "delta", "difference", "versus",
+                "previous", "context", "question", "was",
+            }
+            _noise = _stopwords | _metric_kw | _time_kw | _domain_kw | _dim_kw
+            goal_tokens = set(re.findall(r"[a-z]+", lower))
+            goal_tokens -= _noise
+            # Remove tokens that appear in the selected metric name
+            metric_tokens = set(re.split(r"[_\s]+", best_metric.lower()))
+            goal_tokens -= metric_tokens
+            # Also remove any single-char tokens and numeric-like tokens
+            goal_tokens = {t for t in goal_tokens if len(t) > 1}
+            # Strong concept tokens: longer words (>3 chars) that aren't filler
+            _strong = {t for t in goal_tokens if len(t) > 3}
+            if len(goal_tokens) >= 2 or len(_strong) >= 1:
+                self._pipeline_warnings.append(
+                    f"Metric unrecognized: goal concepts {goal_tokens} not found in "
+                    f"selected metric '{best_metric}'. The answer may not reflect "
+                    "what was asked."
+                )
+
         return best_metric
 
     def _detect_schema_exploration(self, lower: str, catalog: dict[str, Any]) -> str | None:
@@ -4268,6 +4743,28 @@ class AgenticAnalyticsTeam:
             intent = "yoy_growth"
         elif any(k in lower for k in ["correlation", "correlate"]):
             intent = "correlation"
+        # ── QA-R4 Fix 5 / QA-R5 Fix 5: Insight synthesis intent ─────────
+        elif any(
+            k in lower
+            for k in [
+                "actionable insight",
+                "business insight",
+                "key insight",
+                "top insight",
+                "key takeaway",
+                "actionable takeaway",
+                "executive summary",
+                "what should we focus on",
+                "what stands out",
+                "notable pattern",
+                "key finding",
+                "key findings",
+                "decision-grade insight",
+                "decision grade insight",
+                "strategic insight",
+            ]
+        ) or re.search(r"\b(?:insights|findings)\b", lower):
+            intent = "insight_synthesis"
         # RC5: Superlative patterns like "which country has the most payees"
         elif re.search(r'\bwhich\s+\w+\s+(?:has|have|had)\s+(?:the\s+)?(?:most|least|highest|lowest|fewest|largest|smallest)', lower):
             intent = "grouped_metric"
@@ -4396,7 +4893,7 @@ class AgenticAnalyticsTeam:
         _currency_pair_detected = False
         if domain == "quotes" and any(kw in lower for kw in ["currency pair", "currency combination", "most common currency"]):
             _currency_pair_detected = True
-            if any(kw in lower for kw in ["most common", "top", "most popular"]):
+            if any(kw in lower for kw in ["most common", "top", "most popular", "most frequent", "frequent", "which"]):
                 intent = "grouped_metric"
                 if metric == "quote_count" or not metric:
                     metric = "quote_count"
@@ -4546,16 +5043,31 @@ class AgenticAnalyticsTeam:
             top_n = max(1, min(100, int(top_match.group(1))))
 
         time_filter: dict[str, Any] | None = None
-        month = None
+        # ── QA-R4 Fix 2: Extract ALL months for comparison intent ────────
+        all_months: list[int] = []
         for name, number in MONTH_MAP.items():
             if re.search(rf"\b{name}\b", lower):
-                month = number
-                break
+                all_months.append(number)
+        month = all_months[0] if all_months else None
 
         years = re.findall(r"\b(20\d{2})\b", lower)
         year = int(years[0]) if years else None
 
-        if month is not None:
+        # When two distinct months are mentioned in a comparison query,
+        # create an explicit_comparison filter so _time_clause can map
+        # current → later month, comparison → earlier month with no subtraction.
+        if len(all_months) >= 2 and intent == "comparison":
+            unique_months = list(dict.fromkeys(all_months))  # preserve order, dedupe
+            if len(unique_months) >= 2:
+                time_filter = {
+                    "kind": "explicit_comparison",
+                    "month_a": unique_months[0],
+                    "month_b": unique_months[1],
+                    "year": year,
+                }
+            else:
+                time_filter = {"kind": "month_year", "month": month, "year": year}
+        elif month is not None:
             time_filter = {"kind": "month_year", "month": month, "year": year}
         elif "this month" in lower:
             time_filter = {"kind": "relative", "value": "this_month"}
@@ -4641,6 +5153,35 @@ class AgenticAnalyticsTeam:
     ) -> dict[str, Any]:
         out = dict(parsed)
         lower = goal.lower()
+
+        # ── QA-R4 Fix 1: Time-filter specificity guard ──────────────────
+        # If deterministic parsing found a more specific time filter (e.g.
+        # month_year) but the LLM downgraded it (e.g. to year_only), keep
+        # the deterministic version.
+        _TIME_SPECIFICITY = {"explicit_comparison": 4, "month_year": 3, "relative": 2, "year_only": 1}
+        det_tf = deterministic.get("time_filter")
+        out_tf = out.get("time_filter")
+        if det_tf and out_tf:
+            det_spec = _TIME_SPECIFICITY.get(det_tf.get("kind", ""), 0)
+            out_spec = _TIME_SPECIFICITY.get(out_tf.get("kind", ""), 0)
+            if det_spec > out_spec:
+                self._pipeline_warnings.append(
+                    f"Time filter restored from '{out_tf.get('kind')}' to "
+                    f"'{det_tf.get('kind')}' — deterministic parser was more specific."
+                )
+                out["time_filter"] = det_tf
+
+        # ── QA-R4 Fix 1b / Fix 6 / QA-R5 Fix 2: Future-date guard ───────
+        _current_year = datetime.utcnow().year
+        _tf = out.get("time_filter")
+        if _tf and isinstance(_tf, dict):
+            _tf_year = _tf.get("year")
+            if _tf_year is not None and int(_tf_year) > _current_year:
+                self._pipeline_warnings.append(
+                    f"Future year {_tf_year} detected (current year is {_current_year}). "
+                    "No data can exist for future dates."
+                )
+                out["time_filter"] = {"kind": "future_blocked", "year": int(_tf_year)}
 
         # RC6: Hard domain guard — explicit entity nouns override LLM drift
         if "transaction" in lower and not any(k in lower for k in ["booking", "booked", "deal type", "value date"]):
@@ -4767,6 +5308,274 @@ class AgenticAnalyticsTeam:
         out["value_filters"] = value_filters
         return out
 
+    def _build_contract_spec(self, plan: dict[str, Any]) -> dict[str, Any]:
+        """Build a semantic contract specification from the execution plan.
+
+        The contract captures the binding between the user's intent and the
+        SQL execution plan — metric, domain, dimensions, time_scope, filters,
+        and exclusions. This is used for pre-execution validation (FR-1) and
+        post-execution explainability (FR-6).
+        """
+        # ── G1: Delegate to contract-first module for structured contract ────
+        try:
+            structured = build_contract_from_pipeline(plan)
+            plan["_structured_contract"] = structured.to_dict()
+        except Exception as _sc_exc:
+            self._pipeline_warnings.append(
+                f"Structured contract build failed ({type(_sc_exc).__name__}: {_sc_exc}); "
+                f"falling back to plan-based contract."
+            )
+            plan["_structured_contract"] = {}
+
+        time_filter = plan.get("time_filter")
+        time_scope = "none"
+        if time_filter:
+            kind = time_filter.get("kind", "")
+            if kind == "future_blocked":
+                time_scope = f"future_blocked:{time_filter.get('year', '?')}"
+            elif kind == "month_year":
+                time_scope = f"month_year:{time_filter.get('year', '?')}-{time_filter.get('month', '?')}"
+            elif kind == "year_only":
+                time_scope = f"year:{time_filter.get('year', '?')}"
+            elif kind == "explicit_comparison":
+                time_scope = f"comparison:{time_filter.get('month_a', '?')}v{time_filter.get('month_b', '?')}@{time_filter.get('year', '?')}"
+            elif kind == "relative":
+                time_scope = f"relative:{time_filter.get('value', '?')}"
+            else:
+                time_scope = f"unknown:{kind}"
+
+        return {
+            "metric": plan.get("metric", ""),
+            "metric_expr": plan.get("metric_expr", ""),
+            "domain": plan.get("domain", ""),
+            "table": plan.get("table", ""),
+            "dimensions": list(plan.get("dimensions") or []),
+            "time_scope": time_scope,
+            "time_filter": time_filter,
+            "filters": list(plan.get("value_filters") or []),
+            "exclusions": list(plan.get("_exclusions") or []),
+            "intent": plan.get("intent", ""),
+            "definition_used": plan.get("definition_used", ""),
+        }
+
+    def _validate_contract_against_sql(
+        self, contract: dict[str, Any], sql: str, plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate that generated SQL honors the semantic contract.
+
+        Checks:
+        1. Time scope: If contract specifies month/year, SQL must contain
+           EXTRACT(MONTH/YEAR) or DATE_TRUNC predicates.
+        2. Grouping fidelity: If contract has dimensions, SQL must have GROUP BY.
+        3. Metric grounding: metric_expr tokens must appear in SQL.
+        4. Future blocking: future_blocked contracts must produce FALSE in WHERE.
+
+        Returns dict with 'valid': bool, 'violations': list[str], 'checks': list[dict].
+        """
+        # ── G1: Run structured contract validation ────────────────────
+        structured = plan.get("_structured_contract")
+        if structured and structured.get("metric"):
+            try:
+                sc = AnalysisContract(**structured)
+                result = validate_sql_against_contract(sql, sc)
+                if not result.valid:
+                    for v in result.violations:
+                        if v not in self._pipeline_warnings:
+                            self._pipeline_warnings.append(f"[Contract] {v}")
+            except Exception as _cv_exc:
+                self._pipeline_warnings.append(
+                    f"Structured contract validation failed ({type(_cv_exc).__name__}); "
+                    f"falling back to heuristic checks."
+                )
+
+        sql_upper = sql.upper()
+        sql_lower = sql.lower()
+        violations: list[str] = []
+        checks: list[dict[str, Any]] = []
+
+        # Check 1: Time scope enforcement
+        ts = contract.get("time_scope", "none")
+        if ts.startswith("month_year:"):
+            parts = ts.split(":")[1].split("-")
+            if len(parts) == 2:
+                year_str, month_str = parts
+                has_year = f"= {year_str}" in sql or f"={year_str}" in sql
+                has_month = f"= {month_str}" in sql or f"={month_str}" in sql
+                if not has_year:
+                    violations.append(f"Contract requires year={year_str} but SQL missing year predicate")
+                if not has_month:
+                    violations.append(f"Contract requires month={month_str} but SQL missing month predicate")
+                checks.append({"name": "time_year", "passed": has_year, "detail": f"year={year_str}"})
+                checks.append({"name": "time_month", "passed": has_month, "detail": f"month={month_str}"})
+        elif ts.startswith("year:"):
+            year_str = ts.split(":")[1]
+            has_year = f"= {year_str}" in sql or f"={year_str}" in sql
+            if not has_year:
+                violations.append(f"Contract requires year={year_str} but SQL missing year predicate")
+            checks.append({"name": "time_year", "passed": has_year, "detail": f"year={year_str}"})
+        elif ts.startswith("future_blocked:"):
+            if "FALSE" not in sql_upper:
+                violations.append("Contract is future_blocked but SQL does not contain FALSE predicate")
+            checks.append({"name": "future_block", "passed": "FALSE" in sql_upper, "detail": ts})
+
+        # Check 2: Grouping fidelity
+        dims = contract.get("dimensions", [])
+        if dims and contract.get("intent") in ("grouped_metric", "trend_analysis"):
+            has_group = "GROUP BY" in sql_upper
+            if not has_group:
+                violations.append(f"Contract specifies dimensions {dims} but SQL has no GROUP BY")
+            checks.append({"name": "grouping", "passed": has_group, "detail": f"dims={dims}"})
+
+        # Check 3: Metric grounding
+        metric_expr = contract.get("metric_expr", "")
+        if metric_expr and metric_expr != "N/A":
+            # Extract key function/column from metric_expr
+            grounded = any(
+                tok.lower() in sql_lower
+                for tok in re.findall(r'[a-zA-Z_]\w+', metric_expr)
+                if len(tok) > 2 and tok.upper() not in (
+                    "COUNT", "SUM", "AVG", "MIN", "MAX", "CASE", "WHEN",
+                    "THEN", "ELSE", "END", "DISTINCT", "CAST", "VARCHAR",
+                    "COALESCE", "TRUE", "FALSE",
+                )
+            )
+            checks.append({"name": "metric_grounding", "passed": grounded, "detail": metric_expr})
+            if not grounded:
+                violations.append(f"Metric expression '{metric_expr}' not grounded in SQL")
+
+        return {
+            "valid": len(violations) == 0,
+            "violations": violations,
+            "checks": checks,
+            "contract": contract,
+        }
+
+    def _build_decision_flow(
+        self,
+        goal: str,
+        intake: dict[str, Any],
+        contract: dict[str, Any],
+        contract_validation: dict[str, Any],
+        plan: dict[str, Any],
+        query_plan: dict[str, Any],
+        execution: dict[str, Any],
+        audit: dict[str, Any],
+        autonomy_result: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Build the 'Explain yourself' decision-flow timeline (FR-6).
+
+        Returns a list of decision steps, each containing:
+        - step: step name
+        - description: what happened
+        - details: relevant data
+        """
+        flow: list[dict[str, Any]] = []
+
+        # Step 1: Question understanding
+        flow.append({
+            "step": "question_understanding",
+            "description": f"Interpreted: intent={intake.get('intent')}, domain={intake.get('domain')}, metric={intake.get('metric')}",
+            "details": {
+                "original_goal": goal,
+                "resolved_intent": intake.get("intent"),
+                "resolved_domain": intake.get("domain"),
+                "resolved_metric": intake.get("metric"),
+                "time_filter": intake.get("time_filter"),
+                "dimensions": intake.get("dimensions", []),
+            },
+        })
+
+        # Step 2: Contract binding
+        flow.append({
+            "step": "contract_binding",
+            "description": f"Bound to contract: {contract.get('metric')} on {contract.get('table')} [{contract.get('time_scope')}]",
+            "details": contract,
+        })
+
+        # Step 3: Contract validation
+        cv_status = "PASSED" if contract_validation.get("valid") else f"FAILED: {contract_validation.get('violations', [])}"
+        flow.append({
+            "step": "contract_validation",
+            "description": f"SQL contract check: {cv_status}",
+            "details": contract_validation,
+        })
+
+        # Step 4: SQL generation
+        flow.append({
+            "step": "sql_generation",
+            "description": f"Generated SQL against {plan.get('table', '?')}",
+            "details": {
+                "sql": query_plan.get("sql", ""),
+                "table": plan.get("table"),
+                "metric_expr": plan.get("metric_expr"),
+            },
+        })
+
+        # Step 5: Execution result
+        flow.append({
+            "step": "execution",
+            "description": f"{'Success' if execution.get('success') else 'Failed'}: {execution.get('row_count', 0)} rows in {execution.get('execution_time_ms', 0):.0f}ms",
+            "details": {
+                "success": execution.get("success"),
+                "row_count": execution.get("row_count", 0),
+                "execution_time_ms": execution.get("execution_time_ms", 0),
+                "error": execution.get("error"),
+            },
+        })
+
+        # Step 6: Audit checks
+        audit_checks = audit.get("checks", [])
+        passed = sum(1 for c in audit_checks if c.get("passed"))
+        total = len(audit_checks)
+        flow.append({
+            "step": "audit_checks",
+            "description": f"Audit: {passed}/{total} checks passed, score={audit.get('score', 0):.2f}",
+            "details": {
+                "checks": audit_checks,
+                "score": audit.get("score"),
+                "warnings": audit.get("warnings", []),
+                "grounding": audit.get("grounding", {}),
+            },
+        })
+
+        # Step 7: Confidence decomposition
+        decomp = autonomy_result.get("confidence_decomposition", [])
+        flow.append({
+            "step": "confidence_decomposition",
+            "description": f"Final confidence: {audit.get('score', 0):.2f} with {len(decomp)} factors",
+            "details": {
+                "score": audit.get("score"),
+                "decomposition": decomp,
+                "pipeline_warnings": list(getattr(self, "_pipeline_warnings", [])),
+            },
+        })
+
+        # ── G4: Attach structured explain-yourself panel ──────────────
+        try:
+            panel = build_explain_yourself(
+                goal=goal,
+                intent={"type": intake.get("intent", "unknown"), "confidence": 0.8, "rationale": "Pipeline classification"},
+                contract=contract,
+                contract_validation=contract_validation,
+                sql=query_plan.get("sql", ""),
+                audit=audit,
+                confidence=autonomy_result.get("confidence_decomposition_detail"),
+                narrative=autonomy_result.get("narrative", ""),
+                answer_summary=autonomy_result.get("answer_summary", ""),
+            )
+            flow.append({
+                "step": "explain_yourself_panel",
+                "description": f"Explainability panel completeness: {panel.completeness:.0%}",
+                "details": panel.to_dict(),
+            })
+        except Exception as _ep_exc:
+            self._pipeline_warnings.append(
+                f"Explain-yourself panel failed ({type(_ep_exc).__name__}); "
+                f"panel omitted from decision flow."
+            )
+
+        return flow
+
     def _apply_memory_hints(
         self,
         goal: str,
@@ -4792,18 +5601,36 @@ class AgenticAnalyticsTeam:
             "revenue",
         ]
         has_explicit_subject = any(term in lower for term in explicit_subject_terms)
+        has_explicit_time_scope = bool(
+            re.search(
+                r"\b(this month|last month|this year|last year|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec|20\d{2})\b",
+                lower,
+            )
+        )
+        has_explicit_grouping = any(token in lower for token in [" by ", "split", "breakdown", "wise", "per ", "group"])
+        has_explicit_filtering = any(token in lower for token in [" only ", " where ", "status", "platform", "state", "country"])
         best = memory_hints[0]
         if float(best.get("similarity", 0.0)) < 0.55:
             return parsed
 
+        # Learned corrections are only safe to replay when the current goal is
+        # sparse and does not carry explicit scope/group/filter constraints.
+        replay_safe = not (has_explicit_time_scope or has_explicit_grouping or has_explicit_filtering)
+
         # GAP 41a: For explicit queries, still apply learned corrections if available
         if has_explicit_subject:
-            if not best.get("correction_applied") or float(best.get("similarity", 0)) < 0.75:
+            if (
+                not replay_safe
+                or not best.get("correction_applied")
+                or float(best.get("similarity", 0)) < 0.82
+            ):
+                return parsed
+            if parsed.get("dimensions") or parsed.get("time_filter") or parsed.get("value_filters"):
                 return parsed
             # Apply learned correction from a previous corrected run
             merged = dict(parsed)
             past_metric = str(best.get("metric") or "").strip()
-            if past_metric:
+            if past_metric and str(merged.get("metric") or "").strip() in {"", "transaction_count"}:
                 merged["metric"] = past_metric
             past_dims = list(best.get("dimensions") or [])
             if past_dims:
@@ -4819,14 +5646,14 @@ class AgenticAnalyticsTeam:
         merged = dict(parsed)
         past_metric = str(best.get("metric") or "").strip()
         past_dims = list(best.get("dimensions") or [])
-        if past_metric and merged.get("metric") == "transaction_count":
+        if past_metric and merged.get("metric") == "transaction_count" and replay_safe:
             merged["metric"] = past_metric
-        if past_dims and not merged.get("dimensions"):
+        if past_dims and not merged.get("dimensions") and replay_safe:
             merged["dimensions"] = past_dims[:MAX_DIMENSIONS]
             merged["dimension"] = merged["dimensions"][0]
-        if not merged.get("time_filter") and isinstance(best.get("time_filter"), dict):
+        if replay_safe and not merged.get("time_filter") and isinstance(best.get("time_filter"), dict):
             merged["time_filter"] = best["time_filter"]
-        if not merged.get("value_filters") and isinstance(best.get("value_filters"), list):
+        if replay_safe and not merged.get("value_filters") and isinstance(best.get("value_filters"), list):
             merged["value_filters"] = best["value_filters"][:4]
         return merged
 
@@ -5613,7 +6440,9 @@ class AgenticAnalyticsTeam:
             if variant:
                 candidates.append(variant)
 
-        if int(base_execution.get("row_count") or 0) == 0 and base_plan.get("time_filter"):
+        _base_tf = base_plan.get("time_filter")
+        _is_future_blocked = isinstance(_base_tf, dict) and _base_tf.get("kind") == "future_blocked"
+        if int(base_execution.get("row_count") or 0) == 0 and _base_tf and not _is_future_blocked:
             variant = self._build_plan_variant(
                 base_plan,
                 catalog,
@@ -6177,11 +7006,35 @@ class AgenticAnalyticsTeam:
         return {"active": True, "notes": notes, "warnings": warnings, "directives": directives}
 
     def _governance_precheck(self, goal: str) -> dict[str, Any]:
-        lower = goal.lower()
-        blocked_keywords = ["drop table", "delete from", "truncate", "update ", "insert into"]
+        """Policy gate: block destructive ops, fabrication requests, and manipulation.
+
+        FR-3: Fabrication resistance must be hard-gated.
+        FR-4: Future-time requests handled downstream (future_blocked).
+        """
+        # ── G2: Policy-safe autonomy gates ─────────────────────────
+        verdicts = run_all_policy_gates(goal)
+        blocking = get_blocking_verdict(verdicts)
+        if blocking:
+            return {
+                "allowed": False,
+                "reason": blocking.reason,
+                "policy": blocking.gate,
+                "verdicts": [v.to_dict() for v in verdicts],
+            }
+
+        lower = goal.lower().strip()
+
+        # Keep one explicit local gate for destructive SQL phrasing.
+        blocked_keywords = ["drop table", "delete from", "truncate", "update ", "insert into", "alter table"]
         if any(k in lower for k in blocked_keywords):
-            return {"allowed": False, "reason": "Destructive operations are blocked."}
-        return {"allowed": True, "reason": "ok"}
+            return {
+                "allowed": False,
+                "reason": "Destructive operations are blocked.",
+                "policy": "destructive_sql",
+                "verdicts": [v.to_dict() for v in verdicts],
+            }
+
+        return {"allowed": True, "reason": "ok", "policy": "none", "verdicts": [v.to_dict() for v in verdicts]}
 
     def _apply_specialist_guidance(
         self,
@@ -6477,6 +7330,38 @@ class AgenticAnalyticsTeam:
                             sql = llm_result["sql"]
                             plan["_llm_sql_used"] = True
 
+        # ── SPEC-1 / Phase B: SQL post-compile time scope enforcement ──────
+        # Safety net: if the intake/plan specified month_year but the compiled
+        # SQL only has YEAR (not MONTH), patch the SQL to include the month
+        # predicate.  This catches any upstream downgrade from month_year to
+        # year_only that may occur in the pipeline.
+        _tf = plan.get("time_filter")
+        _tc = plan.get("time_column")
+        if (
+            _tf
+            and isinstance(_tf, dict)
+            and _tf.get("kind") == "month_year"
+            and _tf.get("month")
+            and _tc
+            and "EXTRACT(MONTH" not in sql.upper()
+            and "EXTRACT(YEAR" in sql.upper()
+        ):
+            _patch_month = int(_tf["month"])
+            _year_pattern = f"EXTRACT(YEAR FROM {_tc})"
+            # Insert month predicate right after the year predicate
+            _year_pred_re = re.compile(
+                rf"(EXTRACT\(YEAR\s+FROM\s+{re.escape(_tc)}\)\s*=\s*\d+)",
+                re.IGNORECASE,
+            )
+            _replacement = rf"\1 AND EXTRACT(MONTH FROM {_tc}) = {_patch_month}"
+            patched_sql = _year_pred_re.sub(_replacement, sql, count=0)
+            if patched_sql != sql:
+                sql = patched_sql
+                self._pipeline_warnings.append(
+                    f"[Contract] Month predicate (={_patch_month}) injected into SQL "
+                    f"— plan specified month_year but compiled SQL was missing MONTH."
+                )
+
         return {"sql": sql, "table": table}
 
     # ── GAP 31: LLM SQL Generation ──────────────────────────────
@@ -6659,6 +7544,32 @@ class AgenticAnalyticsTeam:
     def _time_clause(self, time_col: str, time_filter: dict[str, Any], for_comparison: str) -> str:
         kind = time_filter.get("kind")
 
+        # ── QA-R5 Fix 2: future_blocked kind → zero rows ────────────────
+        if kind == "future_blocked":
+            return "FALSE"
+
+        # ── QA-R4 Fix 6: Future-year safety net in SQL ───────────────────
+        _current_year = datetime.utcnow().year
+        _tf_year = time_filter.get("year")
+        if _tf_year is not None and int(_tf_year) > _current_year:
+            return "FALSE"
+
+        # ── QA-R4 Fix 2b: Explicit comparison with two named months ──────
+        if kind == "explicit_comparison":
+            month_a = int(time_filter.get("month_a"))
+            month_b = int(time_filter.get("month_b"))
+            year = time_filter.get("year")
+            if year is None:
+                year = _current_year
+            year = int(year)
+            if for_comparison == "comparison":
+                # Earlier month
+                m = min(month_a, month_b)
+            else:
+                # Later month (current period)
+                m = max(month_a, month_b)
+            return f"EXTRACT(YEAR FROM {time_col}) = {year} AND EXTRACT(MONTH FROM {time_col}) = {m}"
+
         if kind == "month_year":
             month = int(time_filter.get("month"))
             year = time_filter.get("year")
@@ -6698,10 +7609,9 @@ class AgenticAnalyticsTeam:
                     return f"EXTRACT(YEAR FROM {time_col}) = EXTRACT(YEAR FROM CURRENT_DATE) - 2"
                 return f"EXTRACT(YEAR FROM {time_col}) = EXTRACT(YEAR FROM CURRENT_DATE) - 1"
 
-        # Fallback rolling windows for comparisons.
-        if for_comparison == "comparison":
-            return f"{time_col} >= CURRENT_DATE - INTERVAL '60 days' AND {time_col} < CURRENT_DATE - INTERVAL '30 days'"
-        return f"{time_col} >= CURRENT_DATE - INTERVAL '30 days'"
+        # Unknown/unsupported time filter kinds should not silently force
+        # rolling windows (which can fabricate scope). Fall back to no-op.
+        return "1=1"
 
     def _execution_agent(self, query_plan: dict[str, Any]) -> dict[str, Any]:
         res = self.executor.execute(query_plan["sql"])
@@ -6958,15 +7868,16 @@ class AgenticAnalyticsTeam:
             warnings.append("Execution latency above 4s.")
 
         failed_checks = sum(1 for c in checks if not c["passed"])
-        score = 0.9
+        # ── QA-R4 Fix 4: Recalibrated confidence baseline ───────────────
+        score = 0.82
         if not execution["success"]:
             score = 0.18
         elif execution["row_count"] == 0:
-            score -= 0.20
+            score -= 0.25
         score -= 0.10 * failed_checks
         score -= 0.10 * len(warnings)
         if not concept_check_passed:
-            score = min(score, 0.45)
+            score = min(score, 0.40)
         score -= 0.08 * max(0.0, 1.0 - concept_coverage)
         if not schema_grounded:
             score -= 0.08
@@ -6978,6 +7889,32 @@ class AgenticAnalyticsTeam:
         # Penalize when specialist overrode the metric (signals ambiguity)
         if plan.get("_specialist_metric_override"):
             score -= 0.10
+
+        # ── QA-R4 Fix 4b: Goal mentions time but no time filter → -0.25 ─
+        _time_words = ["month", "year", "quarter", "week", "day",
+                       "january", "jan", "february", "feb", "march", "mar",
+                       "april", "apr", "may", "june", "jun", "july", "jul",
+                       "august", "aug", "september", "sep", "sept",
+                       "october", "oct", "november", "nov", "december", "dec",
+                       "2024", "2025", "2026", "2027", "2028", "2029", "2030",
+                       "2031", "2032", "2033", "2034", "2035",
+                       "this month", "last month", "this year", "last year"]
+        if any(tw in goal_text for tw in _time_words) and not plan.get("time_filter"):
+            score -= 0.25
+            warnings.append("Goal mentions a time period but no time filter was applied.")
+
+        # BRD-FR4: Future-blocked queries get hard score cap
+        _tf = plan.get("time_filter")
+        if isinstance(_tf, dict) and _tf.get("kind") == "future_blocked":
+            score = min(score, 0.25)
+            warnings.append(f"Future year {_tf.get('year')} — no data exists for future dates.")
+
+        # ── QA-R4 Fix 3b / Fix 4c / BRD-FR7: Unrecognized metric → hard cap ─
+        _pw = getattr(self, "_pipeline_warnings", [])
+        if any("Metric unrecognized" in w for w in _pw):
+            score -= 0.30
+            score = min(score, 0.49)  # FR-7: Never high-confidence on unrecognized metric
+            warnings.append("Metric was not recognized in catalog; result may be a fallback.")
 
         score = max(0.0, min(1.0, score))
 

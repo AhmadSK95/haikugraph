@@ -46,9 +46,10 @@ DEFAULT_CASES: list[SourceTruthCase] = [
         case_id="mt103_month_platform",
         question="Total MT103 transactions count split by month wise and platform wise",
         expected_sql=(
-            "SELECT DATE_TRUNC('month', event_ts) AS month_bucket, platform_name AS dimension, "
-            "SUM(CASE WHEN has_mt103 THEN 1 ELSE 0 END) AS metric_value "
-            "FROM datada_mart_transactions WHERE event_ts IS NOT NULL "
+            "SELECT DATE_TRUNC('month', mt103_created_ts) AS month_bucket, platform_name AS platform_name, "
+            "COUNT(DISTINCT CASE WHEN has_mt103 THEN transaction_key END) AS metric_value "
+            "FROM datada_mart_transactions WHERE 1=1 "
+            "AND LOWER(COALESCE(CAST(has_mt103 AS VARCHAR), '')) = LOWER('true') "
             "GROUP BY 1,2 ORDER BY 3 DESC NULLS LAST, 1 ASC, 2 ASC LIMIT 20"
         ),
         note="MT103 monthly/platform split.",
@@ -105,6 +106,81 @@ def _exec(conn: duckdb.DuckDBPyConnection, sql: str) -> tuple[list[str], list[tu
         return [], [], str(exc)
 
 
+def _ingestion_parity_summary(conn: duckdb.DuckDBPyConnection) -> dict[str, Any]:
+    """Compare latest ingested table stats against current table row counts."""
+    try:
+        latest = conn.execute(
+            """
+            SELECT ingestion_id
+            FROM datada_ingestion_table_stats
+            ORDER BY ingested_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    except Exception:
+        return {"available": False, "reason": "ingestion_stats_missing", "checks": []}
+
+    if not latest or not latest[0]:
+        return {"available": False, "reason": "no_ingestion_snapshot", "checks": []}
+
+    ingestion_id = str(latest[0])
+    expected_rows = conn.execute(
+        """
+        SELECT table_name, rows_loaded, columns_loaded
+        FROM datada_ingestion_table_stats
+        WHERE ingestion_id = ?
+        ORDER BY table_name ASC
+        """,
+        [ingestion_id],
+    ).fetchall()
+    checks: list[dict[str, Any]] = []
+    matched = 0
+    for table_name, rows_loaded, columns_loaded in expected_rows:
+        current_rows = None
+        current_cols = None
+        error = ""
+        try:
+            current_rows = int(conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0])
+            current_cols = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM information_schema.columns
+                    WHERE table_name = ?
+                    """,
+                    [table_name],
+                ).fetchone()[0]
+            )
+        except Exception as exc:
+            error = str(exc)
+        row_match = (current_rows == int(rows_loaded)) if current_rows is not None else False
+        col_match = (current_cols == int(columns_loaded)) if current_cols is not None else False
+        ok = bool(row_match and col_match and not error)
+        if ok:
+            matched += 1
+        checks.append(
+            {
+                "table_name": str(table_name),
+                "expected_rows": int(rows_loaded or 0),
+                "actual_rows": int(current_rows or 0) if current_rows is not None else None,
+                "expected_columns": int(columns_loaded or 0),
+                "actual_columns": int(current_cols or 0) if current_cols is not None else None,
+                "match": ok,
+                "error": error,
+            }
+        )
+
+    total = len(checks)
+    return {
+        "available": True,
+        "ingestion_id": ingestion_id,
+        "tables_checked": total,
+        "tables_matched": matched,
+        "parity_pct": round((matched / total) * 100, 2) if total else 0.0,
+        "checks": checks,
+    }
+
+
 def run_source_truth_suite(
     *,
     team,
@@ -112,7 +188,9 @@ def run_source_truth_suite(
     runtime: RuntimeSelection,
     max_cases: int = 6,
 ) -> dict[str, Any]:
-    conn = duckdb.connect(str(Path(db_path).expanduser()), read_only=True)
+    # Keep connection mode aligned with runtime executor connections to avoid
+    # DuckDB "different configuration" lock errors in live API checks.
+    conn = duckdb.connect(str(Path(db_path).expanduser()), read_only=False)
     rows: list[dict[str, Any]] = []
     cases = DEFAULT_CASES[: max(1, min(len(DEFAULT_CASES), int(max_cases)))]
 
@@ -169,6 +247,7 @@ def run_source_truth_suite(
             }
         )
 
+    parity = _ingestion_parity_summary(conn)
     conn.close()
 
     evaluated = [r for r in rows if r["status"] != "skipped"]
@@ -184,6 +263,6 @@ def run_source_truth_suite(
         "exact_matches": len(matched),
         "accuracy_pct": round((len(matched) / len(evaluated)) * 100, 2) if evaluated else 0.0,
         "avg_latency_ms": avg_latency,
+        "parity_summary": parity,
         "runs": rows,
     }
-

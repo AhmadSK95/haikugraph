@@ -5,6 +5,8 @@ split across different columns and merges them into a single table.
 """
 
 import re
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +25,14 @@ def _read_file(file_path: Path, sheet=None) -> pd.DataFrame:
         return pd.read_parquet(file_path)
     else:
         raise ValueError(f"Unsupported file format: {suffix}")
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def detect_file_groups(excel_files: list[Path]) -> dict[str, list[Path]]:
@@ -228,18 +238,56 @@ def smart_ingest_excel_to_duckdb(
     print("Analyzing data files for relationships...")
     file_groups = detect_file_groups(data_files)
     
+    ingestion_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+
     # Process results
     results = {
         "status": "success",
+        "ingestion_id": ingestion_id,
         "db_path": str(db_path.absolute()),
         "tables": [],
         "errors": [],
         "merges": [],
+        "manifest_rows": 0,
     }
     
     # Create database connection
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = duckdb.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS datada_ingestion_manifest (
+            ingestion_id VARCHAR,
+            source_path VARCHAR,
+            source_name VARCHAR,
+            table_name VARCHAR,
+            merge_group VARCHAR,
+            read_mode VARCHAR,
+            rows_loaded BIGINT,
+            columns_loaded BIGINT,
+            file_size_bytes BIGINT,
+            file_mtime TIMESTAMP,
+            file_sha256 VARCHAR,
+            ingested_at TIMESTAMP
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS datada_ingestion_table_stats (
+            ingestion_id VARCHAR,
+            table_name VARCHAR,
+            source_count BIGINT,
+            rows_loaded BIGINT,
+            columns_loaded BIGINT,
+            read_mode VARCHAR,
+            ingested_at TIMESTAMP
+        )
+        """
+    )
+    if force:
+        conn.execute("DELETE FROM datada_ingestion_manifest")
+        conn.execute("DELETE FROM datada_ingestion_table_stats")
     
     for table_name, files in sorted(file_groups.items()):
         try:
@@ -276,6 +324,48 @@ def smart_ingest_excel_to_duckdb(
             
             # Get row count
             row_count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+            now_ts = datetime.now(timezone.utc)
+            source_names = [f.name for f in files]
+            merge_group = table_name if len(files) > 1 else ""
+
+            conn.execute(
+                """
+                INSERT INTO datada_ingestion_table_stats VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    ingestion_id,
+                    table_name,
+                    len(files),
+                    int(row_count),
+                    int(len(df.columns)),
+                    read_mode,
+                    now_ts,
+                ],
+            )
+
+            for src in files:
+                stat = src.stat()
+                file_hash = _file_sha256(src)
+                conn.execute(
+                    """
+                    INSERT INTO datada_ingestion_manifest VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        ingestion_id,
+                        str(src.resolve()),
+                        src.name,
+                        table_name,
+                        merge_group,
+                        read_mode,
+                        int(row_count),
+                        int(len(df.columns)),
+                        int(stat.st_size),
+                        datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                        file_hash,
+                        now_ts,
+                    ],
+                )
+                results["manifest_rows"] += 1
             
             table_info = {
                 "file": files[0].name if len(files) == 1 else f"{len(files)} merged files",
@@ -286,7 +376,7 @@ def smart_ingest_excel_to_duckdb(
             if read_mode == "string_fallback":
                 table_info["mode"] = "string_fallback"
             if len(files) > 1:
-                table_info["merged_from"] = [f.name for f in files]
+                table_info["merged_from"] = source_names
             
             results["tables"].append(table_info)
         
@@ -322,8 +412,12 @@ def format_smart_ingestion_summary(results: dict) -> str:
         return "\n".join(lines)
     
     lines.append("✅ Smart ingestion complete\n")
+    if results.get("ingestion_id"):
+        lines.append(f"Ingestion ID: {results['ingestion_id']}")
     lines.append(f"Database: {results['db_path']}")
     lines.append(f"Tables created: {len(results['tables'])}")
+    if results.get("manifest_rows") is not None:
+        lines.append(f"Manifest rows: {int(results.get('manifest_rows') or 0)}")
     
     if results["merges"]:
         lines.append(f"\n🔗 Merged file groups: {len(results['merges'])}")
