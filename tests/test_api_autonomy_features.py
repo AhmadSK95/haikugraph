@@ -88,6 +88,15 @@ def test_query_includes_blackboard_and_confidence_decomposition(client):
     assert autonomy is not None
     assert isinstance(autonomy.get("confidence_decomposition", []), list)
     assert isinstance(autonomy.get("contradiction_resolution", {}), dict)
+    objective = autonomy.get("objective_coverage", {})
+    assert isinstance(objective, dict)
+    assert int(objective.get("required_count", 0)) >= 1
+    assert "coverage_pct" in objective
+    hard_gates = autonomy.get("hard_gates", {})
+    assert isinstance(hard_gates, dict)
+    assert "objective_coverage_gate" in hard_gates
+    assert "contradiction_gate" in hard_gates
+    assert "metric_family_gate" in hard_gates
 
 
 def test_autonomy_reports_refinement_rounds_and_signatures(client):
@@ -108,6 +117,9 @@ def test_autonomy_reports_refinement_rounds_and_signatures(client):
     assert len(rounds) >= 1
     assert len(rounds) <= 3
     assert all("round" in r and "ending_score" in r for r in rounds)
+    objective = autonomy.get("objective_coverage", {})
+    assert isinstance(objective, dict)
+    assert int(objective.get("required_count", 0)) >= int(objective.get("passed_count", 0))
 
     grounding = (data.get("data_quality") or {}).get("grounding", {})
     assert "concept_coverage_pct" in grounding

@@ -1,0 +1,34 @@
+profile_version: "1.0"
+industry: "<industry-name>"
+dataset:
+  owner: "<team-or-person>"
+  db_path: "<path-to-duckdb>"
+  refresh_cadence: "<daily|hourly|stream>"
+tables:
+  - name: "<source_table>"
+    domain: "<transactions|quotes|customers|bookings|other>"
+    row_count_estimate: 0
+    primary_keys: []
+    foreign_keys: []
+    time_columns: []
+    metric_columns: []
+    sensitive_columns: []
+canonical_mappings:
+  metrics:
+    - metric_id: "<domain.metric_name>"
+      source_table: "<source_table>"
+      source_expression: "<sql-expression>"
+      unit: "<count|amount|rate|percent>"
+      preferred_time_column: "<column>"
+      business_definition: "<plain-language-definition>"
+  dimensions:
+    - name: "<dimension>"
+      source_table: "<source_table>"
+      source_column: "<column>"
+      business_label: "<label>"
+qa_gate:
+  top_questions: []
+  refusal_checks: []
+  expected_latency_ms_p95: 0
+notes:
+  - "<context or risk>"

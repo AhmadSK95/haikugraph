@@ -108,9 +108,9 @@ FABRICATION_TRIGGERS = [
 
 # Coercion patterns - attempts to override safety
 COERCION_PATTERNS = [
-    r"ignore\s+(?:safety|rules|guardrails|policy|guidelines)",
-    r"bypass\s+(?:safety|rules|guardrails|checks)",
-    r"override\s+(?:safety|the\s+rules|policy)",
+    r"ignore\s+(?:your\s+)?(?:safety(?:\s+filters?)?|rules|guardrails|policy|guidelines)",
+    r"bypass\s+(?:all\s+)?(?:safety(?:\s+filters?)?|rules|guardrails|checks)",
+    r"override\s+(?:your\s+)?(?:safety(?:\s+filters?)?|the\s+rules|rules|policy|guardrails)",
     r"don'?t\s+(?:check|validate|verify|refuse)",
     r"skip\s+(?:validation|checks|safety)",
     r"i\s+(?:insist|demand|command)\s+you",

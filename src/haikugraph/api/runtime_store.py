@@ -116,6 +116,21 @@ class RuntimeStore:
                     )
                     """
                 )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS datada_scenario_sets (
+                        scenario_set_id VARCHAR,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        tenant_id VARCHAR,
+                        connection_id VARCHAR,
+                        name VARCHAR,
+                        assumptions_json VARCHAR,
+                        status VARCHAR,
+                        version BIGINT
+                    )
+                    """
+                )
             finally:
                 conn.close()
 
@@ -395,6 +410,243 @@ class RuntimeStore:
             "runtime_ms": float(row[10] or 0.0),
         }
 
+    def count_async_jobs(
+        self,
+        *,
+        tenant_id: str | None = None,
+        statuses: tuple[str, ...] = ("queued", "running"),
+    ) -> dict[str, int]:
+        """Return async job counts for load-shedding decisions."""
+        clean_statuses = [str(s).strip().lower() for s in statuses if str(s).strip()]
+        if not clean_statuses:
+            clean_statuses = ["queued", "running"]
+
+        placeholders = ", ".join(["?"] * len(clean_statuses))
+        params: list[Any] = list(clean_statuses)
+        sql = (
+            "SELECT status, COUNT(*) AS cnt "
+            "FROM datada_async_jobs "
+            f"WHERE LOWER(status) IN ({placeholders})"
+        )
+        if tenant_id is not None:
+            sql += " AND tenant_id = ?"
+            params.append((tenant_id or "public").strip() or "public")
+        sql += " GROUP BY status"
+
+        counts: dict[str, int] = {"total": 0}
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(sql, params).fetchall()
+            finally:
+                conn.close()
+
+        for row in rows:
+            status = str(row[0] or "").strip().lower()
+            count = int(row[1] or 0)
+            counts[status] = count
+            counts["total"] += count
+
+        for status in clean_statuses:
+            counts.setdefault(status, 0)
+        return counts
+
+    def upsert_scenario_set(
+        self,
+        *,
+        tenant_id: str,
+        connection_id: str,
+        name: str,
+        assumptions: list[str],
+        scenario_set_id: str | None = None,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        clean_tenant = (tenant_id or "public").strip() or "public"
+        clean_connection = (connection_id or "default").strip() or "default"
+        clean_name = str(name or "").strip()[:180] or "Scenario set"
+        clean_assumptions = [str(item).strip() for item in (assumptions or []) if str(item).strip()]
+        clean_assumptions = clean_assumptions[:50]
+        clean_status = str(status or "active").strip().lower() or "active"
+        now = _utc_now()
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                sid = str(scenario_set_id or "").strip()
+                if sid:
+                    existing = conn.execute(
+                        """
+                        SELECT version
+                        FROM datada_scenario_sets
+                        WHERE scenario_set_id = ? AND tenant_id = ?
+                        LIMIT 1
+                        """,
+                        [sid, clean_tenant],
+                    ).fetchone()
+                    if existing:
+                        next_version = int(existing[0] or 0) + 1
+                        conn.execute(
+                            """
+                            UPDATE datada_scenario_sets
+                            SET updated_at = ?, connection_id = ?, name = ?, assumptions_json = ?, status = ?, version = ?
+                            WHERE scenario_set_id = ? AND tenant_id = ?
+                            """,
+                            [
+                                now,
+                                clean_connection,
+                                clean_name,
+                                json.dumps(clean_assumptions, default=str),
+                                clean_status,
+                                next_version,
+                                sid,
+                                clean_tenant,
+                            ],
+                        )
+                        return {
+                            "scenario_set_id": sid,
+                            "tenant_id": clean_tenant,
+                            "connection_id": clean_connection,
+                            "name": clean_name,
+                            "assumptions": clean_assumptions,
+                            "status": clean_status,
+                            "version": next_version,
+                            "updated": True,
+                        }
+
+                sid = str(uuid.uuid4())
+                conn.execute(
+                    """
+                    INSERT INTO datada_scenario_sets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        sid,
+                        now,
+                        now,
+                        clean_tenant,
+                        clean_connection,
+                        clean_name,
+                        json.dumps(clean_assumptions, default=str),
+                        clean_status,
+                        1,
+                    ],
+                )
+            finally:
+                conn.close()
+
+        return {
+            "scenario_set_id": sid,
+            "tenant_id": clean_tenant,
+            "connection_id": clean_connection,
+            "name": clean_name,
+            "assumptions": clean_assumptions,
+            "status": clean_status,
+            "version": 1,
+            "updated": False,
+        }
+
+    def get_scenario_set(self, *, scenario_set_id: str, tenant_id: str) -> dict[str, Any] | None:
+        sid = str(scenario_set_id or "").strip()
+        clean_tenant = (tenant_id or "public").strip() or "public"
+        if not sid:
+            return None
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT scenario_set_id, created_at, updated_at, tenant_id, connection_id, name,
+                           assumptions_json, status, version
+                    FROM datada_scenario_sets
+                    WHERE scenario_set_id = ? AND tenant_id = ?
+                    LIMIT 1
+                    """,
+                    [sid, clean_tenant],
+                ).fetchone()
+            finally:
+                conn.close()
+        if not row:
+            return None
+        assumptions: list[str] = []
+        try:
+            parsed = json.loads(row[6] or "[]")
+            if isinstance(parsed, list):
+                assumptions = [str(item) for item in parsed if str(item).strip()]
+        except Exception:
+            assumptions = []
+        return {
+            "scenario_set_id": str(row[0] or ""),
+            "created_at": str(row[1] or ""),
+            "updated_at": str(row[2] or ""),
+            "tenant_id": str(row[3] or ""),
+            "connection_id": str(row[4] or ""),
+            "name": str(row[5] or ""),
+            "assumptions": assumptions,
+            "status": str(row[7] or "active"),
+            "version": int(row[8] or 1),
+        }
+
+    def list_scenario_sets(
+        self,
+        *,
+        tenant_id: str,
+        connection_id: str | None = None,
+        status: str | None = "active",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clean_tenant = (tenant_id or "public").strip() or "public"
+        clean_connection = (connection_id or "").strip()
+        clean_status = (status or "").strip().lower()
+        where = ["tenant_id = ?"]
+        params: list[Any] = [clean_tenant]
+        if clean_connection:
+            where.append("connection_id = ?")
+            params.append(clean_connection)
+        if clean_status:
+            where.append("LOWER(status) = ?")
+            params.append(clean_status)
+        where_sql = " AND ".join(where)
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT scenario_set_id, created_at, updated_at, tenant_id, connection_id, name,
+                           assumptions_json, status, version
+                    FROM datada_scenario_sets
+                    WHERE {where_sql}
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    [*params, max(1, min(500, int(limit)))],
+                ).fetchall()
+            finally:
+                conn.close()
+
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            assumptions: list[str] = []
+            try:
+                parsed = json.loads(row[6] or "[]")
+                if isinstance(parsed, list):
+                    assumptions = [str(item) for item in parsed if str(item).strip()]
+            except Exception:
+                assumptions = []
+            out.append(
+                {
+                    "scenario_set_id": str(row[0] or ""),
+                    "created_at": str(row[1] or ""),
+                    "updated_at": str(row[2] or ""),
+                    "tenant_id": str(row[3] or ""),
+                    "connection_id": str(row[4] or ""),
+                    "name": str(row[5] or ""),
+                    "assumptions": assumptions,
+                    "status": str(row[7] or "active"),
+                    "version": int(row[8] or 1),
+                }
+            )
+        return out
+
     def record_run_metric(
         self,
         *,
@@ -491,6 +743,16 @@ class RuntimeStore:
                     """,
                     params,
                 ).fetchall()
+                recent_contract_rows = conn.execute(
+                    f"""
+                    SELECT llm_mode, metadata_json
+                    FROM datada_run_metrics
+                    {where}
+                    ORDER BY created_at DESC
+                    LIMIT 320
+                    """,
+                    params,
+                ).fetchall()
             finally:
                 conn.close()
 
@@ -531,6 +793,81 @@ class RuntimeStore:
                 }
             )
 
+        parity_summary: dict[str, Any] = {
+            "available": False,
+            "mode_deltas": {},
+            "contract_drift_cases": 0,
+            "contract_drift_rate": 0.0,
+            "alerts": [],
+        }
+        by_mode_map = {str(item.get("mode") or ""): item for item in modes}
+        deterministic = by_mode_map.get("deterministic")
+        if deterministic:
+            base_success = float(deterministic.get("success_rate") or 0.0)
+            deltas: dict[str, dict[str, Any]] = {}
+            alerts: list[dict[str, Any]] = []
+            for mode_name, mode_stats in by_mode_map.items():
+                if mode_name == "deterministic":
+                    continue
+                mode_success = float(mode_stats.get("success_rate") or 0.0)
+                delta = round(base_success - mode_success, 4)
+                deltas[mode_name] = {
+                    "success_rate": round(mode_success, 4),
+                    "success_delta_vs_deterministic": delta,
+                }
+                if delta > 0.05:
+                    alerts.append(
+                        {
+                            "type": "success_drift",
+                            "mode": mode_name,
+                            "baseline": round(base_success, 4),
+                            "actual": round(mode_success, 4),
+                            "delta": delta,
+                        }
+                    )
+
+            goal_contracts: dict[str, dict[str, set[str]]] = {}
+            for row in recent_contract_rows:
+                metadata: dict[str, Any] = {}
+                try:
+                    parsed = json.loads(row[1] or "{}")
+                    if isinstance(parsed, dict):
+                        metadata = parsed
+                except Exception:
+                    metadata = {}
+                goal = str(metadata.get("goal") or "").strip().lower()
+                contract_sig = str(metadata.get("contract_signature") or "").strip()
+                mode_name = str(row[0] or "").strip().lower() or "unknown"
+                if not goal or not contract_sig:
+                    continue
+                goal_contracts.setdefault(goal, {}).setdefault(mode_name, set()).add(contract_sig)
+            drift_cases = 0
+            compared = 0
+            for mode_map in goal_contracts.values():
+                if len(mode_map) < 2:
+                    continue
+                compared += 1
+                union_count = len(set().union(*mode_map.values()))
+                if union_count > 1:
+                    drift_cases += 1
+            drift_rate = (drift_cases / max(1, compared)) if compared else 0.0
+            if drift_rate > 0.10:
+                alerts.append(
+                    {
+                        "type": "contract_drift",
+                        "drift_rate": round(drift_rate, 4),
+                        "threshold": 0.10,
+                        "compared_cases": compared,
+                    }
+                )
+            parity_summary = {
+                "available": True,
+                "mode_deltas": deltas,
+                "contract_drift_cases": drift_cases,
+                "contract_drift_rate": round(drift_rate, 4),
+                "alerts": alerts,
+            }
+
         return {
             "generated_at": _utc_iso(),
             "tenant_id": tenant_filter or "all",
@@ -543,6 +880,7 @@ class RuntimeStore:
             "p95_execution_ms": round(float(totals[4] or 0.0), 2) if totals else 0.0,
             "total_warnings": int(totals[5] or 0) if totals else 0,
             "by_mode": modes,
+            "parity_summary": parity_summary,
             "recent_failures": failures,
         }
 

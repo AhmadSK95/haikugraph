@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "skills": {
+    "csv-data-wrangler": {
+      "source": "404kidwiz/claude-supercode-skills",
+      "sourceType": "github",
+      "computedHash": "0f5b4fa74d058ac48bf78fddba8fbbda168cd30406703f923e5a233176e4163d"
+    },
+    "dispatching-parallel-agents": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "534432f7d0af6f567ec505ef251e6bbf0a8f2d12a34d9da9517fb131dd9c8646"
+    },
+    "doc": {
+      "source": "openai/skills",
+      "sourceType": "github",
+      "computedHash": "7f8bfe9d1cbd6cb9a3617556387f2ac48911058a26d89345673c4565bb11717f"
+    },
+    "figma-implement-design": {
+      "source": "openai/skills",
+      "sourceType": "github",
+      "computedHash": "d6f7141e613b102b1c4b0abb392b4d5b57d2a7ea5d0036cfea85038dc24120ed"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "computedHash": "6412eb4eb3b91595ebab937f0c69501240e7ba761b3d82510b5cf506ec5c7adc"
+    },
+    "pdf": {
+      "source": "openai/skills",
+      "sourceType": "github",
+      "computedHash": "ae0a8fde8447e83a08edd0baf5373cd52febce32494e47e17d5d695a441a1884"
+    },
+    "query-expert": {
+      "source": "jamesrochabrun/skills",
+      "sourceType": "github",
+      "computedHash": "0a0a79aeb8904aa5d8ad107ac62c7b295ba141e51189d01d867133e0fc403979"
+    },
+    "spreadsheet": {
+      "source": "openai/skills",
+      "sourceType": "github",
+      "computedHash": "dc3936529d4971cfe5387b46ceb982fdf67609ce89a45a37163351b43292c112"
+    },
+    "sql-optimization-patterns": {
+      "source": "rmyndharis/antigravity-skills",
+      "sourceType": "github",
+      "computedHash": "37ee6076aa2142718cb3fbf43ce35acc0c8f567a16860ad5881c436c93b90a31"
+    },
+    "systematic-debugging": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "72e9ab72627e4fd8ed26a582e82309a98ecdc4f6e1c99418430ac05682c9e91d"
+    },
+    "verification-before-completion": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "9b446f0c7fe1cfb560b1d34439523b1a76d5f177290007b2c053a1c749a4a8ba"
+    }
+  }
+}

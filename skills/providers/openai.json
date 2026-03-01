@@ -1,0 +1,22 @@
+{
+  "provider": "openai",
+  "models": {
+    "planner": "gpt-4o",
+    "intent": "gpt-4o-mini",
+    "narrator": "gpt-4o-mini"
+  },
+  "timeouts": {
+    "default": 45,
+    "planner": 30,
+    "intent": 25,
+    "narrator": 60
+  },
+  "routing": {
+    "fast_model": "gpt-4o-mini",
+    "fallback_models": {
+      "planner": ["gpt-4o-mini"],
+      "intent": ["gpt-4o"],
+      "narrator": ["gpt-4o"]
+    }
+  }
+}

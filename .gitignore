@@ -48,14 +48,12 @@ data/
 !data/.gitkeep
 
 # Generated reports/artifacts
-reports/agentic_benchmark_*.html
-reports/agentic_benchmark_*.json
-reports/accuracy_audit_*.html
-reports/accuracy_audit_*.json
-reports/source_truth_audit_*.html
-reports/source_truth_audit_*.json
-reports/ui_regression_qa_*.html
-reports/ui_regression_qa_*.json
-reports/demo_report_*.html
-reports/validated_report_*.html
-reports/hardening_*/
+reports/**
+!reports/.gitkeep
+
+# Project-local downloaded skills (managed via scripts/setup_skills_base.sh)
+skills/base/.agent/
+skills/base/.agents/
+skills/base/.claude/
+skills/base/skills/
+skills/meta/skills_install_snapshot.txt

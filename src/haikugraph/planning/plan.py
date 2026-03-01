@@ -130,7 +130,7 @@ def detect_intent(question: str) -> dict:
             r"\bhow many\b",
             r"\bhow much\b",
         ],
-        "comparison": [r"\bcompare\b", r"\bvs\b", r"\bdifference\b", r"\bbetween\b"],
+        "comparison": [r"\bcompare\b", r"\bcompared\b", r"\bcompared\s+to\b", r"\bvs\b", r"\bversus\b", r"\bdifference\b", r"\bbetween\b"],
         "diagnostic": [r"\bwhy\b", r"\bfailed\b", r"\berror\b", r"\bissue\b"],
         "lookup": [r"\bshow\b", r"\blist\b", r"\bfind\b", r"\bget\b"],
         "trend": [r"\bover time\b", r"\btrend\b", r"\bgrowth\b", r"\bchange\b"],

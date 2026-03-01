@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import concurrent.futures
+from collections import OrderedDict
+import hashlib
 import importlib.util
 import json
 import os
@@ -16,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
@@ -25,6 +27,8 @@ from haikugraph.api.connection_registry import ConnectionRegistry
 from haikugraph.api.runtime_store import RuntimeStore
 from haikugraph.agents.contracts import AssistantQueryResponse
 from haikugraph.io.document_ingest import ingest_documents_to_duckdb
+from haikugraph.io.onboarding_profile import load_or_create_onboarding_profile
+from haikugraph.io.stream_snapshot import ingest_stream_snapshot_to_duckdb
 from haikugraph.llm.router import DEFAULT_MODELS
 from haikugraph.poc import AgenticAnalyticsTeam, AutonomyConfig, RuntimeSelection, load_dotenv_file
 from haikugraph.poc.source_truth import run_source_truth_suite
@@ -35,6 +39,10 @@ DEFAULT_DB_CANDIDATES = (
     Path("./data/datada.duckdb"),
     Path("./data/haikugraph.duckdb"),
 )
+
+_PROVIDER_SNAPSHOT_LOCK = threading.Lock()
+_PROVIDER_SNAPSHOT_CACHE: ProvidersResponse | None = None
+_PROVIDER_SNAPSHOT_CACHE_TS = 0.0
 
 
 class LLMMode(str, Enum):
@@ -60,8 +68,14 @@ class QueryRequest(BaseModel):
     goal: str = Field(..., min_length=1, max_length=2000)
     db_connection_id: str = Field(default="default")
     constraints: dict[str, Any] = Field(default_factory=dict)
+    scenario_set_id: str | None = Field(default=None, max_length=128)
     llm_mode: LLMMode = Field(default=LLMMode.AUTO)
     local_model: str | None = Field(default=None)
+    local_narrator_model: str | None = Field(default=None)
+    openai_model: str | None = Field(default=None)
+    openai_narrator_model: str | None = Field(default=None)
+    anthropic_model: str | None = Field(default=None)
+    anthropic_narrator_model: str | None = Field(default=None)
     session_id: str | None = Field(default=None, max_length=128)
     storyteller_mode: bool = Field(default=False)
     autonomy_mode: str = Field(default="bounded", max_length=32)
@@ -133,6 +147,98 @@ class CorrectionRollbackRequest(BaseModel):
     correction_id: str = Field(..., min_length=1, max_length=128)
 
 
+class BusinessRuleInfo(BaseModel):
+    rule_id: str
+    created_at: str = ""
+    updated_at: str = ""
+    tenant_id: str = ""
+    domain: str = ""
+    name: str
+    rule_type: str
+    triggers: list[str] = Field(default_factory=list)
+    action_payload: dict[str, Any] = Field(default_factory=dict)
+    notes: str = ""
+    priority: float = 1.0
+    status: str = "draft"
+    source: str = ""
+    created_by: str = ""
+    approved_by: str = ""
+    version: int = 1
+
+
+class BusinessRulesResponse(BaseModel):
+    db_connection_id: str
+    rules: list[BusinessRuleInfo] = Field(default_factory=list)
+
+
+class BusinessRuleCreateRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    domain: str = Field(default="general", max_length=64)
+    name: str = Field(..., min_length=2, max_length=180)
+    rule_type: str = Field(default="plan_override", max_length=64)
+    triggers: list[str] = Field(default_factory=list)
+    action_payload: dict[str, Any] = Field(default_factory=dict)
+    notes: str = Field(default="", max_length=500)
+    priority: float = Field(default=1.0, ge=0.0, le=10.0)
+    status: str = Field(default="draft", max_length=32)
+
+
+class BusinessRuleStatusRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    rule_id: str = Field(..., min_length=1, max_length=128)
+    status: str = Field(..., min_length=4, max_length=32)
+    note: str = Field(default="", max_length=300)
+
+
+class BusinessRuleUpdateRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    rule_id: str = Field(..., min_length=1, max_length=128)
+    domain: str | None = Field(default=None, max_length=64)
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    rule_type: str | None = Field(default=None, max_length=64)
+    triggers: list[str] | None = None
+    action_payload: dict[str, Any] | None = None
+    notes: str | None = Field(default=None, max_length=500)
+    priority: float | None = Field(default=None, ge=0.0, le=10.0)
+    status: str | None = Field(default=None, min_length=4, max_length=32)
+    note: str = Field(default="", max_length=300)
+
+
+class BusinessRuleRollbackRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    rule_id: str = Field(..., min_length=1, max_length=128)
+
+
+class BusinessRuleActionResponse(BaseModel):
+    success: bool
+    message: str
+    db_connection_id: str
+    rule_id: str = ""
+    status: str = ""
+
+
+class FixRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    trace_id: str | None = None
+    session_id: str | None = None
+    goal: str | None = None
+    issue: str = Field(..., min_length=5, max_length=2000)
+    keyword: str = Field(..., min_length=2, max_length=180)
+    domain: str = Field(default="general", max_length=64)
+    target_table: str = Field(..., min_length=2, max_length=180)
+    target_metric: str = Field(..., min_length=2, max_length=180)
+    target_dimensions: list[str] = Field(default_factory=list)
+    notes: str = Field(default="", max_length=500)
+
+
+class FixResponse(BaseModel):
+    success: bool
+    message: str
+    feedback_id: str = ""
+    correction_id: str = ""
+    rule_id: str = ""
+
+
 class ToolCandidateInfo(BaseModel):
     tool_id: str
     created_at: str = ""
@@ -194,6 +300,7 @@ class TrustDashboardResponse(BaseModel):
     p95_execution_ms: float
     total_warnings: int
     by_mode: list[TrustModeMetric] = Field(default_factory=list)
+    parity_summary: dict[str, Any] = Field(default_factory=dict)
     recent_failures: list[TrustFailureSample] = Field(default_factory=list)
 
 
@@ -358,6 +465,38 @@ class ConnectionActionResponse(BaseModel):
     connection: ConnectionInfo | None = None
 
 
+class ScenarioSetInfo(BaseModel):
+    scenario_set_id: str
+    created_at: str = ""
+    updated_at: str = ""
+    tenant_id: str = ""
+    connection_id: str = ""
+    name: str
+    assumptions: list[str] = Field(default_factory=list)
+    status: str = "active"
+    version: int = 1
+
+
+class ScenarioSetUpsertRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
+    scenario_set_id: str | None = Field(default=None, max_length=128)
+    name: str = Field(..., min_length=2, max_length=180)
+    assumptions: list[str] = Field(default_factory=list)
+    status: str = Field(default="active", max_length=32)
+
+
+class ScenarioSetActionResponse(BaseModel):
+    success: bool
+    message: str
+    db_connection_id: str
+    scenario_set: ScenarioSetInfo | None = None
+
+
+class ScenarioSetsResponse(BaseModel):
+    db_connection_id: str
+    scenario_sets: list[ScenarioSetInfo] = Field(default_factory=list)
+
+
 class LegacyAskRequest(BaseModel):
     question: str = Field(..., min_length=1)
 
@@ -383,6 +522,8 @@ class HealthResponse(BaseModel):
     default_connection_id: str = "default"
     available_connections: int = 1
     active_connection_kind: str = "duckdb"
+    onboarding_profile_version: str = ""
+    onboarding_profile_path: str = ""
     runtime_store_path: str = ""
     version: str = "2.0.0-poc"
 
@@ -442,6 +583,34 @@ class ArchitectureResponse(BaseModel):
     agents: list[AgentInfo] = []
 
 
+class CapabilityScoreItem(BaseModel):
+    capability_id: str
+    name: str
+    category: str
+    status: str
+    evidence: str = ""
+    gap_to_close: str = ""
+    requirement: str = ""
+
+
+class CapabilityScoreCounts(BaseModel):
+    total: int
+    done: int
+    partial: int
+    gap: int
+    np_strict: float
+    np_reality: float
+
+
+class CapabilityScoreboardResponse(BaseModel):
+    tracker_path: str
+    tracker_last_updated: str = ""
+    generated_at_epoch_ms: int
+    counts: CapabilityScoreCounts
+    remaining: list[CapabilityScoreItem] = Field(default_factory=list)
+    capabilities: list[CapabilityScoreItem] = Field(default_factory=list)
+
+
 class LocalModelOption(BaseModel):
     name: str
     installed: bool
@@ -475,16 +644,60 @@ class LocalModelActionResponse(BaseModel):
     active_narrator_model: str | None = None
 
 
+class CloudModelOption(BaseModel):
+    name: str
+    tier: str
+    recommended_for: str
+
+
+class CloudModelsResponse(BaseModel):
+    provider: str
+    available: bool
+    reason: str = ""
+    active_intent_model: str | None = None
+    active_narrator_model: str | None = None
+    options: list[CloudModelOption] = Field(default_factory=list)
+
+
 def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
 OLLAMA_MODEL_HINTS: dict[str, tuple[str, str]] = {
-    "qwen2.5:14b-instruct": ("high", "best local reasoning quality"),
     "qwen2.5:7b-instruct": ("balanced", "default local reasoning"),
     "llama3.1:8b": ("balanced", "strong narrative responses"),
     "mistral:7b": ("balanced", "fast and stable local inference"),
-    "llama3.2:latest": ("fast", "quick responses on laptop hardware"),
+}
+
+# Intentionally removed from active catalog due poor benchmark profile
+# (latency/quality trade-off for this project baseline).
+UNSUPPORTED_LOCAL_MODELS = {
+    "qwen2.5:14b-instruct",
+    "llama3.2:latest",
+}
+
+
+def _is_supported_local_model(model_name: str) -> bool:
+    return str(model_name or "").strip().lower() not in {
+        m.lower() for m in UNSUPPORTED_LOCAL_MODELS
+    }
+
+
+def _filter_supported_local_models(models: list[str]) -> list[str]:
+    return [m for m in models if _is_supported_local_model(m)]
+
+OPENAI_MODEL_HINTS: dict[str, tuple[str, str]] = {
+    "gpt-4o": ("high", "best quality for difficult query decomposition"),
+    "gpt-4.1": ("high", "strong reasoning and longer context handling"),
+    "gpt-4o-mini": ("balanced", "cost-efficient default for most analytics prompts"),
+    "gpt-4.1-mini": ("balanced", "fast structured reasoning with lower latency"),
+    "o4-mini": ("balanced", "deep tool-use style reasoning"),
+    "o3-mini": ("balanced", "strong chain-of-thought style planning"),
+}
+
+ANTHROPIC_MODEL_HINTS: dict[str, tuple[str, str]] = {
+    "claude-sonnet-4-6": ("high", "best Claude quality for planning and analyst narration"),
+    "claude-haiku-4-5-20251001": ("fast", "low-latency Claude responses"),
 }
 
 
@@ -500,11 +713,12 @@ def _model_tier(model_name: str) -> str:
 
 
 def _build_local_model_options(installed: list[str]) -> list[LocalModelOption]:
+    installed = _filter_supported_local_models(installed)
     installed_set = {m.lower() for m in installed}
     ordered_names: list[str] = []
 
     for model_name in OLLAMA_MODEL_HINTS:
-        if model_name not in ordered_names:
+        if _is_supported_local_model(model_name) and model_name not in ordered_names:
             ordered_names.append(model_name)
     for model_name in installed:
         if model_name not in ordered_names:
@@ -524,6 +738,17 @@ def _build_local_model_options(installed: list[str]) -> list[LocalModelOption]:
             )
         )
     return options
+
+
+def _build_cloud_model_options(hints: dict[str, tuple[str, str]]) -> list[CloudModelOption]:
+    return [
+        CloudModelOption(
+            name=name,
+            tier=tier,
+            recommended_for=recommended_for,
+        )
+        for name, (tier, recommended_for) in hints.items()
+    ]
 
 
 def _fetch_ollama_models(base_url: str) -> list[str]:
@@ -550,15 +775,14 @@ def _pick_ollama_model(available_models: list[str], preferred: list[str]) -> str
 
 
 def _configure_ollama_models(available_models: list[str]) -> tuple[str | None, str | None]:
+    available_models = _filter_supported_local_models(available_models)
     # Prefer instruction-tuned model for intent extraction.
     intent_choice = _pick_ollama_model(
         available_models,
         [
-            "qwen2.5:14b-instruct",
             "qwen2.5:7b-instruct",
             "llama3.1:8b",
             "mistral:7b",
-            "llama3.2:latest",
         ],
     )
     # Prefer fluent summarizer for narrative generation.
@@ -568,14 +792,13 @@ def _configure_ollama_models(available_models: list[str]) -> tuple[str | None, s
             "llama3.1:8b",
             "qwen2.5:7b-instruct",
             "mistral:7b",
-            "llama3.2:latest",
         ],
     )
 
     if intent_choice:
-        os.environ.setdefault("HG_OLLAMA_INTENT_MODEL", intent_choice)
+        os.environ["HG_OLLAMA_INTENT_MODEL"] = intent_choice
     if narrator_choice:
-        os.environ.setdefault("HG_OLLAMA_NARRATOR_MODEL", narrator_choice)
+        os.environ["HG_OLLAMA_NARRATOR_MODEL"] = narrator_choice
 
     return intent_choice, narrator_choice
 
@@ -583,6 +806,14 @@ def _configure_ollama_models(available_models: list[str]) -> tuple[str | None, s
 def _activate_local_models(intent_model: str, narrator_model: str | None = None) -> None:
     clean_intent = intent_model.strip()
     clean_narrator = (narrator_model or intent_model).strip()
+    if clean_intent and not _is_supported_local_model(clean_intent):
+        raise ValueError(
+            f"Model '{clean_intent}' is disabled in this build due benchmark underperformance."
+        )
+    if clean_narrator and not _is_supported_local_model(clean_narrator):
+        raise ValueError(
+            f"Narrator model '{clean_narrator}' is disabled in this build due benchmark underperformance."
+        )
     if clean_intent:
         os.environ["HG_OLLAMA_INTENT_MODEL"] = clean_intent
     if clean_narrator:
@@ -592,13 +823,22 @@ def _activate_local_models(intent_model: str, narrator_model: str | None = None)
 def _get_local_models_state() -> LocalModelsResponse:
     base_url = os.environ.get("HG_OLLAMA_BASE_URL", "http://localhost:11434")
     try:
-        installed = _fetch_ollama_models(base_url)
+        installed_all = _fetch_ollama_models(base_url)
+        installed = _filter_supported_local_models(installed_all)
         if not installed:
+            disabled_installed = [
+                m for m in installed_all if not _is_supported_local_model(m)
+            ]
+            disabled_note = (
+                f" (disabled models detected: {', '.join(disabled_installed)})"
+                if disabled_installed
+                else ""
+            )
             return LocalModelsResponse(
                 available=False,
                 base_url=base_url,
                 options=_build_local_model_options([]),
-                reason="Ollama reachable but no models installed.",
+                reason=f"Ollama reachable but no supported models installed.{disabled_note}",
             )
         intent_model, narrator_model = _configure_ollama_models(installed)
         return LocalModelsResponse(
@@ -616,6 +856,34 @@ def _get_local_models_state() -> LocalModelsResponse:
             options=_build_local_model_options([]),
             reason=str(exc),
         )
+
+
+def _get_openai_models_state() -> CloudModelsResponse:
+    check = _openai_check()
+    default_intent = DEFAULT_MODELS.get("openai", {}).get("intent", "gpt-4o-mini")
+    default_narrator = DEFAULT_MODELS.get("openai", {}).get("narrator", "gpt-4o-mini")
+    return CloudModelsResponse(
+        provider="openai",
+        available=check.available,
+        reason=check.reason,
+        active_intent_model=(os.environ.get("HG_OPENAI_INTENT_MODEL") or default_intent),
+        active_narrator_model=(os.environ.get("HG_OPENAI_NARRATOR_MODEL") or default_narrator),
+        options=_build_cloud_model_options(OPENAI_MODEL_HINTS),
+    )
+
+
+def _get_anthropic_models_state() -> CloudModelsResponse:
+    check = _anthropic_check()
+    default_intent = DEFAULT_MODELS.get("anthropic", {}).get("intent", "claude-haiku-4-5-20251001")
+    default_narrator = DEFAULT_MODELS.get("anthropic", {}).get("narrator", "claude-haiku-4-5-20251001")
+    return CloudModelsResponse(
+        provider="anthropic",
+        available=check.available,
+        reason=check.reason,
+        active_intent_model=(os.environ.get("HG_ANTHROPIC_INTENT_MODEL") or default_intent),
+        active_narrator_model=(os.environ.get("HG_ANTHROPIC_NARRATOR_MODEL") or default_narrator),
+        options=_build_cloud_model_options(ANTHROPIC_MODEL_HINTS),
+    )
 
 
 def _get_db_path() -> Path:
@@ -642,6 +910,98 @@ def _get_runtime_store_path() -> Path:
     return Path("./data/runtime_store.duckdb")
 
 
+def _get_product_gap_tracker_path() -> Path:
+    env_path = os.environ.get("HG_PRODUCT_GAP_TRACKER_PATH")
+    if env_path:
+        return Path(env_path).expanduser()
+    return Path(__file__).resolve().parents[3] / "PRODUCT_GAP_TRACKER.md"
+
+
+def _normalize_capability_status(raw_status: str) -> str:
+    status = str(raw_status or "").strip().upper()
+    if status in {"DONE", "PARTIAL", "GAP"}:
+        return status
+    return "GAP"
+
+
+def _parse_capability_row(line: str) -> CapabilityScoreItem | None:
+    text = str(line or "").strip()
+    if not text.startswith("|"):
+        return None
+    cells = [cell.strip() for cell in text.strip("|").split("|")]
+    if len(cells) < 7:
+        return None
+    capability_id = str(cells[0] or "").strip().upper()
+    if (
+        len(capability_id) != 3
+        or capability_id[0] not in {"A", "T"}
+        or not capability_id[1:].isdigit()
+    ):
+        return None
+    return CapabilityScoreItem(
+        capability_id=capability_id,
+        name=str(cells[1] or "").strip(),
+        category="analyst_skill" if capability_id.startswith("A") else "team_capability",
+        status=_normalize_capability_status(str(cells[3] or "")),
+        evidence=str(cells[4] or "").strip(),
+        gap_to_close=str(cells[5] or "").strip(),
+        requirement=str(cells[6] or "").strip(),
+    )
+
+
+def _read_capability_scoreboard() -> CapabilityScoreboardResponse:
+    tracker_path = _get_product_gap_tracker_path()
+    if not tracker_path.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=f"Capability tracker not found at {tracker_path}",
+        )
+    try:
+        raw = tracker_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Failed to read capability tracker: {exc}")
+
+    tracker_last_updated = ""
+    capabilities: list[CapabilityScoreItem] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not tracker_last_updated and stripped.lower().startswith("last updated:"):
+            tracker_last_updated = stripped.split(":", 1)[1].strip()
+        item = _parse_capability_row(stripped)
+        if item is not None:
+            capabilities.append(item)
+
+    if not capabilities:
+        raise HTTPException(
+            status_code=503,
+            detail="Capability tracker did not contain parseable A##/T## capability rows.",
+        )
+
+    done = sum(1 for row in capabilities if row.status == "DONE")
+    partial = sum(1 for row in capabilities if row.status == "PARTIAL")
+    gap = sum(1 for row in capabilities if row.status == "GAP")
+    total = len(capabilities)
+    np_strict = round((done / total) * 100.0, 2) if total else 0.0
+    np_reality = round(((done + (0.5 * partial)) / total) * 100.0, 2) if total else 0.0
+    remaining = [row for row in capabilities if row.status != "DONE"]
+
+    return CapabilityScoreboardResponse(
+        tracker_path=str(tracker_path),
+        tracker_last_updated=tracker_last_updated,
+        generated_at_epoch_ms=int(time.time() * 1000),
+        counts=CapabilityScoreCounts(
+            total=total,
+            done=done,
+            partial=partial,
+            gap=gap,
+            np_strict=np_strict,
+            np_reality=np_reality,
+        ),
+        remaining=remaining,
+        capabilities=capabilities,
+    )
+
+
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
@@ -654,6 +1014,91 @@ def _env_int(name: str, default: int) -> int:
         return int(os.environ.get(name, str(default)))
     except Exception:
         return int(default)
+
+
+def _query_cache_enabled(app: FastAPI) -> bool:
+    return bool(getattr(app.state, "query_response_cache_enabled", False))
+
+
+def _query_cache_key(
+    *,
+    request: QueryRequest,
+    tenant_id: str,
+    connection_id: str,
+    runtime: RuntimeSelection,
+    autonomy: AutonomyConfig,
+    history_turns: int,
+) -> str:
+    # Follow-up questions are context-dependent; do not cache them.
+    if history_turns > 0:
+        return ""
+    payload = {
+        "tenant_id": tenant_id,
+        "connection_id": connection_id,
+        "goal": str(request.goal or "").strip(),
+        "llm_mode": str(request.llm_mode.value),
+        "constraints": dict(request.constraints or {}),
+        "scenario_set_id": str(request.scenario_set_id or ""),
+        "runtime_mode": str(runtime.mode),
+        "provider": str(runtime.provider or ""),
+        "model_overrides": {
+            "local_model": request.local_model,
+            "local_narrator_model": request.local_narrator_model,
+            "openai_model": request.openai_model,
+            "openai_narrator_model": request.openai_narrator_model,
+            "anthropic_model": request.anthropic_model,
+            "anthropic_narrator_model": request.anthropic_narrator_model,
+        },
+        "autonomy": {
+            "mode": autonomy.mode,
+            "auto_correction": bool(autonomy.auto_correction),
+            "strict_truth": bool(autonomy.strict_truth),
+            "max_refinement_rounds": int(autonomy.max_refinement_rounds),
+            "max_candidate_plans": int(autonomy.max_candidate_plans),
+        },
+        "storyteller_mode": bool(request.storyteller_mode),
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()
+
+
+def _query_cache_get(app: FastAPI, key: str) -> dict[str, Any] | None:
+    if not key or not _query_cache_enabled(app):
+        return None
+    ttl_seconds = float(getattr(app.state, "query_response_cache_ttl_seconds", 0.0) or 0.0)
+    if ttl_seconds <= 0:
+        return None
+    now = time.time()
+    with app.state.query_response_cache_lock:
+        cache: OrderedDict[str, dict[str, Any]] = app.state.query_response_cache
+        stale_keys = [
+            item_key
+            for item_key, item in cache.items()
+            if (now - float(item.get("created_at") or 0.0)) > ttl_seconds
+        ]
+        for stale in stale_keys:
+            cache.pop(stale, None)
+        hit = cache.get(key)
+        if not hit:
+            return None
+        cache.move_to_end(key)
+        payload = hit.get("response_payload")
+        return dict(payload) if isinstance(payload, dict) else None
+
+
+def _query_cache_set(app: FastAPI, key: str, response_payload: dict[str, Any]) -> None:
+    if not key or not _query_cache_enabled(app):
+        return
+    max_entries = max(8, int(getattr(app.state, "query_response_cache_max_entries", 128)))
+    with app.state.query_response_cache_lock:
+        cache: OrderedDict[str, dict[str, Any]] = app.state.query_response_cache
+        cache[key] = {
+            "created_at": time.time(),
+            "response_payload": dict(response_payload),
+        }
+        cache.move_to_end(key)
+        while len(cache) > max_entries:
+            cache.popitem(last=False)
 
 
 def _load_api_key_policies() -> dict[str, dict[str, str]]:
@@ -950,6 +1395,69 @@ def _resolve_documents_duckdb_path(app: FastAPI, entry: dict[str, Any]) -> Path:
     return mirror_db
 
 
+def _resolve_stream_duckdb_path(app: FastAPI, entry: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+    stream_uri = str(entry.get("path") or "").strip()
+    connection_id = str(entry.get("id") or "stream")
+    if not stream_uri:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Stream connection '{connection_id}' is missing a stream URI.",
+        )
+
+    mirror_dir = app.state.db_path.parent / "stream_mirrors"
+    mirror_dir.mkdir(parents=True, exist_ok=True)
+    mirror_db = mirror_dir / f"{connection_id}.duckdb"
+    try:
+        snapshot = ingest_stream_snapshot_to_duckdb(
+            stream_uri=stream_uri,
+            db_path=mirror_db,
+            connection_id=connection_id,
+            force=False,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to ingest stream snapshot for '{connection_id}': {exc}",
+        )
+    if not bool(snapshot.get("success")):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to ingest stream snapshot for '{connection_id}'.",
+        )
+    return mirror_db, snapshot
+
+
+def _resolve_onboarding_profile_meta(app: FastAPI, *, connection_id: str, db_path: Path) -> dict[str, Any]:
+    profile_dir = Path(
+        os.environ.get(
+            "HG_ONBOARDING_PROFILE_DIR",
+            str(app.state.db_path.parent / "onboarding_profiles"),
+        )
+    ).expanduser()
+    profile_path = profile_dir / f"{connection_id}.json"
+    try:
+        profile_meta = load_or_create_onboarding_profile(
+            db_path=db_path,
+            profile_path=profile_path,
+            include_datada_views=False,
+        )
+    except Exception:
+        return {
+            "path": str(profile_path),
+            "version": "",
+            "table_count": 0,
+            "generated_at": "",
+        }
+    return {
+        "path": str(profile_meta.get("path") or profile_path),
+        "version": str(profile_meta.get("version") or ""),
+        "table_count": int(profile_meta.get("table_count") or 0),
+        "generated_at": str(profile_meta.get("generated_at") or ""),
+    }
+
+
 def _resolve_team_for_connection(
     app: FastAPI,
     connection_id: str | None,
@@ -969,7 +1477,7 @@ def _resolve_team_for_connection(
         )
 
     kind = str(entry.get("kind") or "duckdb").lower()
-    if kind not in {"duckdb", "documents"}:
+    if kind not in {"duckdb", "documents", "stream"}:
         raise HTTPException(
             status_code=501,
             detail=(
@@ -978,8 +1486,11 @@ def _resolve_team_for_connection(
             ),
         )
 
+    stream_snapshot_meta: dict[str, Any] = {}
     if kind == "documents":
         db_path = _resolve_documents_duckdb_path(app, entry)
+    elif kind == "stream":
+        db_path, stream_snapshot_meta = _resolve_stream_duckdb_path(app, entry)
     else:
         db_path = Path(str(entry.get("path") or "")).expanduser()
     if not db_path.exists():
@@ -1012,7 +1523,16 @@ def _resolve_team_for_connection(
         app.state.db_path = db_path
         app.state.team = team
 
-    return team, db_path, entry
+    enriched_entry = dict(entry)
+    if stream_snapshot_meta:
+        enriched_entry["_stream_snapshot"] = stream_snapshot_meta
+    enriched_entry["_onboarding_profile"] = _resolve_onboarding_profile_meta(
+        app,
+        connection_id=cid,
+        db_path=db_path,
+    )
+
+    return team, db_path, enriched_entry
 
 
 def _role_rank(role: str) -> int:
@@ -1153,14 +1673,34 @@ def _execute_query_request(
         state = _get_local_models_state()
         installed = {opt.name.lower() for opt in state.options if opt.installed}
         if request.local_model.lower() in installed:
-            _activate_local_models(request.local_model, request.local_model)
+            if request.local_narrator_model and request.local_narrator_model.lower() not in installed:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Local narrator model '{request.local_narrator_model}' is not installed. "
+                        "Download it first."
+                    ),
+                )
+            _activate_local_models(
+                request.local_model,
+                request.local_narrator_model or request.local_model,
+            )
         elif request.llm_mode in {LLMMode.LOCAL, LLMMode.AUTO}:
             raise HTTPException(
                 status_code=400,
                 detail=f"Local model '{request.local_model}' is not installed. Download it first.",
             )
 
-    runtime = _resolve_runtime(request.llm_mode)
+    runtime = _resolve_runtime(
+        request.llm_mode,
+        goal=request.goal,
+        local_model=request.local_model,
+        local_narrator_model=request.local_narrator_model,
+        openai_model=request.openai_model,
+        openai_narrator_model=request.openai_narrator_model,
+        anthropic_model=request.anthropic_model,
+        anthropic_narrator_model=request.anthropic_narrator_model,
+    )
     autonomy = AutonomyConfig(
         mode=request.autonomy_mode.strip().lower() or "bounded",
         auto_correction=bool(request.auto_correction),
@@ -1171,18 +1711,90 @@ def _execute_query_request(
     session_id = (request.session_id or "default").strip()[:128] or "default"
     connection_id = str(connection_entry.get("id") or "default")
     session_scope = _tenant_session_scope(tenant_id, connection_id, session_id)
+    scenario_context: dict[str, Any] | None = None
+    if request.scenario_set_id:
+        scenario_row = app.state.runtime_store.get_scenario_set(
+            scenario_set_id=request.scenario_set_id,
+            tenant_id=tenant_id,
+        )
+        if scenario_row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Scenario set '{request.scenario_set_id}' not found for tenant '{tenant_id}'.",
+            )
+        if str(scenario_row.get("connection_id") or connection_id) != connection_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Scenario set belongs to a different db_connection_id.",
+            )
+        scenario_context = {
+            "scenario_set_id": str(scenario_row.get("scenario_set_id") or ""),
+            "name": str(scenario_row.get("name") or ""),
+            "assumptions": list(scenario_row.get("assumptions") or []),
+        }
 
     history = app.state.runtime_store.load_session_turns(session_scope, limit=20)
+    cache_key = _query_cache_key(
+        request=request,
+        tenant_id=tenant_id,
+        connection_id=connection_id,
+        runtime=runtime,
+        autonomy=autonomy,
+        history_turns=len(history),
+    )
+    cache_hit = False
+    cached_payload = _query_cache_get(app, cache_key)
 
     started = time.perf_counter()
-    response = team.run(
-        request.goal,
-        runtime,
-        tenant_id=tenant_id,
-        conversation_context=history,
-        storyteller_mode=request.storyteller_mode,
-        autonomy=autonomy,
-    )
+    if isinstance(cached_payload, dict):
+        response = AssistantQueryResponse(**cached_payload)
+        cache_hit = True
+    else:
+        response = team.run(
+            request.goal,
+            runtime,
+            tenant_id=tenant_id,
+            conversation_context=history,
+            storyteller_mode=request.storyteller_mode,
+            autonomy=autonomy,
+            scenario_context=scenario_context,
+        )
+        if response.success:
+            _query_cache_set(app, cache_key, response.model_dump())
+
+    # Explicit-mode safety: if selected provider did not produce any effective
+    # LLM step, surface a clear user-facing degradation notice.
+    if request.llm_mode in {LLMMode.LOCAL, LLMMode.OPENAI, LLMMode.ANTHROPIC} and runtime.use_llm:
+        rt_payload = dict(response.runtime or {})
+        llm_effective = bool(rt_payload.get("llm_effective"))
+        if not llm_effective:
+            provider_label = {
+                "ollama": "Local model",
+                "openai": "OpenAI",
+                "anthropic": "Anthropic",
+            }.get(str(runtime.provider or "").lower(), str(runtime.provider or "Selected provider"))
+            last_error = str(rt_payload.get("llm_last_error") or "").strip()
+            reason = last_error or "provider returned no usable response."
+            notice = (
+                f"{provider_label} was unavailable for this run ({reason}). "
+                "Answered with deterministic fallback."
+            )
+            warnings = list(response.warnings or [])
+            if notice not in warnings:
+                warnings.append(notice)
+            response.warnings = warnings
+            if not str(response.answer_markdown or "").lower().startswith("**provider notice:**"):
+                response.answer_markdown = (
+                    f"**Provider notice:** {provider_label} is resting right now, so I used deterministic mode.\n\n"
+                    f"{response.answer_markdown}"
+                )
+            response.runtime = {
+                **rt_payload,
+                "llm_degraded": True,
+                "llm_degraded_provider": str(runtime.provider or ""),
+                "llm_degraded_reason": reason,
+            }
+
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
 
     app.state.runtime_store.append_session_turn(
@@ -1222,6 +1834,17 @@ def _execute_query_request(
         metadata={
             "goal": request.goal,
             "trace_id": response.trace_id,
+            "scenario_set_id": str(request.scenario_set_id or ""),
+            "contract_signature": json.dumps(
+                {
+                    "metric": str((response.contract_spec or {}).get("metric") or ""),
+                    "table": str((response.contract_spec or {}).get("table") or ""),
+                    "dimensions": list((response.contract_spec or {}).get("dimensions") or []),
+                    "time_scope": str((response.contract_spec or {}).get("time_scope") or ""),
+                },
+                sort_keys=True,
+                default=str,
+            ),
             "warning_terms": warning_terms if isinstance(warning_terms, list) else [],
         },
     )
@@ -1238,6 +1861,16 @@ def _execute_query_request(
         "role": request.role or "",
         "budget_remaining": int(budget.get("remaining") or 0),
         "budget_limit_per_hour": int(budget.get("limit_per_hour") or 0),
+        "response_cache_hit": bool(cache_hit),
+        "response_cache_key": cache_key[:12] if cache_key else "",
+        "scenario_set_id": str((scenario_context or {}).get("scenario_set_id") or ""),
+        "onboarding_profile_version": str(
+            ((connection_entry.get("_onboarding_profile") or {}).get("version") or "")
+        ),
+        "onboarding_profile_path": str(
+            ((connection_entry.get("_onboarding_profile") or {}).get("path") or "")
+        ),
+        "stream_snapshot": dict(connection_entry.get("_stream_snapshot") or {}),
     }
     _maybe_record_runtime_incident(
         app,
@@ -1305,7 +1938,15 @@ def _anthropic_check() -> ProviderCheck:
     return ProviderCheck(available=True, reason="package + key detected")
 
 
-def _providers_snapshot() -> ProvidersResponse:
+def _providers_snapshot(*, force_refresh: bool = False) -> ProvidersResponse:
+    global _PROVIDER_SNAPSHOT_CACHE
+    global _PROVIDER_SNAPSHOT_CACHE_TS
+    ttl_seconds = max(0.0, float(os.environ.get("HG_PROVIDER_SNAPSHOT_TTL_SECONDS", "8") or 8.0))
+    if not force_refresh and ttl_seconds > 0:
+        with _PROVIDER_SNAPSHOT_LOCK:
+            if _PROVIDER_SNAPSHOT_CACHE is not None and (time.time() - _PROVIDER_SNAPSHOT_CACHE_TS) <= ttl_seconds:
+                return _PROVIDER_SNAPSHOT_CACHE
+
     raw_default = os.environ.get("HG_DEFAULT_LLM_MODE", LLMMode.AUTO.value).lower()
     default_mode = LLMMode(raw_default) if raw_default in {m.value for m in LLMMode} else LLMMode.AUTO
 
@@ -1328,17 +1969,94 @@ def _providers_snapshot() -> ProvidersResponse:
             recommended = order_map.get(provider, LLMMode.DETERMINISTIC)
             break
 
-    return ProvidersResponse(default_mode=default_mode, recommended_mode=recommended, checks=checks)
+    snap = ProvidersResponse(default_mode=default_mode, recommended_mode=recommended, checks=checks)
+    with _PROVIDER_SNAPSHOT_LOCK:
+        _PROVIDER_SNAPSHOT_CACHE = snap
+        _PROVIDER_SNAPSHOT_CACHE_TS = time.time()
+    return snap
 
 
-def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
+def _auto_prefers_deterministic_fast_path(goal: str) -> bool:
+    if os.environ.get("HG_AUTO_DETERMINISTIC_FAST_PATH", "true").lower() not in {"1", "true", "yes", "on"}:
+        return False
+    text = (goal or "").strip().lower()
+    if not text:
+        return False
+    # Keep analytical/narrative asks on LLM providers.
+    llm_pref_keywords = (
+        "insight",
+        "why",
+        "explain",
+        "story",
+        "narrative",
+        "recommend",
+        "strategy",
+        "root cause",
+        "forecast",
+        "scenario",
+        "correlation",
+        "anomaly",
+        "cohort",
+        "funnel",
+        "glossary",
+        "dictionary",
+        "schema",
+        "what kind of data",
+        "document",
+        "pdf",
+    )
+    if any(k in text for k in llm_pref_keywords):
+        return False
+    # Fast-path simple metric asks to deterministic for latency.
+    simple_metric_words = ("count", "total", "sum", "average", "avg", "split", "by", "month", "platform")
+    has_simple_metric = any(k in text for k in simple_metric_words)
+    return has_simple_metric and len(text) <= 240
+
+
+def _resolve_runtime(
+    mode: LLMMode,
+    *,
+    goal: str | None = None,
+    local_model: str | None = None,
+    local_narrator_model: str | None = None,
+    openai_model: str | None = None,
+    openai_narrator_model: str | None = None,
+    anthropic_model: str | None = None,
+    anthropic_narrator_model: str | None = None,
+) -> RuntimeSelection:
     providers = _providers_snapshot()
-    local_intent_model = os.environ.get("HG_OLLAMA_INTENT_MODEL")
-    local_narrator_model = os.environ.get("HG_OLLAMA_NARRATOR_MODEL")
-    openai_intent_model = DEFAULT_MODELS.get("openai", {}).get("intent", "gpt-4o-mini")
-    openai_narrator_model = DEFAULT_MODELS.get("openai", {}).get("narrator", "gpt-4o-mini")
-    anthropic_intent_model = DEFAULT_MODELS.get("anthropic", {}).get("intent", "claude-haiku-4-5-20251001")
-    anthropic_narrator_model = DEFAULT_MODELS.get("anthropic", {}).get("narrator", "claude-haiku-4-5-20251001")
+    local_intent_model = (
+        (local_model or "").strip()
+        or os.environ.get("HG_OLLAMA_INTENT_MODEL")
+        or DEFAULT_MODELS.get("ollama", {}).get("intent", "qwen2.5:7b-instruct")
+    )
+    local_narrator_model_final = (
+        (local_narrator_model or "").strip()
+        or os.environ.get("HG_OLLAMA_NARRATOR_MODEL")
+        or local_intent_model
+    )
+    openai_intent_model = (
+        (openai_model or "").strip()
+        or os.environ.get("HG_OPENAI_INTENT_MODEL")
+        or DEFAULT_MODELS.get("openai", {}).get("intent", "gpt-4o-mini")
+    )
+    openai_narrator_model_final = (
+        (openai_narrator_model or "").strip()
+        or os.environ.get("HG_OPENAI_NARRATOR_MODEL")
+        or DEFAULT_MODELS.get("openai", {}).get("narrator", "gpt-4o-mini")
+        or openai_intent_model
+    )
+    anthropic_intent_model = (
+        (anthropic_model or "").strip()
+        or os.environ.get("HG_ANTHROPIC_INTENT_MODEL")
+        or DEFAULT_MODELS.get("anthropic", {}).get("intent", "claude-haiku-4-5-20251001")
+    )
+    anthropic_narrator_model_final = (
+        (anthropic_narrator_model or "").strip()
+        or os.environ.get("HG_ANTHROPIC_NARRATOR_MODEL")
+        or DEFAULT_MODELS.get("anthropic", {}).get("narrator", "claude-haiku-4-5-20251001")
+        or anthropic_intent_model
+    )
 
     if mode == LLMMode.DETERMINISTIC:
         return RuntimeSelection(
@@ -1353,9 +2071,9 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
 
     # ── Explicit LLM modes: fail if provider unavailable (no silent fallback) ──
     _explicit_modes = {
-        LLMMode.LOCAL: ("ollama", local_intent_model, local_narrator_model),
-        LLMMode.OPENAI: ("openai", openai_intent_model, openai_narrator_model),
-        LLMMode.ANTHROPIC: ("anthropic", anthropic_intent_model, anthropic_narrator_model),
+        LLMMode.LOCAL: ("ollama", local_intent_model, local_narrator_model_final),
+        LLMMode.OPENAI: ("openai", openai_intent_model, openai_narrator_model_final),
+        LLMMode.ANTHROPIC: ("anthropic", anthropic_intent_model, anthropic_narrator_model_final),
     }
     if mode in _explicit_modes:
         provider_key, intent_m, narrator_m = _explicit_modes[mode]
@@ -1379,19 +2097,30 @@ def _resolve_runtime(mode: LLMMode) -> RuntimeSelection:
         )
 
     # auto mode — policy-controlled provider preference.
+    if _auto_prefers_deterministic_fast_path(goal or ""):
+        return RuntimeSelection(
+            requested_mode=mode.value,
+            mode=LLMMode.DETERMINISTIC.value,
+            use_llm=False,
+            provider=None,
+            reason="auto fast-path deterministic (simple metric ask)",
+            intent_model=None,
+            narrator_model=None,
+        )
+
     pref_raw = os.environ.get("HG_AUTO_MODE_PRIORITY", "openai,anthropic,ollama")
     pref = [p.strip().lower() for p in pref_raw.split(",") if p.strip()]
     options = {
-        "openai": ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model),
-        "anthropic": ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model),
-        "ollama": ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model),
+        "openai": ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model_final),
+        "anthropic": ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model_final),
+        "ollama": ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model_final),
     }
     _auto_priority = [options[p] for p in pref if p in options]
     if not _auto_priority:
         _auto_priority = [
-            ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model),
-            ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model),
-            ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model),
+            ("openai", LLMMode.OPENAI, openai_intent_model, openai_narrator_model_final),
+            ("anthropic", LLMMode.ANTHROPIC, anthropic_intent_model, anthropic_narrator_model_final),
+            ("ollama", LLMMode.LOCAL, local_intent_model, local_narrator_model_final),
         ]
     for prov_key, llm_mode, intent_m, narrator_m in _auto_priority:
         if providers.checks[prov_key].available:
@@ -1521,6 +2250,13 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.state.slo_warning_rate_target = float(os.environ.get("HG_SLO_WARNING_RATE_TARGET", "0.15"))
     app.state.incident_webhook_url = os.environ.get("HG_INCIDENT_WEBHOOK_URL", "").strip()
     app.state.incident_dedupe_minutes = max(1, _env_int("HG_INCIDENT_DEDUPE_MINUTES", 60))
+    app.state.query_response_cache_enabled = _env_bool("HG_QUERY_RESPONSE_CACHE_ENABLED", True)
+    app.state.query_response_cache_ttl_seconds = max(0, _env_int("HG_QUERY_RESPONSE_CACHE_TTL_SECONDS", 120))
+    app.state.query_response_cache_max_entries = max(8, _env_int("HG_QUERY_RESPONSE_CACHE_MAX_ENTRIES", 256))
+    app.state.query_response_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    app.state.query_response_cache_lock = threading.RLock()
+    app.state.async_max_inflight = max(1, _env_int("HG_ASYNC_MAX_INFLIGHT", 64))
+    app.state.async_max_inflight_per_tenant = max(1, _env_int("HG_ASYNC_MAX_INFLIGHT_PER_TENANT", 16))
     app.state.async_executor = concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, _env_int("HG_ASYNC_WORKERS", 4)),
         thread_name_prefix="datada-async",
@@ -1559,10 +2295,22 @@ def _register_routes(app: FastAPI) -> None:
                 default_connection_id="default",
                 available_connections=0,
                 active_connection_kind="duckdb",
+                onboarding_profile_version="",
+                onboarding_profile_path="",
                 runtime_store_path=str(app.state.runtime_store.db_path),
             )
 
+        kind = str(default_entry.get("kind") or "duckdb").lower()
         db_path = Path(str(default_entry.get("path") or app.state.db_path))
+        if kind in {"documents", "stream"}:
+            try:
+                _, resolved_path, resolved_entry = _resolve_team_for_connection(
+                    app, str(default_entry.get("id") or "default")
+                )
+                db_path = resolved_path
+                default_entry = resolved_entry
+            except Exception:
+                pass
         exists = db_path.exists()
         semantic_ready = False
         if exists:
@@ -1576,6 +2324,11 @@ def _register_routes(app: FastAPI) -> None:
                 semantic_ready = False
 
         listed = app.state.connection_registry.list_connections()
+        onboarding_meta = _resolve_onboarding_profile_meta(
+            app,
+            connection_id=str(default_entry.get("id") or "default"),
+            db_path=db_path,
+        )
         return HealthResponse(
             status="ok" if exists else "no_database",
             db_exists=exists,
@@ -1585,6 +2338,8 @@ def _register_routes(app: FastAPI) -> None:
             default_connection_id=str(listed.get("default_connection_id") or "default"),
             available_connections=len(listed.get("connections", [])),
             active_connection_kind=str(default_entry.get("kind") or "duckdb"),
+            onboarding_profile_version=str(onboarding_meta.get("version") or ""),
+            onboarding_profile_path=str(onboarding_meta.get("path") or ""),
             runtime_store_path=str(app.state.runtime_store.db_path),
         )
 
@@ -1853,13 +2608,13 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.get("/api/assistant/providers", response_model=ProvidersResponse)
     async def providers() -> ProvidersResponse:
-        return _providers_snapshot()
+        return _providers_snapshot(force_refresh=True)
 
     @app.get("/api/assistant/model-health")
     async def model_health():
         """Check health of all configured LLM models."""
         from haikugraph.llm.router import check_model_health, DEFAULT_MODELS
-        providers_snap = _providers_snapshot()
+        providers_snap = _providers_snapshot(force_refresh=True)
         results = {}
         for provider_name in ("anthropic", "openai", "ollama"):
             check = providers_snap.checks.get(provider_name)
@@ -1878,8 +2633,26 @@ def _register_routes(app: FastAPI) -> None:
     async def local_models() -> LocalModelsResponse:
         return _get_local_models_state()
 
+    @app.get("/api/assistant/models/openai", response_model=CloudModelsResponse)
+    async def openai_models() -> CloudModelsResponse:
+        return _get_openai_models_state()
+
+    @app.get("/api/assistant/models/anthropic", response_model=CloudModelsResponse)
+    async def anthropic_models() -> CloudModelsResponse:
+        return _get_anthropic_models_state()
+
     @app.post("/api/assistant/models/local/select", response_model=LocalModelActionResponse)
     async def select_local_model(request: LocalModelSelectRequest) -> LocalModelActionResponse:
+        if not _is_supported_local_model(request.model):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{request.model}' is disabled in this build due benchmark underperformance.",
+            )
+        if request.narrator_model and not _is_supported_local_model(request.narrator_model):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Narrator model '{request.narrator_model}' is disabled in this build due benchmark underperformance.",
+            )
         state = _get_local_models_state()
         if not state.available:
             raise HTTPException(status_code=503, detail=f"Ollama unavailable: {state.reason}")
@@ -1904,6 +2677,11 @@ def _register_routes(app: FastAPI) -> None:
 
     @app.post("/api/assistant/models/local/pull", response_model=LocalModelActionResponse)
     async def pull_local_model(request: LocalModelPullRequest) -> LocalModelActionResponse:
+        if not _is_supported_local_model(request.model):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model '{request.model}' is disabled in this build due benchmark underperformance.",
+            )
         base_url = os.environ.get("HG_OLLAMA_BASE_URL", "http://localhost:11434")
         try:
             response = requests.post(
@@ -1959,6 +2737,13 @@ def _register_routes(app: FastAPI) -> None:
                 description="Recalls prior runs and correction rules; persists outcomes for future improvements",
                 inputs=["goal", "trace", "feedback"],
                 outputs=["memory hints", "learned correction rules"],
+            ),
+            AgentInfo(
+                name="OrganizationalKnowledgeAgent",
+                role="Domain governance curator",
+                description="Maintains organization rulebook/domain views and feeds governance context into planning",
+                inputs=["goal", "catalog", "matched rules", "memory store"],
+                outputs=["required domains", "governance directives", "knowledge views"],
             ),
             AgentInfo(
                 name="BlackboardAgent",
@@ -2074,6 +2859,10 @@ def _register_routes(app: FastAPI) -> None:
             ),
         ]
         return ArchitectureResponse(agents=agents)
+
+    @app.get("/api/assistant/capability/scoreboard", response_model=CapabilityScoreboardResponse)
+    async def capability_scoreboard() -> CapabilityScoreboardResponse:
+        return _read_capability_scoreboard()
 
     @app.post("/api/assistant/query", response_model=AssistantQueryResponse)
     async def query(
@@ -2276,6 +3065,374 @@ def _register_routes(app: FastAPI) -> None:
             db_connection_id=str(connection_entry.get("id") or request.db_connection_id),
             correction_id=request.correction_id,
             enabled=bool(result.get("enabled", True)),
+        )
+
+    @app.get("/api/assistant/rules", response_model=BusinessRulesResponse)
+    async def list_business_rules(
+        db_connection_id: str = "default",
+        status: str | None = None,
+        domain: str | None = None,
+        limit: int = 200,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> BusinessRulesResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, entry = _resolve_team_for_connection(app, db_connection_id)
+        rows = team.list_business_rules(
+            tenant_id=access["tenant_id"],
+            status=status,
+            domain=domain,
+            limit=limit,
+        )
+        return BusinessRulesResponse(
+            db_connection_id=str(entry.get("id") or db_connection_id),
+            rules=[BusinessRuleInfo(**row) for row in rows],
+        )
+
+    @app.post("/api/assistant/rules", response_model=BusinessRuleActionResponse)
+    async def create_business_rule(
+        request: BusinessRuleCreateRequest,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> BusinessRuleActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        rule_id = team.create_business_rule(
+            tenant_id=access["tenant_id"],
+            domain=request.domain,
+            name=request.name,
+            rule_type=request.rule_type,
+            triggers=request.triggers,
+            action_payload=request.action_payload,
+            notes=request.notes,
+            priority=request.priority,
+            status=request.status,
+            source="admin_ui",
+            created_by=access["user_id"],
+            approved_by=access["user_id"] if request.status.lower() == "active" else "",
+        )
+        if not rule_id:
+            raise HTTPException(status_code=400, detail="Rule creation failed or duplicate active rule exists.")
+        return BusinessRuleActionResponse(
+            success=True,
+            message=f"Business rule '{request.name}' saved.",
+            db_connection_id=str(entry.get("id") or request.db_connection_id),
+            rule_id=rule_id,
+            status=request.status.lower(),
+        )
+
+    @app.post("/api/assistant/rules/status", response_model=BusinessRuleActionResponse)
+    async def update_business_rule_status(
+        request: BusinessRuleStatusRequest,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> BusinessRuleActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        result = team.set_business_rule_status(
+            request.rule_id,
+            tenant_id=access["tenant_id"],
+            status=request.status,
+            actor=access["user_id"],
+            note=request.note,
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result.get("message") or "Rule status update failed."))
+        return BusinessRuleActionResponse(
+            success=True,
+            message=str(result.get("message") or ""),
+            db_connection_id=str(entry.get("id") or request.db_connection_id),
+            rule_id=request.rule_id,
+            status=str(result.get("status") or request.status),
+        )
+
+    @app.post("/api/assistant/rules/update", response_model=BusinessRuleActionResponse)
+    async def update_business_rule(
+        request: BusinessRuleUpdateRequest,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> BusinessRuleActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        result = team.update_business_rule(
+            request.rule_id,
+            tenant_id=access["tenant_id"],
+            domain=request.domain,
+            name=request.name,
+            rule_type=request.rule_type,
+            triggers=request.triggers,
+            action_payload=request.action_payload,
+            notes=request.notes,
+            priority=request.priority,
+            status=request.status,
+            actor=access["user_id"],
+            note=request.note,
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result.get("message") or "Rule update failed."))
+        return BusinessRuleActionResponse(
+            success=True,
+            message=str(result.get("message") or ""),
+            db_connection_id=str(entry.get("id") or request.db_connection_id),
+            rule_id=request.rule_id,
+            status=str(result.get("status") or request.status or ""),
+        )
+
+    @app.post("/api/assistant/rules/rollback", response_model=BusinessRuleActionResponse)
+    async def rollback_business_rule(
+        request: BusinessRuleRollbackRequest,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> BusinessRuleActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        result = team.rollback_business_rule(
+            request.rule_id,
+            tenant_id=access["tenant_id"],
+            actor=access["user_id"],
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result.get("message") or "Rule rollback failed."))
+        return BusinessRuleActionResponse(
+            success=True,
+            message=str(result.get("message") or ""),
+            db_connection_id=str(entry.get("id") or request.db_connection_id),
+            rule_id=request.rule_id,
+            status=str(result.get("status") or ""),
+        )
+
+    @app.get("/api/assistant/scenarios", response_model=ScenarioSetsResponse)
+    async def list_scenarios(
+        db_connection_id: str = "default",
+        status: str = "active",
+        limit: int = 100,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> ScenarioSetsResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "viewer")
+        _, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        connection_id = str(connection_entry.get("id") or db_connection_id)
+        rows = app.state.runtime_store.list_scenario_sets(
+            tenant_id=access["tenant_id"],
+            connection_id=connection_id,
+            status=status,
+            limit=limit,
+        )
+        return ScenarioSetsResponse(
+            db_connection_id=connection_id,
+            scenario_sets=[ScenarioSetInfo(**row) for row in rows],
+        )
+
+    @app.post("/api/assistant/scenarios", response_model=ScenarioSetActionResponse)
+    async def upsert_scenario(
+        request: ScenarioSetUpsertRequest,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> ScenarioSetActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "analyst")
+        _, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        connection_id = str(connection_entry.get("id") or request.db_connection_id)
+        saved = app.state.runtime_store.upsert_scenario_set(
+            tenant_id=access["tenant_id"],
+            connection_id=connection_id,
+            name=request.name,
+            assumptions=request.assumptions,
+            scenario_set_id=request.scenario_set_id,
+            status=request.status,
+        )
+        return ScenarioSetActionResponse(
+            success=True,
+            message="Scenario set saved.",
+            db_connection_id=connection_id,
+            scenario_set=ScenarioSetInfo(**saved),
+        )
+
+    @app.get("/api/assistant/scenarios/{scenario_set_id}", response_model=ScenarioSetActionResponse)
+    async def get_scenario(
+        scenario_set_id: str,
+        db_connection_id: str = "default",
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> ScenarioSetActionResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "viewer")
+        _, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        connection_id = str(connection_entry.get("id") or db_connection_id)
+        row = app.state.runtime_store.get_scenario_set(
+            scenario_set_id=scenario_set_id,
+            tenant_id=access["tenant_id"],
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Scenario set '{scenario_set_id}' not found.")
+        return ScenarioSetActionResponse(
+            success=True,
+            message="Scenario set loaded.",
+            db_connection_id=connection_id,
+            scenario_set=ScenarioSetInfo(**row),
+        )
+
+    @app.post("/api/assistant/fix", response_model=FixResponse)
+    async def fix_answer(
+        request: FixRequest,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> FixResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "admin")
+        team, _, _ = _resolve_team_for_connection(app, request.db_connection_id)
+        saved = team.record_fix(
+            tenant_id=access["tenant_id"],
+            trace_id=request.trace_id,
+            session_id=request.session_id,
+            goal=request.goal,
+            issue=request.issue,
+            keyword=request.keyword,
+            domain=request.domain,
+            target_table=request.target_table,
+            target_metric=request.target_metric,
+            target_dimensions=request.target_dimensions,
+            notes=request.notes,
+            actor=access["user_id"],
+        )
+        return FixResponse(
+            success=True,
+            message="Fix captured: feedback logged, correction updated, and admin rule activated.",
+            feedback_id=str(saved.get("feedback_id") or ""),
+            correction_id=str(saved.get("correction_id") or ""),
+            rule_id=str(saved.get("rule_id") or ""),
         )
 
     @app.get("/api/assistant/toolsmith", response_model=ToolCandidatesResponse)
@@ -2528,6 +3685,7 @@ def _register_routes(app: FastAPI) -> None:
             p95_execution_ms=float(payload.get("p95_execution_ms") or 0.0),
             total_warnings=int(payload.get("total_warnings") or 0),
             by_mode=[TrustModeMetric(**row) for row in payload.get("by_mode", [])],
+            parity_summary=dict(payload.get("parity_summary") or {}),
             recent_failures=[TrustFailureSample(**row) for row in payload.get("recent_failures", [])],
         )
 
@@ -2737,6 +3895,28 @@ def _register_routes(app: FastAPI) -> None:
         request.role = access["role"]
         request.user_id = access["user_id"]
 
+        global_load = app.state.runtime_store.count_async_jobs(statuses=("queued", "running"))
+        if int(global_load.get("total", 0)) >= int(app.state.async_max_inflight):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Async query queue is currently at capacity. "
+                    f"Try again shortly (max inflight={app.state.async_max_inflight})."
+                ),
+            )
+        tenant_load = app.state.runtime_store.count_async_jobs(
+            tenant_id=access["tenant_id"],
+            statuses=("queued", "running"),
+        )
+        if int(tenant_load.get("total", 0)) >= int(app.state.async_max_inflight_per_tenant):
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"Tenant async queue limit reached for '{access['tenant_id']}'. "
+                    f"Try again shortly (tenant max inflight={app.state.async_max_inflight_per_tenant})."
+                ),
+            )
+
         connection_id = (request.db_connection_id or "default").strip() or "default"
         session_id = (request.session_id or "default").strip()[:128] or "default"
         job_id = app.state.runtime_store.create_async_job(
@@ -2879,6 +4059,13 @@ def _register_routes(app: FastAPI) -> None:
 
 
 def get_ui_html() -> str:
+    ui_template = Path(__file__).with_name("ui.html")
+    try:
+        html = ui_template.read_text(encoding="utf-8")
+        if "<html" in html.lower() and "runQuery" in html:
+            return html
+    except Exception:
+        pass
     return '''
 <!DOCTYPE html>
 <html lang="en">
@@ -3098,6 +4285,8 @@ def get_ui_html() -> str:
     .tl-summary{font-size:11px;color:var(--text-muted);margin-top:2px}
     .tl-meta{font-size:10px;color:var(--text-dim);font-family:var(--mono);margin-top:2px}
     .tl-reasoning{font-size:10px;color:var(--gold);font-family:var(--mono);margin-top:4px;padding:4px 8px;background:rgba(255,193,7,0.08);border-radius:4px}
+    .tl-skills{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:5px}
+    .tl-skills .flow-node{font-size:10px;padding:3px 8px;border-radius:999px}
     .flow-lane{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
     .flow-node{font-size:11px;color:var(--text);padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)}
     .flow-arrow{font-size:12px;color:var(--gold)}
@@ -3445,7 +4634,16 @@ def get_ui_html() -> str:
           const dot = st === 'failed' ? 'fail' : st === 'warning' ? 'warn' : 'ok';
           const ms = t.duration_ms != null ? Math.round(t.duration_ms) + 'ms' : '';
           const reasonHtml = t.reasoning ? `<div class="tl-reasoning">${esc(t.reasoning)}</div>` : '';
-          html += `<div class="tl-item"><div class="tl-dot ${dot}"></div><div class="tl-body"><div class="tl-agent">${esc(t.agent || t.role || '')}</div>${reasonHtml}<div class="tl-summary">${esc(t.summary || '')}</div>${ms ? '<div class="tl-meta">' + ms + '</div>' : ''}</div></div>`;
+          const skills = Array.isArray(t.selected_skills) ? t.selected_skills.filter(Boolean) : [];
+          let skillsHtml = '';
+          if (skills.length) {
+            const chips = skills.map(s => `<span class="flow-node">${esc(s)}</span>`).join('');
+            skillsHtml = `<div class="tl-skills"><span class="inspect-label" style="margin-right:6px">Skills</span>${chips}</div>`;
+          }
+          const contractBits = [t.skill_contract_file, t.skill_layer_file].filter(Boolean).join(' | ');
+          const contractHtml = contractBits ? `<div class="tl-meta">contracts: ${esc(contractBits)}</div>` : '';
+          const policyHtml = t.skill_policy_reason ? `<div class="tl-meta">policy: ${esc(t.skill_policy_reason)}</div>` : '';
+          html += `<div class="tl-item"><div class="tl-dot ${dot}"></div><div class="tl-body"><div class="tl-agent">${esc(t.agent || t.role || '')}</div>${reasonHtml}${skillsHtml}<div class="tl-summary">${esc(t.summary || '')}</div>${contractHtml}${policyHtml}${ms ? '<div class="tl-meta">' + ms + '</div>' : ''}</div></div>`;
         });
         html += '</div></div>';
       }

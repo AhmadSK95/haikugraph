@@ -1,17 +1,9 @@
 #!/bin/bash
 
-# dataDa server startup script
-set -e
+# Backward-compatible entrypoint.
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-if [ -d ".venv" ]; then
-  source .venv/bin/activate
-fi
-
-echo "Starting dataDa server..."
-echo "Web UI:   http://localhost:8000"
-echo "API docs: http://localhost:8000/docs"
-
-exec uvicorn haikugraph.api.server:app --host 0.0.0.0 --port 8000 --reload
+exec ./run.sh

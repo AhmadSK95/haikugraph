@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from haikugraph.api.runtime_store import RuntimeStore
+
+
+def test_runtime_store_scenario_set_crud(tmp_path: Path) -> None:
+    store = RuntimeStore(tmp_path / "runtime.duckdb")
+
+    created = store.upsert_scenario_set(
+        tenant_id="public",
+        connection_id="default",
+        name="fx downside",
+        assumptions=["volume down 10%", "fees up 2%"],
+    )
+    sid = str(created.get("scenario_set_id") or "")
+    assert sid
+
+    fetched = store.get_scenario_set(scenario_set_id=sid, tenant_id="public")
+    assert fetched is not None
+    assert fetched["name"] == "fx downside"
+    assert len(fetched["assumptions"]) == 2
+
+    updated = store.upsert_scenario_set(
+        tenant_id="public",
+        connection_id="default",
+        name="fx downside v2",
+        assumptions=["volume down 8%"],
+        scenario_set_id=sid,
+    )
+    assert updated["updated"] is True
+    assert int(updated["version"] or 0) >= 2
+
+    rows = store.list_scenario_sets(tenant_id="public", connection_id="default")
+    assert any(str(row.get("scenario_set_id") or "") == sid for row in rows)

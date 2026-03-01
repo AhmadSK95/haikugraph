@@ -1,234 +1,154 @@
 # dataDa
 
-Status date: February 23, 2026
+`dataDa` is an agentic data analytics product-in-progress: a conversational analytics team that can ingest business data, answer questions, explain decisions, and improve via correction rules.
 
-`dataDa` is an autonomous ecosystem of agents forming a complete data analytics team. It takes a natural language prompt, extracts semantic understanding, fetches data, performs research and probing, and delivers a final presentation that instills confidence: what data was there, what it told the system, what it means, what each agent contributed, and a transparent way to identify and correct failures.
+This repository now uses a **minimal top-level documentation set**:
 
-It is built as an agentic analytics runtime with bounded autonomy: agents decompose tasks, generate and evaluate alternatives, audit results, self-correct when evidence is stronger, accumulate institutional knowledge, and defend their conclusions with evidence.
+1. `/Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph/README.md` (how to run/use)
+2. `/Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph/PRODUCT_GAP_TRACKER.md` (North Pole from product POV)
+3. `/Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph/TECHNICAL_BUILD_TRACKER.md` (implementation plan + growth tracking)
 
-## Why dataDa
+## Current Product Baseline
 
-Most AI chat tools are good at language but weak at accountable analytics on private enterprise data. dataDa is designed for:
-
-- grounded answers (SQL + sample rows + statistical validation + checks)
-- transparent execution (agent trace + confidence breakdown + per-agent contribution)
-- bounded autonomy (self-correction without unsafe side effects)
-- institutional learning (knowledge base that grows beyond sessions and users)
-- deployment flexibility (deterministic, local LLM, OpenAI, or auto)
-
-## Product Scope
-
-### Target users
-
-- data and analytics teams
-- operations and business teams that need conversational BI
-- enterprises with privacy/governance constraints
-
-### What this is
-
-- a verifiable autonomous analytics engine
-- a multi-agent data analyst team
-- an open and inspectable runtime that accumulates institutional knowledge
-
-### What this is not
-
-- an unrestricted autonomous system that can silently mutate production systems
-- a generic chatbot without lineage
-
-## Current Architecture
-
-```mermaid
-flowchart LR
-A["User Query"] --> B["Context Agent"]
-B --> C["Memory Agent (recall)"]
-C --> D["Intake Agent"]
-D --> E["Semantic Retrieval Agent"]
-E --> F["Planning Agent"]
-F --> G["Specialist Agents"]
-G --> H["Query Engineer Agent"]
-H --> I["Execution Agent"]
-I --> J["Audit Agent"]
-J --> K["Autonomy Agent (candidate reconciliation + self-correction)"]
-K --> L["Narrative + Visualization Agents"]
-L --> M["Answer + SQL + Evidence + Confidence + Trace"]
-K --> N["Memory Agent (write + learning)"]
-N --> C
-```
-
-## Bounded Autonomy
-
-Autonomy in `dataDa` is intentionally split into two layers:
-
-- cognitive autonomy: agents can decompose tasks, generate alternatives, self-check, self-correct, and learn
-- operational bounds: policies limit unsafe side effects, not intelligence
-
-Controls exposed in API:
-
-- `autonomy_mode`
-- `auto_correction`
-- `strict_truth`
-- `max_refinement_rounds`
-- `max_candidate_plans`
+- North Pole baseline (product reality): **40/100**
+- Primary blocker: semantic intelligence depth (business definition quality, analyst-level interpretation, autonomous decision quality)
+- Existing strengths: safety, trace transparency, multi-provider runtime, trust shell
 
 ## Quick Start
 
-### 1. Environment
+## 1) Setup
 
 ```bash
 cd /Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph
 python3 -m venv .venv
 source .venv/bin/activate
-pip install .
-# If packaging is unavailable in your environment, run commands with:
-# PYTHONPATH=src python -m haikugraph.cli ...
+pip install -e .
 ```
 
-### 2. Ingest data (Excel files)
+## 2) Prepare data
+
+### Ingest local files into DuckDB
 
 ```bash
-PYTHONPATH=src python -m haikugraph.cli ingest --data-dir ./data --db-path ./data/haikugraph.db --force
+PYTHONPATH=src python -m haikugraph.cli ingest \
+  --data-dir ./data \
+  --db-path ./data/haikugraph.db \
+  --force
 ```
 
-### 3. Or point to an existing database
+### Or attach an existing DuckDB directly
 
 ```bash
-PYTHONPATH=src python -m haikugraph.cli use-db --db-path /path/to/existing.duckdb
+PYTHONPATH=src python -m haikugraph.cli use-db \
+  --db-path /absolute/path/to/your.duckdb
 ```
 
-### 4. Run web app
+## 3) Provider setup (optional)
+
+Set keys in environment:
+
+```bash
+HG_OPENAI_API_KEY=...
+HG_ANTHROPIC_API_KEY=...
+HG_OLLAMA_BASE_URL=http://localhost:11434
+```
+
+## 4) Run
 
 ```bash
 ./run.sh
-# UI: http://localhost:8000
-# API docs: http://localhost:8000/docs
 ```
 
-## API Examples
+Open:
+- UI: [http://localhost:8000](http://localhost:8000)
+- Health: [http://localhost:8000/api/assistant/health](http://localhost:8000/api/assistant/health)
+- API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-### Query with autonomy controls
+## 5) Validate quickly
 
 ```bash
-curl -s -X POST http://localhost:8000/api/assistant/query \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "goal": "What is the forex markup revenue for December 2025?",
-    "llm_mode": "auto",
-    "session_id": "demo-session-1",
-    "autonomy_mode": "bounded",
-    "auto_correction": true,
-    "strict_truth": true,
-    "max_refinement_rounds": 2,
-    "max_candidate_plans": 6,
-    "storyteller_mode": true
-  }'
+curl -s http://127.0.0.1:8000/api/assistant/health
+curl -s http://127.0.0.1:8000/api/assistant/providers
 ```
 
-### Provide feedback and optionally teach a correction rule
+## Core APIs
+
+- `POST /api/assistant/query`
+- `POST /api/assistant/query/async`
+- `GET /api/assistant/query/async/{job_id}`
+- `POST /api/assistant/fix`
+- `GET /api/assistant/rules`
+- `GET /api/assistant/providers`
+- `GET /api/assistant/capability/scoreboard`
+- `GET /api/assistant/models/local`
+- `GET /api/assistant/models/openai`
+- `GET /api/assistant/models/anthropic`
+- `POST /api/assistant/models/local/pull`
+
+## Test and benchmark
+
+Run regression:
 
 ```bash
-curl -s -X POST http://localhost:8000/api/assistant/feedback \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "trace_id": "optional-trace-id",
-    "session_id": "demo-session-1",
-    "goal": "forex in december 2025",
-    "issue": "Mapped to transactions when I expected quotes",
-    "keyword": "forex",
-    "target_table": "datada_mart_quotes",
-    "target_metric": "forex_markup_revenue",
-    "target_dimensions": ["__month__"]
-  }'
+source .venv/bin/activate
+PYTHONPATH=src pytest -q
 ```
 
-## Data Stores Used by Runtime
+Run fast per-round regression slice (impact-based):
 
-- primary analytics DB: `HG_DB_PATH` or default `./data/haikugraph.db`
-- autonomous memory DB: default `<primary_db_stem>_agent_memory.duckdb`
-  - override with `HG_MEMORY_DB_PATH`
-- connection registry DB map: `HG_CONNECTION_REGISTRY_PATH` or default `./data/connections.json`
+```bash
+source .venv/bin/activate
+PYTHONPATH=src python scripts/run_fast_round_tests.py --changed-only
+```
 
-## Connection Routing
+Run black-box QA:
 
-`db_connection_id` is fully active in runtime.
+```bash
+source .venv/bin/activate
+PYTHONPATH=src python scripts/qa_round11_blackbox_fresh.py \
+  --base-url http://127.0.0.1:8000 \
+  --db-path data/haikugraph.db \
+  --atomic-workers 6 \
+  --local-atomic-workers 1 \
+  --followup-workers 2 \
+  --local-followup-workers 1 \
+  --mode-workers 2 \
+  --retry-count 2 \
+  --retry-backoff-seconds 0.7
+```
 
-- queries are routed to a registered connection
-- per-connection team runtime is cached and reused
-- sessions are scoped by `connection_id:session_id` to prevent cross-source context bleed
-- UI includes a connection selector + refresh action
+Run provider/model benchmark:
 
-Connection APIs:
+```bash
+source .venv/bin/activate
+PYTHONPATH=src python scripts/run_provider_model_benchmark.py \
+  --base-url http://127.0.0.1:8000 \
+  --db-path data/haikugraph.db \
+  --max-cases 6 \
+  --max-models-per-provider 1 \
+  --workers 2 \
+  --local-workers 1 \
+  --request-timeout 90 \
+  --request-retries 1
+```
 
-- `GET /api/assistant/connections`
-- `POST /api/assistant/connections/upsert`
-- `POST /api/assistant/connections/default`
-- `POST /api/assistant/connections/test`
+Notes:
+- QA and benchmark runs now auto-generate an isolated tenant id unless `--tenant-id` is provided.
+- This avoids cross-run query-budget throttling (`HTTP 429`) contaminating results.
+- Use `--all-advertised-models` for exhaustive model sweeps (slower).
 
----
+Runtime latency knobs:
 
-## Progress Tracker
+```bash
+# cache provider availability checks for N seconds (default 8)
+HG_PROVIDER_SNAPSHOT_TTL_SECONDS=8
 
-### Closure Criteria Status (Current)
+# in auto mode, route simple metric asks to deterministic for lower latency
+HG_AUTO_DETERMINISTIC_FAST_PATH=true
+```
 
-| Closure criterion | Status | Evidence |
-|---|---|---|
-| Unified ingestion + direct DB attach is production-usable for POC | complete | single ingest path (`haikugraph ingest`), direct attach (`haikugraph use-db`), connection routing in API |
-| Semantic intelligence reliability for canonical analytics intents | complete | BRD factual + follow-up + parity suites passing |
-| Agent autonomy core with bounded self-correction and memory | complete | autonomous correction loop + memory persistence + replay checks + correction governance APIs |
-| Truth and verification engine prevents fabricated/confidently-wrong outputs | complete | behavior safety + explainability + full regression green |
-| Conversational UX + transparency with a single Explain Yourself flow | complete | session continuity, async query UX path, explain modal with decision flow + SQL + checks |
-| Full repository regression must be green | complete | `701 passed, 81 skipped, 5 xfailed, 10 xpassed` |
+## Product direction
 
-### What Was Completed In This Closure Round
-
-- UI query path now uses async jobs (`/api/assistant/query/async`) with polling and timeout handling.
-- Conversation ordering updated so newest turn appears at the top.
-- Default answer card simplified to reduce jargon; deeper diagnostics are shown via **Explain Yourself**.
-- Explain modal now includes explicit agent decision flow (arrow sequence), timeline, SQL, checks, and optional raw diagnostics.
-- Clarification gating tuned to avoid false positives for month-only phrasing and grouped prompts.
-- Memory replay guardrails tightened to avoid overwriting explicit user scope/time/grouping/filter constraints.
-- Governance precheck consolidated to rely on centralized policy gates + destructive SQL block.
-- Auto LLM mode now follows configurable priority (`HG_AUTO_MODE_PRIORITY`) and safely falls back to deterministic when no provider is available.
-- Ingestion now writes source-truth artifacts:
-  - `datada_ingestion_manifest`
-  - `datada_ingestion_table_stats`
-- Source-truth check endpoint now reports ingestion parity summary (table row/column parity against latest ingestion snapshot).
-
-### Validation Run Summary
-
-Executed with `PYTHONPATH=src` and isolated runtime/memory DB env vars:
-
-- `pytest -q tests/test_api_runtime_features.py` -> **10 passed**
-- `pytest -q tests/test_brd_behavior_safety.py` -> **24 passed**
-- `pytest -q tests/test_stress.py` -> **21 passed**
-- `pytest -q tests/test_brd_canonical_factual.py` -> **44 passed**
-- `pytest -q tests/test_brd_followup_session.py` -> **15 passed**
-- `pytest -q tests/test_brd_explainability.py` -> **18 passed**
-- `pytest -q tests/test_brd_cross_mode_parity.py` -> **5 passed**
-- `pytest -q` -> **701 passed, 81 skipped, 5 xfailed, 10 xpassed**
-
-### Scope Notes
-
-- Epics 6-7 (enterprise readiness and billion-row scale-out) remain intentionally bounded for this POC release.
-- Current release target is a single DuckDB-backed runtime with strong transparency and bounded autonomy.
-
----
-
-## Implemented Capabilities
-
-- unified ingestion path for Excel/CSV/Parquet -> DuckDB (`haikugraph ingest`)
-- direct existing DB attach (`haikugraph use-db --db-path ...`)
-- typed semantic marts for transactions, quotes, customers, bookings
-- multi-mode runtime: `deterministic`, `local`, `openai`, `anthropic`, `auto`
-- configurable auto mode preference (`HG_AUTO_MODE_PRIORITY`) with deterministic fallback when providers are unavailable
-- local model listing/selection/download via Ollama APIs
-- session continuity in UI/API with tenant-scoped session storage
-- async query jobs and status polling endpoints for non-blocking UX
-- confidence scoring + audit checks + replay consistency checks
-- concept alignment and policy safety checks
-- persistent autonomous memory store (sidecar DuckDB)
-- feedback endpoint with correction rule registration
-- autonomous candidate-plan reconciliation and bounded self-correction
-- multi-agent blackboard with explicit artifact flow
-- correction governance APIs (list/enable/disable/rollback)
-- toolsmith lifecycle APIs (candidate -> stage -> promote -> rollback)
-- source-truth verification suite and parity summary against ingestion snapshots
+The fixed North Pole definition, capability list, and progress logic are in:
+- `/Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph/PRODUCT_GAP_TRACKER.md`
+- `/Users/moenuddeenahmadshaik/Desktop/dataAssistantGenAI/haikugraph/TECHNICAL_BUILD_TRACKER.md`

@@ -209,3 +209,67 @@ def test_document_connection_routes_via_mirror(tmp_path: Path) -> None:
     assert ingest_check["success"] is True
 
     _close_app_teams(app)
+
+
+def test_stream_connection_routes_via_snapshot_mirror(tmp_path: Path) -> None:
+    default_db = tmp_path / "default.db"
+    shutil.copyfile("data/haikugraph.db", default_db)
+    stream_file = tmp_path / "stream_events.jsonl"
+    stream_file.write_text(
+        "\n".join(
+            [
+                '{"event_ts":"2026-03-01T10:00:00Z","event_type":"quote_created","amount":120.0}',
+                '{"event_ts":"2026-03-01T10:05:00Z","event_type":"quote_created","amount":190.0}',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    stream_uri = (
+        f"kafka://quotes/live?file={stream_file}"
+        "&format=json&table=datada_stream_events&freshness_minutes=30"
+    )
+
+    app = create_app(db_path=default_db)
+    client = TestClient(app)
+
+    upsert = client.post(
+        "/api/assistant/connections/upsert",
+        headers={"x-datada-role": "admin", "x-datada-tenant-id": "public"},
+        json={
+            "connection_id": "streamq",
+            "kind": "stream",
+            "path": stream_uri,
+            "description": "stream snapshot source",
+            "enabled": True,
+            "validate_connection": True,
+        },
+    )
+    assert upsert.status_code == 200
+
+    response = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "What kind of data do I have?",
+            "db_connection_id": "streamq",
+            "llm_mode": "deterministic",
+            "session_id": "stream-routing",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["runtime"]["db_connection_id"] == "streamq"
+    assert payload["runtime"]["db_kind"] == "stream"
+    stream_snapshot = payload["runtime"].get("stream_snapshot") or {}
+    assert stream_snapshot.get("snapshot_id")
+    assert str(stream_snapshot.get("table_name") or "").startswith("datada_stream")
+
+    mirror_path = Path(app.state.db_path.parent) / "stream_mirrors" / "streamq.duckdb"
+    assert mirror_path.exists()
+    conn = duckdb.connect(str(mirror_path), read_only=True)
+    try:
+        rows = int(conn.execute("SELECT COUNT(*) FROM datada_stream_events").fetchone()[0] or 0)
+        assert rows == 2
+    finally:
+        conn.close()
+
+    _close_app_teams(app)

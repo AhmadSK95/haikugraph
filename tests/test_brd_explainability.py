@@ -120,6 +120,64 @@ class TestContractSpec:
             assert "valid" in cv, "Contract validation missing 'valid' field"
             assert "checks" in cv, "Contract validation missing 'checks' field"
 
+    def test_e12b_contract_has_canonical_metric_binding(self, known_data_db):
+        with AgenticAnalyticsTeam(known_data_db) as team:
+            resp = _query(team, "How many transactions?")
+            cs = resp.contract_spec
+            assert cs.get("canonical_metric_id") == "transactions.transaction_count"
+            canonical = cs.get("canonical_metric") or {}
+            assert canonical.get("metric_name") == "transaction_count"
+            assert canonical.get("unit") in {"count", "number"}
+
+    def test_e12f_data_quality_contains_kpi_decomposition_tree(self, known_data_db):
+        with AgenticAnalyticsTeam(known_data_db) as team:
+            resp = _query(team, "Transaction count by platform_name")
+            dq = resp.data_quality or {}
+            kpi_tree = dq.get("kpi_decomposition") or {}
+            root = kpi_tree.get("root") or {}
+            assert root.get("kpi_id"), "KPI decomposition root is missing kpi_id"
+            children = kpi_tree.get("children") or []
+            assert isinstance(children, list)
+
+    def test_e12g_kpi_decomposition_contains_owner_and_target(self, known_data_db):
+        with AgenticAnalyticsTeam(known_data_db) as team:
+            resp = _query(team, "How many transactions?")
+            root = ((resp.data_quality or {}).get("kpi_decomposition") or {}).get("root") or {}
+            assert root.get("owner")
+            assert "target" in root
+            assert root.get("target_source") in {"kpi_catalog", "domain_default"}
+
+
+class TestExplainabilityLevels:
+    """E12c-E12e: Explainability has business + technical levels."""
+
+    def test_e12c_explainability_has_dual_levels(self, known_data_db):
+        with AgenticAnalyticsTeam(known_data_db) as team:
+            resp = _query(team, "Transaction count in Dec-2025 by platform_name")
+            explainability = resp.explainability
+            assert isinstance(explainability, dict)
+            assert "business_view" in explainability
+            assert "technical_view" in explainability
+
+    def test_e12d_business_view_has_plain_steps(self, known_data_db):
+        with AgenticAnalyticsTeam(known_data_db) as team:
+            resp = _query(team, "How many transactions?")
+            business = (resp.explainability or {}).get("business_view", {})
+            steps = business.get("plain_steps") or []
+            assert isinstance(steps, list)
+            assert len(steps) >= 3
+            assert any("interpreted" in str(step).lower() for step in steps)
+
+    def test_e12e_technical_view_contains_contract_and_flow(self, known_data_db):
+        with AgenticAnalyticsTeam(known_data_db) as team:
+            resp = _query(team, "Transaction count by platform")
+            technical = (resp.explainability or {}).get("technical_view", {})
+            assert isinstance(technical.get("contract_spec"), dict)
+            assert isinstance(technical.get("contract_validation"), dict)
+            flow = technical.get("decision_flow")
+            assert isinstance(flow, list)
+            assert len(flow) >= 5
+
 
 class TestConfidenceDecomposition:
     """E13-E15: Confidence reasoning is detailed and accurate."""

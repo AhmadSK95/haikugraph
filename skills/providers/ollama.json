@@ -1,0 +1,22 @@
+{
+  "provider": "ollama",
+  "models": {
+    "planner": "qwen2.5:14b-instruct",
+    "intent": "qwen2.5:14b-instruct",
+    "narrator": "llama3.1:8b"
+  },
+  "timeouts": {
+    "default": 30,
+    "planner": 24,
+    "intent": 18,
+    "narrator": 45
+  },
+  "routing": {
+    "fast_model": "qwen2.5:7b-instruct",
+    "fallback_models": {
+      "planner": ["llama3.1:8b", "mistral:7b"],
+      "intent": ["llama3.1:8b"],
+      "narrator": ["qwen2.5:7b-instruct"]
+    }
+  }
+}

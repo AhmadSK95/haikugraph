@@ -4,7 +4,6 @@ This module provides a thin wrapper around the Ollama API for HaikuGraph,
 supporting retry logic and proper error handling for MacBook-friendly local models.
 """
 
-import json
 import os
 import time
 from typing import Any
@@ -19,7 +18,8 @@ def ollama_chat(
     temperature: float = 0.0,
     max_tokens: int | None = None,
     timeout: int = 30,
-) -> str:
+    return_metadata: bool = False,
+) -> str | tuple[str, dict[str, Any]]:
     """Call Ollama API with messages.
 
     Args:
@@ -51,6 +51,7 @@ def ollama_chat(
         "model": model,
         "messages": messages,
         "stream": False,
+        "keep_alive": os.environ.get("HG_OLLAMA_KEEP_ALIVE", "10m"),
         "options": {
             "temperature": temperature,
             "num_ctx": num_ctx,
@@ -74,8 +75,21 @@ def ollama_chat(
             result = response.json()
             if "message" not in result or "content" not in result["message"]:
                 raise ValueError(f"Unexpected Ollama response format: {result}")
-            
-            return result["message"]["content"]
+
+            text = str(result["message"]["content"])
+            if not return_metadata:
+                return text
+            meta = {
+                "model": str(result.get("model") or model),
+                "done_reason": str(result.get("done_reason") or ""),
+                "total_duration_ns": int(result.get("total_duration") or 0),
+                "load_duration_ns": int(result.get("load_duration") or 0),
+                "prompt_eval_duration_ns": int(result.get("prompt_eval_duration") or 0),
+                "eval_duration_ns": int(result.get("eval_duration") or 0),
+                "prompt_eval_count": int(result.get("prompt_eval_count") or 0),
+                "eval_count": int(result.get("eval_count") or 0),
+            }
+            return text, meta
         
         except requests.exceptions.ConnectionError as e:
             last_error = e

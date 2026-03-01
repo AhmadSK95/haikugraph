@@ -467,3 +467,10 @@ class AssistantQueryResponse(BaseModel):
             "(question, contract, rejected_alternatives, sql, audit, confidence_decomposition)."
         ),
     )
+    explainability: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Dual-level explainability payload with `business_view` for non-technical users "
+            "and `technical_view` for drill-down diagnostics."
+        ),
+    )

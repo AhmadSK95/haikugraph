@@ -231,3 +231,91 @@ def test_agent_memory_store_rebuilds_incompatible_legacy_types(tmp_path: Path) -
         assert float(correction_row[1]) >= 1.0
     finally:
         verify.close()
+
+
+def test_memory_recall_precision_prefers_semantic_and_focus_overlap(tmp_path: Path) -> None:
+    db_path = tmp_path / "precision" / "memory.duckdb"
+    store = AgentMemoryStore(db_path)
+    store.store_turn(
+        tenant_id="public",
+        trace_id="r1",
+        goal="Show forex markup charges by month",
+        resolved_goal="Show forex markup charges by month",
+        runtime_mode="deterministic",
+        provider="",
+        success=True,
+        confidence_score=0.9,
+        row_count=4,
+        plan={"table": "datada_mart_quotes", "metric": "forex_markup_revenue", "dimensions": ["__month__"]},
+        sql="SELECT 1",
+        audit_warnings=[],
+        correction_applied=False,
+        correction_reason="",
+        metadata={},
+    )
+    store.store_turn(
+        tenant_id="public",
+        trace_id="r2",
+        goal="List booking status for active customers",
+        resolved_goal="List booking status for active customers",
+        runtime_mode="deterministic",
+        provider="",
+        success=True,
+        confidence_score=0.9,
+        row_count=4,
+        plan={"table": "datada_mart_bookings", "metric": "booking_count", "dimensions": ["status"]},
+        sql="SELECT 1",
+        audit_warnings=[],
+        correction_applied=False,
+        correction_reason="",
+        metadata={},
+    )
+
+    recalled = store.recall("foreign exchange surcharge trend", tenant_id="public", limit=2)
+    assert recalled
+    assert str(recalled[0].get("metric") or "") == "forex_markup_revenue"
+    assert float(recalled[0].get("semantic_similarity") or 0.0) >= 0.4
+
+
+def test_memory_recall_respects_tenant_isolation(tmp_path: Path) -> None:
+    db_path = tmp_path / "tenant" / "memory.duckdb"
+    store = AgentMemoryStore(db_path)
+    store.store_turn(
+        tenant_id="tenant_a",
+        trace_id="ta",
+        goal="How many transactions are there?",
+        resolved_goal="How many transactions are there?",
+        runtime_mode="deterministic",
+        provider="",
+        success=True,
+        confidence_score=0.8,
+        row_count=2,
+        plan={"table": "datada_mart_transactions", "metric": "transaction_count", "dimensions": []},
+        sql="SELECT 1",
+        audit_warnings=[],
+        correction_applied=False,
+        correction_reason="",
+        metadata={},
+    )
+    store.store_turn(
+        tenant_id="tenant_b",
+        trace_id="tb",
+        goal="How many quotes are there?",
+        resolved_goal="How many quotes are there?",
+        runtime_mode="deterministic",
+        provider="",
+        success=True,
+        confidence_score=0.8,
+        row_count=2,
+        plan={"table": "datada_mart_quotes", "metric": "quote_count", "dimensions": []},
+        sql="SELECT 1",
+        audit_warnings=[],
+        correction_applied=False,
+        correction_reason="",
+        metadata={},
+    )
+
+    a_rows = store.recall("transactions", tenant_id="tenant_a", limit=5)
+    b_rows = store.recall("quotes", tenant_id="tenant_b", limit=5)
+    assert all(str(item.get("table") or "").startswith("datada_mart_transactions") for item in a_rows)
+    assert all(str(item.get("table") or "").startswith("datada_mart_quotes") for item in b_rows)

@@ -21,6 +21,7 @@ from haikugraph.qa.control_plane import (
     create_qa_tenant,
     evaluate_test_result,
     build_suite_report,
+    score_semantic_depth,
 )
 from haikugraph.qa.test_suites import (
     get_suite_s1_factual,
@@ -308,6 +309,45 @@ class TestEvaluateTestResult:
         assert d["test_id"] == "R-001"
         assert d["passed"] is True
         assert d["mode"] == "deterministic"
+
+    def test_evaluate_test_result_warnings_exclude(self):
+        """warnings_exclude fails when banned warning fragment appears."""
+        tc = QATestCase(
+            id="E-010",
+            suite="S1",
+            question="Q?",
+            expected={"warnings_exclude": ["metric unrecognized"]},
+        )
+        response = {
+            "success": True,
+            "warnings": ["Metric unrecognized: fallback applied"],
+            "answer_markdown": "ok",
+        }
+        result = evaluate_test_result(tc, response)
+        assert result.passed is False
+        assert "Warnings contain banned fragment" in result.failure_reason
+
+    def test_evaluate_test_result_semantic_depth_min(self):
+        """semantic_depth_min gate fails shallow answers and passes richer ones."""
+        tc = QATestCase(
+            id="E-011",
+            suite="S4",
+            question="Compare months",
+            expected={"semantic_depth_min": 0.6},
+        )
+        shallow = {
+            "success": True,
+            "answer_markdown": "Done.",
+            "sql": "",
+        }
+        deep = {
+            "success": True,
+            "answer_markdown": "January is higher than February by 1,200. Insight: trend improved. Caveat: confidence medium.",
+            "sql": "SELECT ...",
+            "trace": [{"agent": "AuditAgent"}],
+        }
+        assert evaluate_test_result(tc, shallow).passed is False
+        assert evaluate_test_result(tc, deep).passed is True
 
 
 # -----------------------------------------------------------------------

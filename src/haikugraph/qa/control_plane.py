@@ -12,6 +12,7 @@ import time
 import uuid
 from dataclasses import dataclass, field, asdict
 from typing import Any, Callable
+import re
 
 
 @dataclass
@@ -179,6 +180,33 @@ def evaluate_test_result(
                 passed = False
                 failure_reasons.append(f"SQL missing expected fragment: '{fragment}'")
 
+    # Check warnings do not contain banned fragments.
+    if expected.get("warnings_exclude"):
+        warnings = [str(w).lower() for w in (response.get("warnings") or [])]
+        for fragment in expected["warnings_exclude"]:
+            frag = str(fragment).lower()
+            if any(frag in w for w in warnings):
+                passed = False
+                failure_reasons.append(f"Warnings contain banned fragment: '{fragment}'")
+
+    # Check trace/explain fields contain specific fragments.
+    if expected.get("trace_contains"):
+        trace_blob = str(response.get("trace") or "") + " " + str(response.get("decision_flow") or "")
+        trace_blob = trace_blob.lower()
+        for fragment in expected["trace_contains"]:
+            if str(fragment).lower() not in trace_blob:
+                passed = False
+                failure_reasons.append(f"Trace missing expected fragment: '{fragment}'")
+
+    # Check semantic-depth floor for analyst quality.
+    if expected.get("semantic_depth_min") is not None:
+        depth = score_semantic_depth(response)
+        if depth < float(expected["semantic_depth_min"]):
+            passed = False
+            failure_reasons.append(
+                f"Semantic depth {depth:.2f} below minimum {float(expected['semantic_depth_min']):.2f}"
+            )
+
     return QATestResult(
         test_id=test_case.id,
         suite=test_case.suite,
@@ -190,10 +218,39 @@ def evaluate_test_result(
             "confidence": response.get("confidence_score"),
             "has_sql": bool(response.get("sql")),
             "answer_preview": (response.get("answer_markdown") or "")[:200],
+            "semantic_depth": score_semantic_depth(response),
         },
         failure_reason="; ".join(failure_reasons) if failure_reasons else "",
         mode=response.get("runtime", {}).get("llm_mode", "deterministic"),
     )
+
+
+def score_semantic_depth(response: dict[str, Any]) -> float:
+    """Heuristic semantic depth score in [0, 1] for QA gating."""
+    answer = str(response.get("answer_markdown") or "")
+    sql = str(response.get("sql") or "")
+    warnings = [str(w) for w in (response.get("warnings") or [])]
+    trace = str(response.get("trace") or "") + " " + str(response.get("decision_flow") or "")
+
+    score = 0.0
+    if sql:
+        score += 0.20
+    if answer:
+        score += 0.15
+    if re.search(r"\b\d[\d,\.]*\b", answer):
+        score += 0.15
+    if any(k in answer.lower() for k in ["insight", "driver", "trend", "comparison", "higher", "lower", "share"]):
+        score += 0.20
+    if any(k in answer.lower() for k in ["caveat", "warning", "risk", "limitation", "confidence"]):
+        score += 0.10
+    if trace and any(k in trace.lower() for k in ["contract", "audit", "queryengineagent", "executionagent"]):
+        score += 0.10
+    # Penalize contradictory "no data" when SQL exists and query succeeded.
+    if response.get("success") and sql and "no data" in answer.lower():
+        score -= 0.10
+    if warnings and any("metric unrecognized" in w.lower() for w in warnings):
+        score -= 0.05
+    return max(0.0, min(1.0, score))
 
 
 def build_suite_report(

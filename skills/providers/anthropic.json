@@ -1,0 +1,22 @@
+{
+  "provider": "anthropic",
+  "models": {
+    "planner": "claude-sonnet-4-6",
+    "intent": "claude-haiku-4-5-20251001",
+    "narrator": "claude-haiku-4-5-20251001"
+  },
+  "timeouts": {
+    "default": 35,
+    "planner": 30,
+    "intent": 20,
+    "narrator": 60
+  },
+  "routing": {
+    "fast_model": "claude-haiku-4-5-20251001",
+    "fallback_models": {
+      "planner": ["claude-haiku-4-5-20251001"],
+      "intent": ["claude-sonnet-4-6"],
+      "narrator": ["claude-sonnet-4-6"]
+    }
+  }
+}

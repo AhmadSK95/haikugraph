@@ -248,7 +248,27 @@ def _compute_goal_term_coverage(goal: str, sql: str) -> float:
         return 0.8  # All stop words = likely a simple query
 
     sql_lower = sql.lower()
-    matched = sum(1 for t in goal_tokens if t in sql_lower)
+    synonym_map: dict[str, set[str]] = {
+        "fx": {"forex"},
+        "forex": {"fx"},
+        "charge": {"charges", "markup", "forex_markup", "total_additional_charges"},
+        "charges": {"charge", "markup", "forex_markup", "total_additional_charges"},
+        "fee": {"fees", "charge", "charges"},
+        "fees": {"fee", "charge", "charges"},
+        "money": {"transaction", "transactions", "payment", "payments"},
+        "transfer": {"transaction", "transactions", "remittance"},
+        "transfers": {"transaction", "transactions", "remittance"},
+    }
+
+    def _token_matches(token: str) -> bool:
+        if token in sql_lower:
+            return True
+        for alias in synonym_map.get(token, set()):
+            if alias in sql_lower:
+                return True
+        return False
+
+    matched = sum(1 for t in goal_tokens if _token_matches(t))
 
     return matched / len(goal_tokens) if goal_tokens else 0.8
 

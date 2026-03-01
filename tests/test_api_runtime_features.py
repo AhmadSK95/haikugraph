@@ -5,13 +5,17 @@ from __future__ import annotations
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
+import haikugraph.api.server as server_module
+import haikugraph.poc.agentic_team as team_module
 from haikugraph.api.server import create_app
 from haikugraph.io.document_ingest import ingest_documents_to_duckdb
+from haikugraph.poc import RuntimeSelection
 
 
 @pytest.fixture
@@ -141,6 +145,186 @@ def test_trust_dashboard_updates_after_queries(client):
     assert isinstance(payload["by_mode"], list)
 
 
+def test_query_response_cache_sets_cache_hit_flag(client):
+    first = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "How many transactions are there?",
+            "llm_mode": "deterministic",
+            "session_id": "cache-run-a",
+        },
+    )
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert first_payload["runtime"]["response_cache_hit"] is False
+
+    second = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "How many transactions are there?",
+            "llm_mode": "deterministic",
+            "session_id": "cache-run-b",
+        },
+    )
+    assert second.status_code == 200
+    second_payload = second.json()
+    assert second_payload["runtime"]["response_cache_hit"] is True
+
+
+def test_capability_scoreboard_endpoint_returns_live_tracker_counts(client):
+    resp = client.get("/api/assistant/capability/scoreboard")
+    assert resp.status_code == 200
+    payload = resp.json()
+    counts = payload["counts"]
+
+    assert counts["total"] == 45
+    assert counts["done"] + counts["partial"] + counts["gap"] == counts["total"]
+
+    strict_expected = round((counts["done"] / counts["total"]) * 100.0, 2)
+    reality_expected = round(((counts["done"] + (0.5 * counts["partial"])) / counts["total"]) * 100.0, 2)
+    assert counts["np_strict"] == strict_expected
+    assert counts["np_reality"] == reality_expected
+
+    capabilities = payload.get("capabilities") or []
+    remaining = payload.get("remaining") or []
+    assert len(capabilities) == counts["total"]
+    assert len(remaining) == counts["partial"] + counts["gap"]
+    assert str(payload.get("tracker_path") or "").endswith("PRODUCT_GAP_TRACKER.md")
+
+    capability_ids = {str(row.get("capability_id") or "") for row in capabilities}
+    assert "A01" in capability_ids
+    assert "T20" in capability_ids
+
+
+def test_query_response_includes_advanced_analytics_packs(client, monkeypatch):
+    monkeypatch.setenv("HG_ADVANCED_FORECAST_ENABLED", "0")
+    response = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "Transaction count by platform_name",
+            "llm_mode": "deterministic",
+            "session_id": "advanced-pack-smoke",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    advanced = (payload.get("stats_analysis") or {}).get("advanced_packs", {})
+    assert isinstance(advanced, dict)
+    packs = advanced.get("packs", {})
+    assert isinstance(packs, dict)
+    assert "variance" in packs
+    assert "scenario" in packs
+    assert "forecast" in packs
+
+
+def test_query_response_includes_action_recommendations_block(client):
+    response = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "Transaction count by platform_name",
+            "llm_mode": "deterministic",
+            "session_id": "recommendation-block-smoke",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    dq = payload.get("data_quality") or {}
+    recommendations = dq.get("recommendations") or []
+    assert isinstance(recommendations, list)
+    if recommendations:
+        rec = recommendations[0]
+        assert "action" in rec
+        assert "expected_impact" in rec
+        assert "risk" in rec
+    answer = str(payload.get("answer_markdown") or "").lower()
+    assert "recommended actions" in answer
+
+
+def test_query_response_includes_root_cause_ranked_drivers(client):
+    response = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "What is the root cause of transaction count by platform_name?",
+            "llm_mode": "deterministic",
+            "session_id": "root-cause-smoke",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    root_cause = ((payload.get("data_quality") or {}).get("root_cause") or {})
+    ranked = root_cause.get("ranked_drivers") or []
+    assert isinstance(ranked, list)
+    if ranked:
+        first = ranked[0]
+        assert "rank" in first
+        assert "driver" in first
+        assert "evidence_score" in first
+        assert "caveat" in first
+        assert "root-cause hypotheses" in str(payload.get("answer_markdown") or "").lower()
+
+
+def test_scenario_set_persistence_and_query_replay(client):
+    create = client.post(
+        "/api/assistant/scenarios",
+        headers={"x-datada-role": "analyst", "x-datada-tenant-id": "public"},
+        json={
+            "db_connection_id": "default",
+            "name": "fx downside",
+            "assumptions": ["conversion rate down 8%", "fees up 2%"],
+            "status": "active",
+        },
+    )
+    assert create.status_code == 200
+    created = create.json()["scenario_set"]
+    scenario_set_id = created["scenario_set_id"]
+    assert scenario_set_id
+
+    listed = client.get(
+        "/api/assistant/scenarios",
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+        params={"db_connection_id": "default"},
+    )
+    assert listed.status_code == 200
+    rows = listed.json().get("scenario_sets") or []
+    assert any(str(row.get("scenario_set_id") or "") == scenario_set_id for row in rows)
+
+    replay = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "Scenario analysis for quote value trend",
+            "llm_mode": "deterministic",
+            "scenario_set_id": scenario_set_id,
+            "session_id": "scenario-replay",
+        },
+    )
+    assert replay.status_code == 200
+    payload = replay.json()
+    runtime = payload.get("runtime") or {}
+    assert runtime.get("scenario_set_id") == scenario_set_id
+    dq_scenario = ((payload.get("data_quality") or {}).get("scenario") or {})
+    assert dq_scenario.get("assumption_set_id") == scenario_set_id
+    assert int(dq_scenario.get("assumption_count") or 0) >= 1
+
+
+def test_trust_dashboard_includes_parity_summary(client):
+    for mode in ("deterministic", "auto"):
+        response = client.post(
+            "/api/assistant/query",
+            json={
+                "goal": "How many transactions are there?",
+                "llm_mode": mode,
+                "session_id": f"parity-{mode}",
+            },
+        )
+        assert response.status_code == 200
+    trust = client.get("/api/assistant/trust/dashboard", params={"tenant_id": "public", "hours": 24})
+    assert trust.status_code == 200
+    payload = trust.json()
+    parity = payload.get("parity_summary") or {}
+    assert isinstance(parity, dict)
+    assert "mode_deltas" in parity
+
+
 def test_async_query_job_completes(client):
     queued = client.post(
         "/api/assistant/query/async",
@@ -166,6 +350,30 @@ def test_async_query_job_completes(client):
     assert last["status"] == "completed"
     assert last["response"] is not None
     assert "answer_markdown" in last["response"]
+
+
+def test_async_query_backpressure_limit_returns_429(seed_db, monkeypatch):
+    monkeypatch.setenv("HG_ASYNC_MAX_INFLIGHT", "1")
+    monkeypatch.setenv("HG_ASYNC_MAX_INFLIGHT_PER_TENANT", "1")
+    app = create_app(db_path=seed_db)
+    app.state.runtime_store.create_async_job(
+        tenant_id="public",
+        connection_id="default",
+        session_id="existing-load",
+        request_payload={"goal": "preloaded"},
+    )
+    with TestClient(app) as local_client:
+        queued = local_client.post(
+            "/api/assistant/query/async",
+            json={
+                "goal": "How many transactions?",
+                "llm_mode": "deterministic",
+                "session_id": "blocked-by-load",
+            },
+        )
+    assert queued.status_code == 429
+    detail = str(queued.json().get("detail") or "")
+    assert "capacity" in detail.lower() or "limit" in detail.lower()
 
 
 def test_correction_toggle_and_rollback(client):
@@ -197,6 +405,72 @@ def test_correction_toggle_and_rollback(client):
     assert rollback.json()["enabled"] is True
 
 
+def test_business_rules_list_and_update(client):
+    create = client.post(
+        "/api/assistant/rules",
+        headers={"x-datada-role": "admin", "x-datada-tenant-id": "public"},
+        json={
+            "db_connection_id": "default",
+            "domain": "quotes",
+            "name": "fx markup routing",
+            "rule_type": "plan_override",
+            "triggers": ["forex markup", "fx charge"],
+            "action_payload": {
+                "target_table": "datada_mart_quotes",
+                "target_metric": "forex_markup_revenue",
+                "target_dimensions": ["__month__"],
+            },
+            "notes": "seed rule",
+            "priority": 2.0,
+            "status": "active",
+        },
+    )
+    assert create.status_code == 200
+    rule_id = create.json()["rule_id"]
+    assert rule_id
+
+    listed = client.get(
+        "/api/assistant/rules",
+        headers={"x-datada-role": "admin", "x-datada-tenant-id": "public"},
+        params={"db_connection_id": "default", "limit": 50},
+    )
+    assert listed.status_code == 200
+    rules = listed.json()["rules"]
+    assert any(r["rule_id"] == rule_id for r in rules)
+
+    updated = client.post(
+        "/api/assistant/rules/update",
+        headers={"x-datada-role": "admin", "x-datada-tenant-id": "public"},
+        json={
+            "db_connection_id": "default",
+            "rule_id": rule_id,
+            "name": "fx markup routing v2",
+            "triggers": ["fx markup", "forex markup"],
+            "action_payload": {
+                "target_table": "datada_mart_quotes",
+                "target_metric": "forex_markup_revenue",
+                "target_dimensions": ["__month__", "platform_name"],
+            },
+            "notes": "updated",
+            "status": "active",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["rule_id"] == rule_id
+
+    listed2 = client.get(
+        "/api/assistant/rules",
+        headers={"x-datada-role": "admin", "x-datada-tenant-id": "public"},
+        params={"db_connection_id": "default", "limit": 50},
+    )
+    assert listed2.status_code == 200
+    changed = next(r for r in listed2.json()["rules"] if r["rule_id"] == rule_id)
+    assert changed["name"] == "fx markup routing v2"
+    assert "fx markup" in changed["triggers"]
+    assert changed["action_payload"]["target_dimensions"] == ["__month__", "platform_name"]
+    assert changed["version"] >= 2
+
+
 def test_source_truth_endpoint(client):
     resp = client.get(
         "/api/assistant/source-truth/check",
@@ -209,6 +483,153 @@ def test_source_truth_endpoint(client):
     assert isinstance(payload["runs"], list)
 
 
+def test_cloud_model_catalog_endpoints(client):
+    openai_resp = client.get("/api/assistant/models/openai")
+    assert openai_resp.status_code == 200
+    openai_payload = openai_resp.json()
+    assert openai_payload["provider"] == "openai"
+    assert isinstance(openai_payload["options"], list)
+    assert len(openai_payload["options"]) >= 1
+
+    anthropic_resp = client.get("/api/assistant/models/anthropic")
+    assert anthropic_resp.status_code == 200
+    anthropic_payload = anthropic_resp.json()
+    assert anthropic_payload["provider"] == "anthropic"
+    assert isinstance(anthropic_payload["options"], list)
+    assert len(anthropic_payload["options"]) >= 1
+
+
+def test_query_passes_provider_model_overrides_to_runtime_resolution(client, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def _fake_resolve_runtime(mode, **kwargs):
+        captured["mode"] = str(mode)
+        captured.update(kwargs)
+        return RuntimeSelection(
+            requested_mode="deterministic",
+            mode="deterministic",
+            use_llm=False,
+            provider=None,
+            reason="test_override_capture",
+            intent_model=None,
+            narrator_model=None,
+        )
+
+    monkeypatch.setattr(server_module, "_resolve_runtime", _fake_resolve_runtime)
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "How many transactions are there?",
+            "llm_mode": "openai",
+            "openai_model": "gpt-4.1-mini",
+            "openai_narrator_model": "gpt-4.1-mini",
+            "anthropic_model": "claude-sonnet-4-6",
+            "anthropic_narrator_model": "claude-sonnet-4-6",
+        },
+    )
+    assert resp.status_code == 200
+    assert captured.get("openai_model") == "gpt-4.1-mini"
+    assert captured.get("openai_narrator_model") == "gpt-4.1-mini"
+    assert captured.get("anthropic_model") == "claude-sonnet-4-6"
+    assert captured.get("anthropic_narrator_model") == "claude-sonnet-4-6"
+
+
+def test_dual_metric_grouped_query_returns_count_and_amount(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "transactions count and amount split by month and platform, only count MT103 transactions",
+            "llm_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    sql = (payload.get("sql") or "").lower()
+    assert "metric_value" in sql
+    assert "secondary_metric_value" in sql
+    assert "has_mt103" in sql
+    assert "secondary_metric_value" in (payload.get("columns") or [])
+    answer = (payload.get("answer_markdown") or "").lower()
+    assert "mt103_count" in answer
+    assert "total_amount" in answer
+    chart_spec = payload.get("chart_spec") or {}
+    report = chart_spec.get("report") or {}
+    assert isinstance(report.get("panels"), list)
+    assert len(report.get("panels")) >= 1
+
+
+def test_schema_glossary_request_returns_all_marts_dictionary(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "generate me a glossary of schema each field and table and what it means",
+            "llm_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    answer = payload.get("answer_markdown") or ""
+    assert "datada_mart_transactions" in answer
+    assert "datada_mart_quotes" in answer
+    assert "datada_dim_customers" in answer
+    assert "datada_mart_bookings" in answer
+    assert "| Field | Meaning | Notes |" in answer
+
+
+def test_schema_glossary_includes_business_purpose_and_metric_meanings(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "Generate a full schema dictionary for every mart with business definitions",
+            "llm_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    answer = payload.get("answer_markdown") or ""
+    assert "Business purpose:" in answer
+    assert "has_mt103" in answer
+    assert "SWIFT MT103 settlement proof" in answer
+    assert "| Metric | SQL expression | Business meaning |" in answer
+
+
+def test_explicit_provider_failure_is_shown_as_runtime_notice(client, monkeypatch):
+    runtime = RuntimeSelection(
+        requested_mode="anthropic",
+        mode="anthropic",
+        use_llm=True,
+        provider="anthropic",
+        reason="anthropic selected",
+        intent_model="claude-haiku-4-5-20251001",
+        narrator_model="claude-haiku-4-5-20251001",
+    )
+    monkeypatch.setattr(server_module, "_resolve_runtime", Mock(return_value=runtime))
+
+    def _raise_llm(*_args, **_kwargs):
+        raise RuntimeError("401 invalid_api_key")
+
+    monkeypatch.setattr(team_module, "call_llm", _raise_llm)
+
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "what is the total transaction count",
+            "llm_mode": "anthropic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    runtime_payload = payload.get("runtime") or {}
+    assert runtime_payload.get("llm_degraded") is True
+    assert runtime_payload.get("llm_degraded_provider") == "anthropic"
+    assert "provider notice" in (payload.get("answer_markdown") or "").lower()
+    warnings = [str(w).lower() for w in (payload.get("warnings") or [])]
+    assert any("unavailable for this run" in w for w in warnings)
+
+
 def test_data_overview_uses_discovery_agents(client):
     resp = client.post(
         "/api/assistant/query",
@@ -218,6 +639,7 @@ def test_data_overview_uses_discovery_agents(client):
     payload = resp.json()
     assert payload["success"] is True
     assert "Data map" in payload["answer_markdown"]
+    assert "Full Schema Dictionary" not in payload["answer_markdown"]
 
 
 def test_data_overview_includes_rare_pockets_and_semantic_version(client):
@@ -252,6 +674,52 @@ def test_split_month_and_platform_phrase_generates_grouped_dimensions(client):
     assert "__month__" in dims
     assert "platform_name" in dims
     assert payload.get("row_count", 0) > 1
+    answer = str(payload.get("answer_markdown") or "")
+    assert "**What Drove This**" in answer
+    assert "**Evidence**" in answer
+    assert "**Caveat**" in answer
+
+
+def test_cross_domain_markup_vs_spend_query_returns_monthly_comparison(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "Forex markup split by month compared to customer spend on transaction and give me insights",
+            "llm_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    sql = str(payload.get("sql") or "").lower()
+    assert "primary_agg" in sql
+    assert "secondary_agg" in sql
+    cols = payload.get("columns") or []
+    assert "forex_markup_revenue" in cols
+    assert "customer_spend" in cols
+    assert payload.get("row_count", 0) >= 1
+    trace = payload.get("agent_trace") or []
+    assert any(t.get("agent") == "OrganizationalKnowledgeAgent" for t in trace)
+    assert any(t.get("skill_contract_enforced") for t in trace if isinstance(t, dict))
+    runtime = payload.get("runtime") or {}
+    assert (runtime.get("skills_runtime") or {}).get("enforceable_agents", 0) >= 8
+    assert "glossary_seed_stats" in runtime
+
+
+def test_transaction_validity_guard_applies_mt103_filter_for_spend(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "Show valid transaction spend by month",
+            "llm_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    sql = str(payload.get("sql") or "").lower()
+    assert "has_mt103" in sql
+    assert "payment_amount" in sql or "sum(amount)" in sql
 
 
 def test_document_query_returns_citations(tmp_path: Path):
@@ -339,3 +807,54 @@ def test_slo_and_incident_endpoints(client):
     incident_rows = incidents.json().get("incidents", [])
     assert isinstance(incident_rows, list)
     assert any(str(row.get("source", "")) == "query_failure" for row in incident_rows)
+
+
+def test_auto_fast_path_prefers_deterministic_for_simple_metric_goal():
+    assert server_module._auto_prefers_deterministic_fast_path(
+        "total transaction count by month and platform"
+    )
+    assert not server_module._auto_prefers_deterministic_fast_path(
+        "explain the root cause and strategy behind this trend"
+    )
+
+
+def test_resolve_runtime_auto_uses_deterministic_fast_path(monkeypatch):
+    monkeypatch.setenv("HG_AUTO_DETERMINISTIC_FAST_PATH", "true")
+    runtime = server_module._resolve_runtime(
+        server_module.LLMMode.AUTO,
+        goal="show total bookings count by month",
+    )
+    assert runtime.mode == "deterministic"
+    assert runtime.use_llm is False
+    assert "fast-path deterministic" in runtime.reason
+
+
+def test_provider_snapshot_uses_cache(monkeypatch):
+    calls = {"ollama": 0, "openai": 0, "anthropic": 0}
+
+    def _ollama():
+        calls["ollama"] += 1
+        return server_module.ProviderCheck(available=False, reason="x")
+
+    def _openai():
+        calls["openai"] += 1
+        return server_module.ProviderCheck(available=False, reason="x")
+
+    def _anthropic():
+        calls["anthropic"] += 1
+        return server_module.ProviderCheck(available=False, reason="x")
+
+    monkeypatch.setenv("HG_PROVIDER_SNAPSHOT_TTL_SECONDS", "30")
+    monkeypatch.setattr(server_module, "_ollama_check", _ollama)
+    monkeypatch.setattr(server_module, "_openai_check", _openai)
+    monkeypatch.setattr(server_module, "_anthropic_check", _anthropic)
+    server_module._PROVIDER_SNAPSHOT_CACHE = None
+    server_module._PROVIDER_SNAPSHOT_CACHE_TS = 0.0
+
+    _ = server_module._providers_snapshot(force_refresh=True)
+    _ = server_module._providers_snapshot()
+    _ = server_module._providers_snapshot()
+
+    assert calls["ollama"] == 1
+    assert calls["openai"] == 1
+    assert calls["anthropic"] == 1
