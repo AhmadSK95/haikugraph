@@ -20,6 +20,18 @@ def _utc_iso() -> str:
     return _utc_now().isoformat() + "Z"
 
 
+def _percentile(values: list[float], pct: float) -> float:
+    clean = sorted(float(v) for v in values if isinstance(v, (int, float)))
+    if not clean:
+        return 0.0
+    if len(clean) == 1:
+        return float(clean[0])
+    rank = (float(pct) / 100.0) * (len(clean) - 1)
+    idx = int(round(rank))
+    idx = max(0, min(idx, len(clean) - 1))
+    return float(clean[idx])
+
+
 class RuntimeStore:
     """Thread-safe runtime persistence for API orchestration concerns."""
 
@@ -128,6 +140,20 @@ class RuntimeStore:
                         assumptions_json VARCHAR,
                         status VARCHAR,
                         version BIGINT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS datada_schema_signatures (
+                        record_id VARCHAR,
+                        created_at TIMESTAMP,
+                        updated_at TIMESTAMP,
+                        tenant_id VARCHAR,
+                        connection_id VARCHAR,
+                        dataset_signature VARCHAR,
+                        schema_signature VARCHAR,
+                        metadata_json VARCHAR
                     )
                     """
                 )
@@ -647,6 +673,81 @@ class RuntimeStore:
             )
         return out
 
+    def record_schema_signature(
+        self,
+        *,
+        tenant_id: str,
+        connection_id: str,
+        dataset_signature: str,
+        schema_signature: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        clean_tenant = (tenant_id or "public").strip() or "public"
+        clean_connection = (connection_id or "default").strip() or "default"
+        clean_dataset = str(dataset_signature or "").strip()
+        clean_schema = str(schema_signature or "").strip()
+
+        previous_schema = ""
+        previous_dataset = ""
+        previous_updated_at = ""
+        now = _utc_now()
+        record_id = str(uuid.uuid4())
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    """
+                    SELECT dataset_signature, schema_signature, updated_at
+                    FROM datada_schema_signatures
+                    WHERE tenant_id = ? AND connection_id = ?
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    [clean_tenant, clean_connection],
+                ).fetchone()
+                if row:
+                    previous_dataset = str(row[0] or "")
+                    previous_schema = str(row[1] or "")
+                    previous_updated_at = str(row[2] or "")
+                conn.execute(
+                    """
+                    DELETE FROM datada_schema_signatures
+                    WHERE tenant_id = ? AND connection_id = ?
+                    """,
+                    [clean_tenant, clean_connection],
+                )
+                conn.execute(
+                    """
+                    INSERT INTO datada_schema_signatures VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        record_id,
+                        now,
+                        now,
+                        clean_tenant,
+                        clean_connection,
+                        clean_dataset,
+                        clean_schema,
+                        json.dumps(metadata or {}, default=str),
+                    ],
+                )
+            finally:
+                conn.close()
+
+        drift_detected = bool(previous_schema) and bool(clean_schema) and previous_schema != clean_schema
+        return {
+            "record_id": record_id,
+            "tenant_id": clean_tenant,
+            "connection_id": clean_connection,
+            "dataset_signature": clean_dataset,
+            "schema_signature": clean_schema,
+            "previous_dataset_signature": previous_dataset,
+            "previous_schema_signature": previous_schema,
+            "previous_updated_at": previous_updated_at,
+            "drift_detected": drift_detected,
+        }
+
     def record_run_metric(
         self,
         *,
@@ -967,6 +1068,73 @@ class RuntimeStore:
             "breaches": breaches,
             "burn_rate": round(float(burn_rate), 4),
             "trust": trust,
+        }
+
+    def stage_slo_snapshot(
+        self,
+        *,
+        tenant_id: str | None = None,
+        hours: int = 24,
+    ) -> dict[str, Any]:
+        """Aggregate recent per-stage timings from run metadata for stage-level SLO views."""
+        window_hours = max(1, min(24 * 30, int(hours)))
+        since = _utc_now() - timedelta(hours=window_hours)
+        tenant_filter = (tenant_id or "").strip()
+
+        where = "WHERE created_at >= ?"
+        params: list[Any] = [since]
+        if tenant_filter:
+            where += " AND tenant_id = ?"
+            params.append(tenant_filter)
+
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT metadata_json
+                    FROM datada_run_metrics
+                    {where}
+                    ORDER BY created_at DESC
+                    LIMIT 2000
+                    """,
+                    params,
+                ).fetchall()
+            finally:
+                conn.close()
+
+        stage_samples: dict[str, list[float]] = {}
+        for row in rows:
+            metadata: dict[str, Any] = {}
+            try:
+                parsed = json.loads(row[0] or "{}")
+                if isinstance(parsed, dict):
+                    metadata = parsed
+            except Exception:
+                metadata = {}
+            stage_timings = metadata.get("stage_timings_ms") or {}
+            if not isinstance(stage_timings, dict):
+                continue
+            for stage_name, raw_value in stage_timings.items():
+                try:
+                    value = float(raw_value)
+                except Exception:
+                    continue
+                if value < 0:
+                    continue
+                stage_samples.setdefault(str(stage_name), []).append(value)
+
+        observed_p95 = {
+            stage: round(_percentile(values, 95.0), 2)
+            for stage, values in sorted(stage_samples.items())
+            if values
+        }
+        return {
+            "generated_at": _utc_iso(),
+            "tenant_id": tenant_filter or "all",
+            "window_hours": window_hours,
+            "runs_considered": len(rows),
+            "observed_p95_ms": observed_p95,
         }
 
     def record_incident(

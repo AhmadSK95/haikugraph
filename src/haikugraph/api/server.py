@@ -9,6 +9,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import socket
 import threading
 import time
@@ -20,7 +21,7 @@ from typing import Any
 import requests
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from haikugraph.api.connection_registry import ConnectionRegistry
@@ -32,6 +33,7 @@ from haikugraph.io.stream_snapshot import ingest_stream_snapshot_to_duckdb
 from haikugraph.llm.router import DEFAULT_MODELS
 from haikugraph.poc import AgenticAnalyticsTeam, AutonomyConfig, RuntimeSelection, load_dotenv_file
 from haikugraph.poc.source_truth import run_source_truth_suite
+from haikugraph.v2 import SemanticProfileCache, V2Orchestrator, apply_v2_compat_fields, profile_dataset
 
 
 DEFAULT_DB_CANDIDATES = (
@@ -83,6 +85,14 @@ class QueryRequest(BaseModel):
     strict_truth: bool = Field(default=True)
     max_refinement_rounds: int = Field(default=2, ge=0, le=6)
     max_candidate_plans: int = Field(default=5, ge=1, le=12)
+    tenant_id: str | None = Field(default=None, max_length=128)
+    user_id: str | None = Field(default=None, max_length=128)
+    role: str | None = Field(default=None, max_length=32)
+    api_key: str | None = Field(default=None, max_length=512)
+
+
+class DatasetProfileRequest(BaseModel):
+    db_connection_id: str = Field(default="default")
     tenant_id: str | None = Field(default=None, max_length=128)
     user_id: str | None = Field(default=None, max_length=128)
     role: str | None = Field(default=None, max_length=32)
@@ -609,6 +619,66 @@ class CapabilityScoreboardResponse(BaseModel):
     counts: CapabilityScoreCounts
     remaining: list[CapabilityScoreItem] = Field(default_factory=list)
     capabilities: list[CapabilityScoreItem] = Field(default_factory=list)
+    tracker_score: float | None = None
+    truth_score: float | None = None
+    evidence_refs: list[str] = Field(default_factory=list)
+    score_drift: float | None = None
+
+
+class QualityRunSummary(BaseModel):
+    run_id: str
+    generated_at: str = ""
+    kind: str = ""
+    overall_pass_rate: float | None = None
+    truth_score: float | None = None
+    path: str
+
+
+class QualityLatestResponse(BaseModel):
+    generated_at_epoch_ms: int
+    latest_runs: list[QualityRunSummary] = Field(default_factory=list)
+    composite_truth_score: float | None = None
+
+
+class QualityRunDetailResponse(BaseModel):
+    run_id: str
+    path: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class DatasetProfileResponse(BaseModel):
+    db_connection_id: str
+    dataset_signature: str
+    schema_signature: str = ""
+    table_count: int
+    high_risk_join_edges: int
+    sparse_table_count: int
+    semantic_cache_hit: bool = False
+    schema_drift_detected: bool = False
+    profile: dict[str, Any] = Field(default_factory=dict)
+
+
+class StageSLOResponse(BaseModel):
+    generated_at_epoch_ms: int
+    stage_budget_ms: dict[str, int] = Field(default_factory=dict)
+    observed_p95_ms: dict[str, float] = Field(default_factory=dict)
+
+
+class CutoverArtifactStatus(BaseModel):
+    name: str
+    path: str
+    exists: bool
+
+
+class CutoverReadinessResponse(BaseModel):
+    generated_at_epoch_ms: int
+    default_runtime_version: str
+    canary_ready: bool
+    release_gate_passed: bool
+    latest_truth_report: str = ""
+    composite_truth_score: float | None = None
+    floor_violations: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[CutoverArtifactStatus] = Field(default_factory=list)
 
 
 class LocalModelOption(BaseModel):
@@ -917,6 +987,304 @@ def _get_product_gap_tracker_path() -> Path:
     return Path(__file__).resolve().parents[3] / "PRODUCT_GAP_TRACKER.md"
 
 
+def _get_reports_dir() -> Path:
+    env_path = os.environ.get("HG_REPORTS_DIR")
+    if env_path:
+        return Path(env_path).expanduser()
+    return Path(__file__).resolve().parents[3] / "reports"
+
+
+def _repo_root_path() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _runtime_version() -> str:
+    raw = str(os.environ.get("HG_RUNTIME_VERSION", "v1")).strip().lower()
+    if raw in {"v1", "v2", "shadow"}:
+        return raw
+    return "v1"
+
+
+def _latest_report_file(pattern: str) -> Path | None:
+    reports_dir = _get_reports_dir()
+    if not reports_dir.exists():
+        return None
+    matches = list(reports_dir.glob(pattern))
+    if not matches:
+        return None
+    matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return matches[0]
+
+
+def _load_json(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _build_quality_summary(
+    *,
+    path: Path,
+    kind: str,
+    pass_rate: float | None,
+    truth_score: float | None,
+    generated_at: str,
+) -> QualityRunSummary:
+    return QualityRunSummary(
+        run_id=path.stem,
+        generated_at=generated_at,
+        kind=kind,
+        overall_pass_rate=pass_rate,
+        truth_score=truth_score,
+        path=str(path),
+    )
+
+
+def _latest_quality_runs() -> list[QualityRunSummary]:
+    runs: list[QualityRunSummary] = []
+    truth_report = _latest_report_file("v2_qa_truth_report_*.json")
+    if truth_report:
+        payload = _load_json(truth_report) or {}
+        summary = payload.get("summary") or {}
+        score = summary.get("composite_truth_score")
+        if not isinstance(score, (int, float)):
+            score = payload.get("truth_score")
+        pass_rate = summary.get("overall_pass_rate_pct")
+        generated_at = str(payload.get("generated_at") or summary.get("generated_at") or "")
+        runs.append(
+            _build_quality_summary(
+                path=truth_report,
+                kind="v2_truth_qa",
+                pass_rate=float(pass_rate) if isinstance(pass_rate, (int, float)) else None,
+                truth_score=float(score) if isinstance(score, (int, float)) else None,
+                generated_at=generated_at,
+            )
+        )
+
+    round11 = _latest_report_file("qa_round11_blackbox_fresh_*.json")
+    if round11:
+        payload = _load_json(round11) or {}
+        summary = ((payload.get("summary") or {}).get("overall") or {})
+        pass_rate = summary.get("overall_pass_rate")
+        generated_at = str(payload.get("generated_at") or "")
+        runs.append(
+            _build_quality_summary(
+                path=round11,
+                kind="blackbox_round11",
+                pass_rate=float(pass_rate) if isinstance(pass_rate, (int, float)) else None,
+                truth_score=float(pass_rate) if isinstance(pass_rate, (int, float)) else None,
+                generated_at=generated_at,
+            )
+        )
+
+    semantic = _latest_report_file("blackbox_semantic_probe_*.json")
+    if semantic:
+        payload = _load_json(semantic) or {}
+        summary = payload.get("summary") or {}
+        pass_rate = summary.get("expectation_pass_rate_pct")
+        generated_at = str(payload.get("generated_at") or summary.get("generated_at") or "")
+        runs.append(
+            _build_quality_summary(
+                path=semantic,
+                kind="semantic_probe",
+                pass_rate=float(pass_rate) if isinstance(pass_rate, (int, float)) else None,
+                truth_score=float(pass_rate) if isinstance(pass_rate, (int, float)) else None,
+                generated_at=generated_at,
+            )
+        )
+
+    latency = _latest_report_file("latency_optimization_check_*.json")
+    if latency:
+        payload = _load_json(latency) or {}
+        generated_at = str(payload.get("generated_at") or "")
+        runs.append(
+            _build_quality_summary(
+                path=latency,
+                kind="latency_check",
+                pass_rate=None,
+                truth_score=None,
+                generated_at=generated_at,
+            )
+        )
+    return runs
+
+
+def _composite_truth_score(runs: list[QualityRunSummary]) -> float | None:
+    v2_truth = next((r for r in runs if r.kind == "v2_truth_qa" and r.truth_score is not None), None)
+    if v2_truth is not None and v2_truth.truth_score is not None:
+        return round(float(v2_truth.truth_score), 2)
+
+    # Weight black-box higher than semantic probes for release realism.
+    weighted: list[tuple[float, float]] = []
+    for run in runs:
+        if run.truth_score is None:
+            continue
+        if run.kind == "blackbox_round11":
+            weighted.append((float(run.truth_score), 0.7))
+        elif run.kind == "semantic_probe":
+            weighted.append((float(run.truth_score), 0.3))
+    if not weighted:
+        return None
+    denom = sum(w for _, w in weighted)
+    score = sum(val * w for val, w in weighted) / max(denom, 1e-9)
+    return round(score, 2)
+
+
+def _stage_slo_budget_ms() -> dict[str, int]:
+    return {
+        "semantic_profiler": int(os.environ.get("HG_STAGE_BUDGET_SEMANTIC_PROFILER_MS", "900")),
+        "intent_engine": int(os.environ.get("HG_STAGE_BUDGET_INTENT_ENGINE_MS", "900")),
+        "planner": int(os.environ.get("HG_STAGE_BUDGET_PLANNER_MS", "1500")),
+        "query_compiler": int(os.environ.get("HG_STAGE_BUDGET_QUERY_COMPILER_MS", "1200")),
+        "executor_delegate": int(os.environ.get("HG_STAGE_BUDGET_EXECUTOR_MS", "6000")),
+        "evaluator_insight": int(os.environ.get("HG_STAGE_BUDGET_EVALUATOR_MS", "1200")),
+    }
+
+
+def _stage_slo_breaches(stage_timings_ms: dict[str, float] | None) -> list[dict[str, Any]]:
+    if not isinstance(stage_timings_ms, dict) or not stage_timings_ms:
+        return []
+    budget = _stage_slo_budget_ms()
+    breaches: list[dict[str, Any]] = []
+    for stage, limit_ms in budget.items():
+        raw = stage_timings_ms.get(stage)
+        if raw is None:
+            continue
+        try:
+            actual = float(raw)
+        except Exception:
+            continue
+        if actual > float(limit_ms):
+            breaches.append(
+                {
+                    "stage": stage,
+                    "actual_ms": round(actual, 2),
+                    "budget_ms": int(limit_ms),
+                    "delta_ms": round(actual - float(limit_ms), 2),
+                }
+            )
+    return breaches
+
+
+def _profile_dataset_cached(
+    app: FastAPI,
+    *,
+    db_path: Path,
+) -> tuple[Any, dict[str, Any]]:
+    cache: SemanticProfileCache | None = getattr(app.state, "semantic_profile_cache", None)
+    if cache is None:
+        profile = profile_dataset(str(db_path))
+        return profile, {
+            "cache_hit": False,
+            "cache_key": str(profile.dataset_signature or ""),
+            "dataset_signature": str(profile.dataset_signature or ""),
+            "schema_signature": str(getattr(profile, "schema_signature", "") or ""),
+        }
+    profile, meta = cache.get_or_build(str(db_path), profile_dataset)
+    clean_meta = dict(meta or {})
+    clean_meta["dataset_signature"] = str(clean_meta.get("dataset_signature") or profile.dataset_signature or "")
+    clean_meta["schema_signature"] = str(
+        clean_meta.get("schema_signature") or getattr(profile, "schema_signature", "") or ""
+    )
+    return profile, clean_meta
+
+
+def _record_schema_drift_if_any(
+    app: FastAPI,
+    *,
+    tenant_id: str,
+    connection_id: str,
+    profile: Any,
+    cache_meta: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    dataset_signature = str(getattr(profile, "dataset_signature", "") or "")
+    schema_signature = str(getattr(profile, "schema_signature", "") or "")
+    if not dataset_signature and cache_meta:
+        dataset_signature = str(cache_meta.get("dataset_signature") or "")
+    if not schema_signature and cache_meta:
+        schema_signature = str(cache_meta.get("schema_signature") or "")
+    if not dataset_signature and not schema_signature:
+        return {"drift_detected": False}
+    drift = app.state.runtime_store.record_schema_signature(
+        tenant_id=tenant_id,
+        connection_id=connection_id,
+        dataset_signature=dataset_signature,
+        schema_signature=schema_signature,
+        metadata={
+            "cache_hit": bool((cache_meta or {}).get("cache_hit")),
+            "table_count": int((getattr(profile, "quality_summary", {}) or {}).get("table_count") or 0),
+            "high_risk_join_edges": int(
+                (getattr(profile, "quality_summary", {}) or {}).get("high_risk_join_edges") or 0
+            ),
+        },
+    )
+    if not bool(drift.get("drift_detected")):
+        return drift
+    incident = app.state.runtime_store.record_incident(
+        tenant_id=tenant_id,
+        severity="medium",
+        source="schema_drift",
+        title="Dataset schema drift detected",
+        summary=f"Schema signature changed for connection '{connection_id}'.",
+        fingerprint=f"schema_drift:{tenant_id}:{connection_id}",
+        metadata={
+            "connection_id": connection_id,
+            "dataset_signature": dataset_signature,
+            "schema_signature": schema_signature,
+            "previous_schema_signature": str(drift.get("previous_schema_signature") or ""),
+        },
+        dedupe_window_minutes=int(app.state.incident_dedupe_minutes),
+    )
+    if incident.get("created"):
+        _emit_incident_webhook(
+            app,
+            {
+                "event": "incident_created",
+                "tenant_id": tenant_id,
+                "connection_id": connection_id,
+                "severity": "medium",
+                "title": "Dataset schema drift detected",
+                "incident_id": incident.get("incident_id"),
+            },
+        )
+    return drift
+
+
+def _quality_run_by_id(run_id: str) -> dict[str, Any] | None:
+    clean = str(run_id or "").strip()
+    if not clean:
+        return None
+    reports_dir = _get_reports_dir()
+    if not reports_dir.exists():
+        return None
+    safe_pattern = re.sub(r"[^A-Za-z0-9_\-\.]", "", clean)
+    if not safe_pattern:
+        return None
+    for path in reports_dir.glob("*.json"):
+        if path.stem == safe_pattern:
+            payload = _load_json(path)
+            if payload is None:
+                continue
+            return {"path": str(path), "payload": payload}
+    return None
+
+
+def _cutover_artifacts() -> list[CutoverArtifactStatus]:
+    root = _repo_root_path()
+    rows = [
+        ("cutover_runbook", root / "docs" / "v2_cutover_runbook.md"),
+        ("incident_playbook", root / "docs" / "v2_incident_playbook.md"),
+        ("quality_review_cadence", root / "docs" / "v2_quality_review_cadence.md"),
+        ("v1_decommission_criteria", root / "docs" / "v1_decommission_criteria.md"),
+    ]
+    return [
+        CutoverArtifactStatus(name=name, path=str(path), exists=path.exists())
+        for name, path in rows
+    ]
+
+
 def _normalize_capability_status(raw_status: str) -> str:
     status = str(raw_status or "").strip().upper()
     if status in {"DONE", "PARTIAL", "GAP"}:
@@ -984,6 +1352,9 @@ def _read_capability_scoreboard() -> CapabilityScoreboardResponse:
     np_strict = round((done / total) * 100.0, 2) if total else 0.0
     np_reality = round(((done + (0.5 * partial)) / total) * 100.0, 2) if total else 0.0
     remaining = [row for row in capabilities if row.status != "DONE"]
+    quality_runs = _latest_quality_runs()
+    truth_score = _composite_truth_score(quality_runs)
+    tracker_score = np_reality
 
     return CapabilityScoreboardResponse(
         tracker_path=str(tracker_path),
@@ -999,6 +1370,14 @@ def _read_capability_scoreboard() -> CapabilityScoreboardResponse:
         ),
         remaining=remaining,
         capabilities=capabilities,
+        tracker_score=tracker_score,
+        truth_score=truth_score,
+        evidence_refs=[run.path for run in quality_runs],
+        score_drift=(
+            round(float(truth_score) - float(tracker_score), 2)
+            if truth_score is not None
+            else None
+        ),
     )
 
 
@@ -1033,6 +1412,7 @@ def _query_cache_key(
     if history_turns > 0:
         return ""
     payload = {
+        "runtime_version": _runtime_version(),
         "tenant_id": tenant_id,
         "connection_id": connection_id,
         "goal": str(request.goal or "").strip(),
@@ -1606,6 +1986,35 @@ def _maybe_record_runtime_incident(
                 },
             )
 
+    if bool(getattr(app.state, "stage_slo_incident_enabled", True)):
+        stage_breaches = list((response.runtime or {}).get("stage_slo_breaches") or [])
+        if stage_breaches:
+            stages = sorted({str(item.get("stage") or "") for item in stage_breaches if str(item.get("stage") or "")})
+            fp = f"stage_slo_breach:{tenant_id}:{connection_id}:{','.join(stages)}"
+            incident = app.state.runtime_store.record_incident(
+                tenant_id=tenant_id,
+                severity="low",
+                source="stage_slo_monitor",
+                title="Stage SLO breach detected",
+                summary=f"Stage budget exceeded in {len(stages)} stage(s) for connection '{connection_id}'.",
+                fingerprint=fp,
+                metadata={"stage_breaches": stage_breaches, "trace_id": response.trace_id},
+                dedupe_window_minutes=int(app.state.incident_dedupe_minutes),
+            )
+            if incident.get("created"):
+                _emit_incident_webhook(
+                    app,
+                    {
+                        "event": "incident_created",
+                        "tenant_id": tenant_id,
+                        "connection_id": connection_id,
+                        "severity": "low",
+                        "title": "Stage SLO breach detected",
+                        "incident_id": incident.get("incident_id"),
+                        "stage_breaches": stage_breaches,
+                    },
+                )
+
     slo = app.state.runtime_store.evaluate_slo(
         tenant_id=tenant_id,
         hours=int(app.state.slo_window_hours),
@@ -1711,6 +2120,24 @@ def _execute_query_request(
     session_id = (request.session_id or "default").strip()[:128] or "default"
     connection_id = str(connection_entry.get("id") or "default")
     session_scope = _tenant_session_scope(tenant_id, connection_id, session_id)
+    semantic_cache_meta: dict[str, Any] = {}
+    schema_drift: dict[str, Any] = {"drift_detected": False}
+    dataset_signature = ""
+    schema_signature = ""
+    try:
+        profile, semantic_cache_meta = _profile_dataset_cached(app, db_path=db_path)
+        dataset_signature = str(getattr(profile, "dataset_signature", "") or semantic_cache_meta.get("dataset_signature") or "")
+        schema_signature = str(getattr(profile, "schema_signature", "") or semantic_cache_meta.get("schema_signature") or "")
+        schema_drift = _record_schema_drift_if_any(
+            app,
+            tenant_id=tenant_id,
+            connection_id=connection_id,
+            profile=profile,
+            cache_meta=semantic_cache_meta,
+        )
+    except Exception as exc:
+        semantic_cache_meta = {"cache_error": f"{type(exc).__name__}: {exc}"}
+        schema_drift = {"drift_detected": False, "error": f"{type(exc).__name__}: {exc}"}
     scenario_context: dict[str, Any] | None = None
     if request.scenario_set_id:
         scenario_row = app.state.runtime_store.get_scenario_set(
@@ -1744,21 +2171,74 @@ def _execute_query_request(
     )
     cache_hit = False
     cached_payload = _query_cache_get(app, cache_key)
+    runtime_version = _runtime_version()
 
     started = time.perf_counter()
     if isinstance(cached_payload, dict):
         response = AssistantQueryResponse(**cached_payload)
         cache_hit = True
     else:
-        response = team.run(
-            request.goal,
-            runtime,
-            tenant_id=tenant_id,
-            conversation_context=history,
-            storyteller_mode=request.storyteller_mode,
-            autonomy=autonomy,
-            scenario_context=scenario_context,
-        )
+        if runtime_version == "v2":
+            v2_run = V2Orchestrator(
+                team,
+                semantic_cache=app.state.semantic_profile_cache,
+            ).run(
+                goal=request.goal,
+                runtime=runtime,
+                db_path=str(db_path),
+                history=history,
+                tenant_id=tenant_id,
+                storyteller_mode=request.storyteller_mode,
+                autonomy=autonomy,
+                scenario_context=scenario_context,
+                session_id=session_id,
+            )
+            response = apply_v2_compat_fields(v2_run.response, v2_run.v2_payload, analysis_version="v2")
+        elif runtime_version == "shadow":
+            primary_v1 = team.run(
+                request.goal,
+                runtime,
+                tenant_id=tenant_id,
+                conversation_context=history,
+                storyteller_mode=request.storyteller_mode,
+                autonomy=autonomy,
+                scenario_context=scenario_context,
+            )
+            v2_run = V2Orchestrator(
+                team,
+                semantic_cache=app.state.semantic_profile_cache,
+            ).run(
+                goal=request.goal,
+                runtime=runtime,
+                db_path=str(db_path),
+                history=history,
+                tenant_id=tenant_id,
+                storyteller_mode=request.storyteller_mode,
+                autonomy=autonomy,
+                scenario_context=scenario_context,
+                session_id=session_id,
+            )
+            response = apply_v2_compat_fields(primary_v1, v2_run.v2_payload, analysis_version="shadow")
+            shadow_diff = {
+                "v1_success": bool(primary_v1.success),
+                "v2_success": bool(v2_run.response.success),
+                "sql_equal": str(primary_v1.sql or "").strip() == str(v2_run.response.sql or "").strip(),
+                "confidence_delta": round(
+                    float(v2_run.response.confidence_score or 0.0) - float(primary_v1.confidence_score or 0.0),
+                    4,
+                ),
+            }
+            response.runtime = {**(response.runtime or {}), "shadow_diff": shadow_diff}
+        else:
+            response = team.run(
+                request.goal,
+                runtime,
+                tenant_id=tenant_id,
+                conversation_context=history,
+                storyteller_mode=request.storyteller_mode,
+                autonomy=autonomy,
+                scenario_context=scenario_context,
+            )
         if response.success:
             _query_cache_set(app, cache_key, response.model_dump())
 
@@ -1797,6 +2277,22 @@ def _execute_query_request(
 
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
 
+    current_quality_flags = list(response.quality_flags or [])
+    stage_breaches = _stage_slo_breaches(response.stage_timings_ms or {})
+    if stage_breaches:
+        current_quality_flags.append("stage_slo_breach")
+    if bool(schema_drift.get("drift_detected")):
+        current_quality_flags.append("schema_drift")
+    response.quality_flags = sorted(set(current_quality_flags))
+
+    runtime_payload = dict(response.runtime or {})
+    runtime_payload["stage_slo_breaches"] = stage_breaches
+    runtime_payload["dataset_signature"] = dataset_signature
+    runtime_payload["schema_signature"] = schema_signature
+    runtime_payload["semantic_cache_hit"] = bool(semantic_cache_meta.get("cache_hit"))
+    runtime_payload["schema_drift"] = dict(schema_drift or {})
+    response.runtime = runtime_payload
+
     app.state.runtime_store.append_session_turn(
         session_scope=session_scope,
         connection_id=connection_id,
@@ -1811,11 +2307,14 @@ def _execute_query_request(
             "user_id": request.user_id or "",
             "tenant_id": tenant_id,
             "role": request.role or "",
+            "analysis_version": str(response.analysis_version or "v1"),
+            "slice_signature": str(response.slice_signature or ""),
+            "stage_timings_ms": dict(response.stage_timings_ms or {}),
+            "quality_flags": list(response.quality_flags or []),
         },
     )
     conversation_turns = len(history) + 1
 
-    failed_checks = [c for c in (response.sanity_checks or []) if not bool(c.passed)]
     warning_terms = (
         ((response.data_quality or {}).get("grounding") or {}).get("goal_term_misses")
         or []
@@ -1830,11 +2329,12 @@ def _execute_query_request(
         llm_mode=str(runtime.mode or "deterministic"),
         provider=str(runtime.provider or "none"),
         row_count=int(response.row_count or 0),
-        warning_count=len(failed_checks),
+        warning_count=len(response.warnings or []),
         metadata={
             "goal": request.goal,
             "trace_id": response.trace_id,
             "scenario_set_id": str(request.scenario_set_id or ""),
+            "analysis_version": str(response.analysis_version or "v1"),
             "contract_signature": json.dumps(
                 {
                     "metric": str((response.contract_spec or {}).get("metric") or ""),
@@ -1845,7 +2345,16 @@ def _execute_query_request(
                 sort_keys=True,
                 default=str,
             ),
+            "stage_timings_ms": dict(response.stage_timings_ms or {}),
+            "quality_flags": list(response.quality_flags or []),
+            "provider_effective": str(response.provider_effective or runtime.provider or ""),
+            "fallback_used": dict(response.fallback_used or {}),
             "warning_terms": warning_terms if isinstance(warning_terms, list) else [],
+            "dataset_signature": dataset_signature,
+            "schema_signature": schema_signature,
+            "semantic_cache_hit": bool(semantic_cache_meta.get("cache_hit")),
+            "schema_drift": dict(schema_drift or {}),
+            "stage_slo_breaches": stage_breaches,
         },
     )
 
@@ -1872,6 +2381,20 @@ def _execute_query_request(
         ),
         "stream_snapshot": dict(connection_entry.get("_stream_snapshot") or {}),
     }
+    if not response.provider_effective:
+        response.provider_effective = str(
+            (response.runtime or {}).get("provider") or runtime.provider or "deterministic"
+        )
+    if not response.fallback_used:
+        response.fallback_used = {
+            "used": bool((response.runtime or {}).get("llm_degraded")),
+            "reason": str((response.runtime or {}).get("llm_degraded_reason") or ""),
+        }
+    if response.stage_timings_ms is None:
+        response.stage_timings_ms = {}
+    if response.quality_flags is None:
+        response.quality_flags = []
+
     _maybe_record_runtime_incident(
         app,
         tenant_id=tenant_id,
@@ -2255,6 +2778,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.state.query_response_cache_max_entries = max(8, _env_int("HG_QUERY_RESPONSE_CACHE_MAX_ENTRIES", 256))
     app.state.query_response_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
     app.state.query_response_cache_lock = threading.RLock()
+    app.state.semantic_profile_cache = SemanticProfileCache(
+        max_entries=max(4, _env_int("HG_SEMANTIC_CACHE_MAX_ENTRIES", 24)),
+        ttl_seconds=max(30, _env_int("HG_SEMANTIC_CACHE_TTL_SECONDS", 900)),
+    )
+    app.state.stage_slo_incident_enabled = _env_bool("HG_STAGE_SLO_INCIDENT_ENABLED", True)
     app.state.async_max_inflight = max(1, _env_int("HG_ASYNC_MAX_INFLIGHT", 64))
     app.state.async_max_inflight_per_tenant = max(1, _env_int("HG_ASYNC_MAX_INFLIGHT_PER_TENANT", 16))
     app.state.async_executor = concurrent.futures.ThreadPoolExecutor(
@@ -2278,6 +2806,23 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/", response_class=HTMLResponse)
     async def ui() -> str:
         return get_ui_html()
+
+    @app.get("/ui/assets/{asset_name}")
+    async def ui_asset(asset_name: str) -> FileResponse:
+        allowed_assets = {
+            "ui.css": "text/css; charset=utf-8",
+            "ui.js": "application/javascript; charset=utf-8",
+        }
+        if asset_name not in allowed_assets:
+            raise HTTPException(status_code=404, detail="UI asset not found.")
+        path = Path(__file__).with_name(asset_name)
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="UI asset file missing.")
+        return FileResponse(
+            path,
+            media_type=allowed_assets[asset_name],
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/api/assistant/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -2863,6 +3408,155 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/api/assistant/capability/scoreboard", response_model=CapabilityScoreboardResponse)
     async def capability_scoreboard() -> CapabilityScoreboardResponse:
         return _read_capability_scoreboard()
+
+    @app.get("/api/assistant/quality/latest", response_model=QualityLatestResponse)
+    async def quality_latest() -> QualityLatestResponse:
+        latest_runs = _latest_quality_runs()
+        return QualityLatestResponse(
+            generated_at_epoch_ms=int(time.time() * 1000),
+            latest_runs=latest_runs,
+            composite_truth_score=_composite_truth_score(latest_runs),
+        )
+
+    @app.get("/api/assistant/quality/runs/{run_id}", response_model=QualityRunDetailResponse)
+    async def quality_run_detail(run_id: str) -> QualityRunDetailResponse:
+        run = _quality_run_by_id(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Unknown quality run_id '{run_id}'.")
+        return QualityRunDetailResponse(
+            run_id=run_id,
+            path=str(run.get("path") or ""),
+            payload=dict(run.get("payload") or {}),
+        )
+
+    @app.post("/api/assistant/datasets/profile", response_model=DatasetProfileResponse)
+    async def datasets_profile(
+        request: DatasetProfileRequest,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> DatasetProfileResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=request.tenant_id,
+            role=request.role,
+            user_id=request.user_id,
+            api_key_body=request.api_key,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "viewer")
+        team, db_path, connection_entry = _resolve_team_for_connection(
+            app,
+            request.db_connection_id,
+        )
+        del team
+        profile, cache_meta = _profile_dataset_cached(app, db_path=db_path)
+        drift = _record_schema_drift_if_any(
+            app,
+            tenant_id=access["tenant_id"],
+            connection_id=str(connection_entry.get("id") or request.db_connection_id),
+            profile=profile,
+            cache_meta=cache_meta,
+        )
+        quality_summary = dict(profile.quality_summary or {})
+        dataset_signature = str(profile.dataset_signature or cache_meta.get("dataset_signature") or "")
+        schema_signature = str(profile.schema_signature or cache_meta.get("schema_signature") or "")
+        if bool(drift.get("drift_detected")):
+            quality_summary["schema_drift_detected"] = 1.0
+        return DatasetProfileResponse(
+            db_connection_id=str(connection_entry.get("id") or request.db_connection_id),
+            dataset_signature=dataset_signature,
+            schema_signature=schema_signature,
+            table_count=int(quality_summary.get("table_count") or len(profile.tables)),
+            high_risk_join_edges=int(quality_summary.get("high_risk_join_edges") or 0),
+            sparse_table_count=int(quality_summary.get("sparse_table_count") or 0),
+            semantic_cache_hit=bool(cache_meta.get("cache_hit")),
+            schema_drift_detected=bool(drift.get("drift_detected")),
+            profile=profile.model_dump(),
+        )
+
+    @app.get("/api/assistant/runtime/stage-slo", response_model=StageSLOResponse)
+    async def runtime_stage_slo(
+        hours: int = 24,
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> StageSLOResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "viewer")
+        snapshot = app.state.runtime_store.stage_slo_snapshot(
+            tenant_id=access["tenant_id"],
+            hours=max(1, min(24 * 7, int(hours))),
+        )
+        return StageSLOResponse(
+            generated_at_epoch_ms=int(time.time() * 1000),
+            stage_budget_ms=_stage_slo_budget_ms(),
+            observed_p95_ms=dict(snapshot.get("observed_p95_ms") or {}),
+        )
+
+    @app.get("/api/assistant/runtime/cutover/readiness", response_model=CutoverReadinessResponse)
+    async def runtime_cutover_readiness(
+        x_datada_api_key: str | None = Header(default=None),
+        x_datada_tenant_id: str | None = Header(default=None),
+        x_datada_role: str | None = Header(default=None),
+        x_datada_user_id: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+    ) -> CutoverReadinessResponse:
+        access = _resolve_access_context(
+            app,
+            tenant_id=x_datada_tenant_id,
+            role=x_datada_role,
+            user_id=x_datada_user_id,
+            api_key_body=None,
+            api_key_header=x_datada_api_key,
+            tenant_header=x_datada_tenant_id,
+            role_header=x_datada_role,
+            user_header=x_datada_user_id,
+            authorization_header=authorization,
+        )
+        _require_min_role(access["role"], "viewer")
+
+        latest_truth = _latest_report_file("v2_qa_truth_report_*.json")
+        payload = _load_json(latest_truth) if latest_truth else None
+        summary = dict((payload or {}).get("summary") or {})
+        release_gate_passed = bool(summary.get("release_gate_passed"))
+        floor_violations = list(summary.get("floor_violations") or [])
+        composite_truth_score = summary.get("composite_truth_score")
+        if not isinstance(composite_truth_score, (int, float)):
+            composite_truth_score = None
+
+        artifacts = _cutover_artifacts()
+        canary_ready = release_gate_passed and all(item.exists for item in artifacts)
+
+        return CutoverReadinessResponse(
+            generated_at_epoch_ms=int(time.time() * 1000),
+            default_runtime_version=_runtime_version(),
+            canary_ready=bool(canary_ready),
+            release_gate_passed=release_gate_passed,
+            latest_truth_report=str(latest_truth) if latest_truth else "",
+            composite_truth_score=float(composite_truth_score) if composite_truth_score is not None else None,
+            floor_violations=floor_violations,
+            artifacts=artifacts,
+        )
 
     @app.post("/api/assistant/query", response_model=AssistantQueryResponse)
     async def query(
@@ -4062,7 +4756,7 @@ def get_ui_html() -> str:
     ui_template = Path(__file__).with_name("ui.html")
     try:
         html = ui_template.read_text(encoding="utf-8")
-        if "<html" in html.lower() and "runQuery" in html:
+        if "<html" in html.lower():
             return html
     except Exception:
         pass

@@ -1628,6 +1628,8 @@ class AgenticAnalyticsTeam:
         history = conversation_context or []
         autonomy_cfg = autonomy or AutonomyConfig()
         self._pipeline_warnings: list[str] = []
+        self._skill_contract_warned_agents: set[str] = set()
+        self._skill_contract_warning_emitted = False
         self._org_knowledge_context: dict[str, Any] = {}
         reset_llm_metrics()
         if runtime.fallback_warning:
@@ -1649,8 +1651,9 @@ class AgenticAnalyticsTeam:
             return AssistantQueryResponse(
                 success=False,
                 answer_markdown=format_refusal_response(_early_blocking),
-                confidence=ConfidenceLevel.UNCERTAIN,
-                confidence_score=0.0,
+                # Policy refusal can be high-confidence if the gate is deterministic.
+                confidence=ConfidenceLevel.HIGH,
+                confidence_score=0.90,
                 definition_used=goal,
                 evidence=[],
                 sanity_checks=[
@@ -2143,8 +2146,9 @@ class AgenticAnalyticsTeam:
                 return AssistantQueryResponse(
                     success=False,
                     answer_markdown=f"**Request blocked by governance**\n\n{pre_gov['reason']}",
-                    confidence=ConfidenceLevel.UNCERTAIN,
-                    confidence_score=0.0,
+                    # Governance refusal is deterministic and should report high confidence.
+                    confidence=ConfidenceLevel.HIGH,
+                    confidence_score=0.90,
                     definition_used=goal,
                     evidence=[],
                     sanity_checks=[
@@ -3316,13 +3320,25 @@ class AgenticAnalyticsTeam:
                     self._pipeline_warnings.append(
                         "Detected near-tie contradictory candidate interpretations; clarification requested."
                     )
+            raw_pipeline_warnings = [
+                str(w).strip()
+                for w in list(dict.fromkeys(getattr(self, "_pipeline_warnings", [])))
+                if str(w).strip()
+            ]
+            final_warnings = self._finalize_user_warnings(raw_pipeline_warnings)
             response_runtime_payload = self._runtime_payload(
                 runtime,
                 llm_intake_used=bool(intake.get("_llm_intake_used", False)),
                 llm_narrative_used=bool(narration.get("llm_narrative_used", False)),
                 autonomy=autonomy_cfg,
                 correction_applied=bool(autonomy_result.get("correction_applied", False)),
-            ) | {"blackboard_entries": len(blackboard)}
+            ) | {
+                "blackboard_entries": len(blackboard),
+                "warning_hygiene": {
+                    "user_visible_count": len(final_warnings),
+                    "internal_count": len(raw_pipeline_warnings),
+                },
+            }
             response_data_quality = {
                 **catalog.get("quality", {}),
                 "audit_score": confidence_score,
@@ -3375,7 +3391,7 @@ class AgenticAnalyticsTeam:
                 runtime_payload=response_runtime_payload,
                 data_quality=response_data_quality,
                 contribution_map=contribution_map,
-                warnings=list(getattr(self, "_pipeline_warnings", [])),
+                warnings=final_warnings,
             )
 
             return AssistantQueryResponse(
@@ -3401,7 +3417,7 @@ class AgenticAnalyticsTeam:
                 data_quality=response_data_quality,
                 stats_analysis=stats_dict,
                 suggested_questions=narration.get("suggested_questions", []),
-                warnings=self._pipeline_warnings,
+                warnings=final_warnings,
                 contract_spec=_contract_spec,
                 contract_validation=_contract_validation,
                 decision_flow=_decision_flow,
@@ -3435,6 +3451,43 @@ class AgenticAnalyticsTeam:
                 suggested_questions=["Try a simpler business question."],
                 warnings=getattr(self, "_pipeline_warnings", []),
             )
+
+    def _finalize_user_warnings(self, warnings: list[str], *, max_items: int = 1) -> list[str]:
+        """Reduce warning noise to actionable user-facing items."""
+        if not warnings:
+            return []
+
+        internal_prefixes = (
+            "[SkillContract]",
+            "[Contract]",
+            "[ContractGuard:",
+            "Handoff contract warning",
+        )
+        internal_phrases = (
+            "dynamically resolved to column",
+            "specialists will apply count(distinct)",
+            "details available in explainability trace",
+        )
+
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in warnings:
+            message = str(raw or "").strip()
+            if not message:
+                continue
+            message_l = message.lower()
+            if message.startswith(internal_prefixes):
+                continue
+            if any(phrase in message_l for phrase in internal_phrases):
+                continue
+            key = message_l
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(message)
+            if len(out) >= max(1, int(max_items)):
+                break
+        return out
 
     @staticmethod
     def _extract_contribution(agent: str, out: Any) -> tuple[str, list[str], str]:
@@ -3606,9 +3659,13 @@ class AgenticAnalyticsTeam:
             out = fn(*args, **kwargs)
             skill_eval = self.skill_runtime.evaluate_contract(agent, out)
             if skill_eval.enabled and not skill_eval.passed:
-                self._pipeline_warnings.append(
-                    f"[SkillContract] {agent} output missed one or more contract requirements."
-                )
+                self._skill_contract_warned_agents.add(agent)
+                if not getattr(self, "_skill_contract_warning_emitted", False):
+                    self._pipeline_warnings.append(
+                        "[SkillContract] One or more agent outputs missed internal contract checks "
+                        "(details available in explainability trace)."
+                    )
+                    self._skill_contract_warning_emitted = True
             contribution, dropped_items, reasoning = self._extract_contribution(agent, out)
             trace.append(
                 {
@@ -4216,11 +4273,17 @@ class AgenticAnalyticsTeam:
 
         tx_in_scope = adjusted.get("table") == "datada_mart_transactions" or is_markup_vs_spend
         if enforce_mt103_validity and tx_in_scope:
+            spend_on_txn_variant = bool(
+                re.search(
+                    r"\b(spend|amount|revenue|value)\b.*\btransaction(s)?\b|\btransaction(s)?\b.*\b(spend|amount|revenue|value)\b",
+                    lower,
+                )
+            )
             goal_mentions_validity = any(
                 phrase in lower
                 for phrase in ["valid transaction", "valid transactions"]
             )
-            goal_mentions_validity = goal_mentions_validity or "mt103" in lower
+            goal_mentions_validity = goal_mentions_validity or "mt103" in lower or spend_on_txn_variant
             if goal_mentions_validity or is_markup_vs_spend:
                 existing = {
                     str(vf.get("column") or "").strip().lower(): str(vf.get("value") or "").strip().lower()
@@ -5198,7 +5261,13 @@ class AgenticAnalyticsTeam:
             return None
 
         # Keep follow-up metric switches in a single scoped plan.
-        if any(k in lower_goal for k in ["switch metric", "add total amount", "add amount too"]):
+        add_amount_followup = bool(
+            re.search(r"\badd\b.*\b(amount|value|revenue)\b.*\b(too|also)?\b", lower_goal)
+            or "switch metric" in lower_goal
+            or "add total amount" in lower_goal
+            or "add amount too" in lower_goal
+        )
+        if add_amount_followup:
             if any(k in lower_goal for k in ["same slice", "same scope", "keep that", "keep same"]):
                 return None
 
@@ -5615,9 +5684,13 @@ class AgenticAnalyticsTeam:
             "quote",
             "booking",
             "customer",
+            "client",
+            "clients",
             "order",
             "product",
             "region",
+            "country",
+            "countries",
             "refund",
             "mt103",
             "markup",
@@ -5625,6 +5698,7 @@ class AgenticAnalyticsTeam:
             "charge",
             "payee",
             "university",
+            "universities",
             "document",
             "pdf",
             "currency pair",
@@ -6053,6 +6127,10 @@ class AgenticAnalyticsTeam:
         for col in all_columns:
             if any(col.endswith(s) for s in dim_suffixes):
                 candidate_cols.add(col)
+            # Boolean dimensions (for example has_mt103, is_university) are
+            # valid split/group dimensions for analyst-style asks.
+            if col.startswith("has_") or col.startswith("is_"):
+                candidate_cols.add(col)
             if any(col.endswith(s) for s in exclude_suffixes):
                 candidate_cols.discard(col)
 
@@ -6093,6 +6171,18 @@ class AgenticAnalyticsTeam:
                 mapping["source currency"] = "from_currency"
                 mapping["from currency"] = "from_currency"
             mapping["currency pair"] = "currency_pair"
+        elif domain == "customers":
+            if "is_university" in all_columns:
+                mapping["university"] = "is_university"
+                mapping["universities"] = "is_university"
+                mapping["non-university"] = "is_university"
+                mapping["non-universities"] = "is_university"
+            if "address_country" in all_columns:
+                mapping["country"] = "address_country"
+                mapping["countries"] = "address_country"
+                mapping["united kingdom"] = "address_country"
+            mapping["client"] = "customer_id"
+            mapping["clients"] = "customer_id"
 
         return mapping
 
@@ -6125,6 +6215,9 @@ class AgenticAnalyticsTeam:
             "spent": ["customer_spend", "valid_customer_spend", "total_amount"],
             "payee": ["payee_count"],
             "university": ["university_count"],
+            "universities": ["university_count"],
+            "client": ["customer_count", "active_customer_count"],
+            "clients": ["customer_count", "active_customer_count"],
             "charge": ["total_charges"],
             "fee": ["total_charges"],
         }
@@ -6980,7 +7073,20 @@ class AgenticAnalyticsTeam:
             domain = "quotes"
         elif any(k in lower for k in ["booking", "booked", "deal type", "value date"]):
             domain = "bookings"
-        elif any(k in lower for k in ["payee", "university", "address", "beneficiary"]):
+        elif any(
+            k in lower
+            for k in [
+                "payee",
+                "university",
+                "universities",
+                "address",
+                "beneficiary",
+                "client",
+                "clients",
+                "country",
+                "countries",
+            ]
+        ):
             domain = "customers"
         elif "customer" in lower and "transaction" not in lower and "amount" not in lower:
             domain = "customers"
@@ -7013,7 +7119,18 @@ class AgenticAnalyticsTeam:
                 "currency combination",
             ],
             "bookings": ["booking", "booked", "deal type", "value date"],
-            "customers": ["customer", "payee", "university", "address", "beneficiary"],
+            "customers": [
+                "customer",
+                "payee",
+                "university",
+                "universities",
+                "address",
+                "beneficiary",
+                "client",
+                "clients",
+                "country",
+                "countries",
+            ],
         }
         # GAP 36b: Enrich from domain knowledge synonyms
         for term, target_domain in self._domain_knowledge.get("synonyms", {}).items():
@@ -7330,6 +7447,15 @@ class AgenticAnalyticsTeam:
                 default_col = next(iter(dim_candidates.values()))
                 if default_col != "__month__":
                     dimensions.append(default_col)
+
+        # Customer split semantics: "universities vs non-universities"
+        # should reliably bind to boolean university segmentation.
+        if domain == "customers" and (dim_signal or intent == "grouped_metric"):
+            has_uni_split = any(
+                k in lower for k in ["university", "universities", "non-university", "non-universities"]
+            )
+            if has_uni_split and "is_university" in available_dim_cols and "is_university" not in dimensions:
+                dimensions.append("is_university")
 
         if len(dimensions) > MAX_DIMENSIONS:
             dropped_dims = dimensions[MAX_DIMENSIONS:]

@@ -8,6 +8,7 @@ import hashlib
 import json
 import shutil
 import tempfile
+import time
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -322,7 +323,9 @@ def main() -> int:
     parser.add_argument("--openai-model", default="gpt-5.3")
     parser.add_argument("--anthropic-model", default="claude-opus-4-6")
     parser.add_argument("--request-timeout", type=int, default=90)
+    parser.add_argument("--health-timeout", type=int, default=20, help="Timeout (seconds) for startup health check")
     parser.add_argument("--tenant-id", default="", help="Tenant id for this QA run (default: auto-generated)")
+    parser.add_argument("--health-retries", type=int, default=2, help="Retry count for startup health check")
     parser.add_argument("--retry-count", type=int, default=1, help="Retries for transient HTTP/timeout failures")
     parser.add_argument("--retry-backoff-seconds", type=float, default=0.6, help="Base backoff (exponential) between retries")
     parser.add_argument("--atomic-workers", type=int, default=4, help="Parallel workers for atomic cases within each mode")
@@ -330,6 +333,14 @@ def main() -> int:
     parser.add_argument("--followup-workers", type=int, default=2, help="Parallel workers for follow-up chains (non-local)")
     parser.add_argument("--local-followup-workers", type=int, default=1, help="Parallel workers for local follow-up chains")
     parser.add_argument("--mode-workers", type=int, default=1, help="Parallel workers across mode profiles")
+    parser.add_argument(
+        "--modes",
+        default="",
+        help=(
+            "Comma-separated list of llm_mode values to run "
+            "(deterministic,auto,local,openai,anthropic)."
+        ),
+    )
     parser.add_argument(
         "--round-id",
         default="",
@@ -352,9 +363,26 @@ def main() -> int:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    health = requests.get(f"{args.base_url.rstrip('/')}/api/assistant/health", timeout=20)
-    if not health.ok:
-        raise RuntimeError(f"Health check failed: {health.status_code}")
+    health_timeout = max(5, int(args.health_timeout))
+    health_retries = max(0, int(args.health_retries))
+    health_ok = False
+    health_error = ""
+    for attempt in range(health_retries + 1):
+        try:
+            health = requests.get(
+                f"{args.base_url.rstrip('/')}/api/assistant/health",
+                timeout=health_timeout,
+            )
+            if health.ok:
+                health_ok = True
+                break
+            health_error = f"Health check failed: {health.status_code}"
+        except Exception as exc:  # noqa: BLE001
+            health_error = f"Health check error: {type(exc).__name__}: {exc}"
+        if attempt < health_retries:
+            time.sleep(max(0.0, float(args.retry_backoff_seconds)) * (2 ** attempt))
+    if not health_ok:
+        raise RuntimeError(health_error or "Health check failed")
 
     source_db_path = Path(args.db_path).expanduser()
     snapshot_dir = Path(tempfile.mkdtemp(prefix="datada-qa11-"))
@@ -368,6 +396,15 @@ def main() -> int:
         ModeProfile(f"openai:{args.openai_model}", "openai", "openai", args.openai_model),
         ModeProfile(f"anthropic:{args.anthropic_model}", "anthropic", "anthropic", args.anthropic_model),
     ]
+    mode_filter = {
+        str(m).strip().lower()
+        for m in str(args.modes or "").split(",")
+        if str(m).strip()
+    }
+    if mode_filter:
+        profiles = [p for p in profiles if str(p.llm_mode).lower() in mode_filter]
+        if not profiles:
+            raise RuntimeError(f"No mode profiles matched --modes={sorted(mode_filter)}")
 
     round_id = str(args.round_id).strip() or datetime.utcnow().strftime("R11-%Y%m%d%H%M%S")
     atomic_cases = _freshen_atomic_cases(build_atomic_cases(), round_id=round_id)

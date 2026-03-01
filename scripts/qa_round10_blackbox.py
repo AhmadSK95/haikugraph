@@ -776,23 +776,45 @@ def run_mode(
                 )
                 future_map[fut] = (idx, case)
 
-            for fut in concurrent.futures.as_completed(future_map):
-                idx, case = future_map[fut]
-                status, data, latency_ms = fut.result()
-                if status != 200:
-                    results_by_idx[idx] = CaseResult(
-                        mode_id=profile.mode_id,
-                        case_id=case.case_id,
-                        category=case.category,
-                        question=case.question,
-                        passed=False,
-                        latency_ms=latency_ms,
-                        confidence=0.0,
-                        check_type=case.check_type,
-                        failure_reason=f"HTTP {status}",
-                    )
+            retries_factor = max(1, int(retry_count) + 1)
+            waves = max(1, math.ceil(len(indexed_cases) / max(1, worker_count)))
+            per_wave_budget = (mode_timeout * retries_factor) + 15
+            atomic_timeout_s = min(300, max(90, int(per_wave_budget * waves)))
+            try:
+                for fut in concurrent.futures.as_completed(future_map, timeout=atomic_timeout_s):
+                    idx, case = future_map[fut]
+                    status, data, latency_ms = fut.result()
+                    if status != 200:
+                        results_by_idx[idx] = CaseResult(
+                            mode_id=profile.mode_id,
+                            case_id=case.case_id,
+                            category=case.category,
+                            question=case.question,
+                            passed=False,
+                            latency_ms=latency_ms,
+                            confidence=0.0,
+                            check_type=case.check_type,
+                            failure_reason=f"HTTP {status}",
+                        )
+                        continue
+                    results_by_idx[idx] = evaluate_atomic(case, data, conn, latency_ms, profile.mode_id)
+            except concurrent.futures.TimeoutError:
+                pass
+            for fut, (idx, case) in future_map.items():
+                if idx in results_by_idx:
                     continue
-                results_by_idx[idx] = evaluate_atomic(case, data, conn, latency_ms, profile.mode_id)
+                fut.cancel()
+                results_by_idx[idx] = CaseResult(
+                    mode_id=profile.mode_id,
+                    case_id=case.case_id,
+                    category=case.category,
+                    question=case.question,
+                    passed=False,
+                    latency_ms=float(atomic_timeout_s) * 1000.0,
+                    confidence=0.0,
+                    check_type=case.check_type,
+                    failure_reason=f"Atomic worker timeout after {atomic_timeout_s}s",
+                )
         for idx, _case in indexed_cases:
             out.append(results_by_idx[idx])
 
@@ -898,9 +920,45 @@ def run_mode(
         chain_results_by_idx: dict[int, list[CaseResult]] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=chain_workers) as executor:
             futures = {executor.submit(_run_followup_chain, idx_chain): idx_chain[0] for idx_chain in indexed_chains}
-            for fut in concurrent.futures.as_completed(futures):
-                idx, chain_rows = fut.result()
-                chain_results_by_idx[idx] = chain_rows
+            retries_factor = max(1, int(retry_count) + 1)
+            waves = max(1, math.ceil(len(indexed_chains) / max(1, chain_workers)))
+            per_wave_budget = ((mode_timeout * 2) * retries_factor) + 20
+            chain_timeout_s = min(300, max(90, int(per_wave_budget * waves)))
+            try:
+                for fut in concurrent.futures.as_completed(futures, timeout=chain_timeout_s):
+                    idx, chain_rows = fut.result()
+                    chain_results_by_idx[idx] = chain_rows
+            except concurrent.futures.TimeoutError:
+                pass
+            for fut, idx in futures.items():
+                if idx in chain_results_by_idx:
+                    continue
+                fut.cancel()
+                chain = indexed_chains[idx][1]
+                chain_results_by_idx[idx] = [
+                    CaseResult(
+                        mode_id=profile.mode_id,
+                        case_id=f"{chain.chain_id}a",
+                        category=chain.category,
+                        question=chain.prompts[0],
+                        passed=False,
+                        latency_ms=float(chain_timeout_s) * 500.0,
+                        confidence=0.0,
+                        check_type="followup_setup",
+                        failure_reason=f"Follow-up worker timeout after {chain_timeout_s}s",
+                    ),
+                    CaseResult(
+                        mode_id=profile.mode_id,
+                        case_id=f"{chain.chain_id}b",
+                        category=chain.category,
+                        question=chain.prompts[1],
+                        passed=False,
+                        latency_ms=float(chain_timeout_s) * 500.0,
+                        confidence=0.0,
+                        check_type="followup_continuity",
+                        failure_reason=f"Follow-up worker timeout after {chain_timeout_s}s",
+                    ),
+                ]
         for idx, _chain in indexed_chains:
             out.extend(chain_results_by_idx[idx])
 

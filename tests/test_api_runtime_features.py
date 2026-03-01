@@ -196,6 +196,146 @@ def test_capability_scoreboard_endpoint_returns_live_tracker_counts(client):
     assert "T20" in capability_ids
 
 
+def test_quality_latest_endpoint_returns_truth_metadata(client):
+    resp = client.get("/api/assistant/quality/latest")
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "generated_at_epoch_ms" in payload
+    assert isinstance(payload.get("latest_runs"), list)
+    # truth score can be null if no reports exist yet, but field must exist.
+    assert "composite_truth_score" in payload
+
+
+def test_quality_run_detail_endpoint_returns_payload_for_latest_run(client):
+    latest = client.get("/api/assistant/quality/latest")
+    assert latest.status_code == 200
+    rows = latest.json().get("latest_runs") or []
+    if not rows:
+        pytest.skip("No quality run artifacts in reports directory for this test environment.")
+    run_id = str(rows[0].get("run_id") or "")
+    detail = client.get(f"/api/assistant/quality/runs/{run_id}")
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload.get("run_id") == run_id
+    assert str(payload.get("path") or "").endswith(".json")
+    assert isinstance(payload.get("payload"), dict)
+
+
+def test_dataset_profile_endpoint_returns_semantic_summary(client):
+    resp = client.post(
+        "/api/assistant/datasets/profile",
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+        json={"db_connection_id": "default"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload.get("db_connection_id") == "default"
+    assert isinstance(payload.get("dataset_signature"), str)
+    assert isinstance(payload.get("schema_signature"), str)
+    assert int(payload.get("table_count") or 0) >= 1
+    assert isinstance(payload.get("semantic_cache_hit"), bool)
+    assert isinstance(payload.get("schema_drift_detected"), bool)
+    assert isinstance(payload.get("profile"), dict)
+
+
+def test_dataset_profile_endpoint_uses_semantic_cache_on_repeat(client):
+    headers = {"x-datada-role": "viewer", "x-datada-tenant-id": "public"}
+    body = {"db_connection_id": "default"}
+
+    first = client.post("/api/assistant/datasets/profile", headers=headers, json=body)
+    assert first.status_code == 200
+    second = client.post("/api/assistant/datasets/profile", headers=headers, json=body)
+    assert second.status_code == 200
+
+    first_payload = first.json()
+    second_payload = second.json()
+    assert isinstance(first_payload.get("dataset_signature"), str)
+    assert second_payload.get("dataset_signature") == first_payload.get("dataset_signature")
+    assert bool(second_payload.get("semantic_cache_hit")) is True
+
+
+def test_runtime_stage_slo_endpoint_returns_budget_and_observed_maps(client):
+    resp = client.get(
+        "/api/assistant/runtime/stage-slo",
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+        params={"hours": 24},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "generated_at_epoch_ms" in payload
+    assert isinstance(payload.get("stage_budget_ms"), dict)
+    assert isinstance(payload.get("observed_p95_ms"), dict)
+    # Core stage budgets should always be present.
+    for key in ["semantic_profiler", "intent_engine", "planner", "query_compiler", "executor_delegate"]:
+        assert key in payload["stage_budget_ms"]
+
+
+def test_runtime_cutover_readiness_endpoint_returns_governance_state(client):
+    resp = client.get(
+        "/api/assistant/runtime/cutover/readiness",
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "generated_at_epoch_ms" in payload
+    assert payload.get("default_runtime_version") in {"v1", "v2", "shadow"}
+    assert isinstance(payload.get("canary_ready"), bool)
+    assert isinstance(payload.get("release_gate_passed"), bool)
+    assert isinstance(payload.get("artifacts"), list)
+    if payload.get("artifacts"):
+        first = payload["artifacts"][0]
+        assert "name" in first
+        assert "path" in first
+        assert "exists" in first
+
+
+def test_ui_shell_serves_modular_assets(client):
+    page = client.get("/")
+    assert page.status_code == 200
+    html = page.text
+    assert "/ui/assets/ui.css" in html
+    assert "/ui/assets/ui.js" in html
+
+    css = client.get("/ui/assets/ui.css")
+    assert css.status_code == 200
+    assert "text/css" in str(css.headers.get("content-type", "")).lower()
+    assert ":root" in css.text
+
+    js = client.get("/ui/assets/ui.js")
+    assert js.status_code == 200
+    assert "javascript" in str(js.headers.get("content-type", "")).lower()
+    assert "const apiClient" in js.text
+
+
+def test_query_response_includes_v2_additive_fields(client):
+    response = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "How many transactions are there?",
+            "llm_mode": "deterministic",
+            "session_id": "v2-additive-fields",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    for key in [
+        "analysis_version",
+        "slice_signature",
+        "quality_flags",
+        "assumptions",
+        "truth_score",
+        "stage_timings_ms",
+        "provider_effective",
+        "fallback_used",
+    ]:
+        assert key in payload
+    runtime = payload.get("runtime") or {}
+    assert "dataset_signature" in runtime
+    assert "schema_signature" in runtime
+    assert "semantic_cache_hit" in runtime
+    assert "stage_slo_breaches" in runtime
+
+
 def test_query_response_includes_advanced_analytics_packs(client, monkeypatch):
     monkeypatch.setenv("HG_ADVANCED_FORECAST_ENABLED", "0")
     response = client.post(

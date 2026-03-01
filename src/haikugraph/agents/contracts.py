@@ -474,3 +474,39 @@ class AssistantQueryResponse(BaseModel):
             "and `technical_view` for drill-down diagnostics."
         ),
     )
+
+    # v2 additive diagnostics (kept optional for API compatibility)
+    analysis_version: str = Field(
+        default="v1",
+        description="Internal analysis engine version used for this response (v1/v2).",
+    )
+    slice_signature: str = Field(
+        default="",
+        description="Stable signature of continuity scope for follow-up tracking.",
+    )
+    quality_flags: list[str] = Field(
+        default_factory=list,
+        description="Typed quality flags (e.g. continuity_risk, join_fragility, provider_degraded).",
+    )
+    assumptions: list[str] = Field(
+        default_factory=list,
+        description="Explicit assumptions used for scenario/what-if style answers.",
+    )
+    truth_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=100.0,
+        description="Composite truth score derived from checks, grounding, and warning hygiene.",
+    )
+    stage_timings_ms: dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-stage runtime timings in milliseconds for v2 pipeline diagnostics.",
+    )
+    provider_effective: str = Field(
+        default="",
+        description="Effective provider that produced the answer.",
+    )
+    fallback_used: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Fallback metadata describing degradation/failover behavior.",
+    )

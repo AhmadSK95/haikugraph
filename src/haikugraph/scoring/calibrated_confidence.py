@@ -206,6 +206,16 @@ def compute_calibrated_confidence(
     # Apply minimum-factor floor: overall can't exceed 1.5x the weakest factor
     min_factor = min(f.score for f in factors) if factors else 0.0
     overall = min(weighted_sum, min_factor * 1.5)
+
+    # Up-calibration guard: avoid severe under-confidence when grounding is
+    # strong and execution succeeded with real rows.
+    strong_contract = contract_score >= 0.9
+    clean_audit = audit_score >= 0.6 and int((audit_result or {}).get("failed", 0) or 0) == 0
+    grounded_goal = goal_coverage >= 0.5
+    reliable_execution = int(row_count or 0) > 0
+    if strong_contract and clean_audit and grounded_goal and reliable_execution and not fallback_used:
+        overall = max(overall, 0.65)
+
     overall = round(max(0.0, min(1.0, overall)), 4)
 
     level = _level_from_score(overall)
