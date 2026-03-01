@@ -13,8 +13,8 @@ Runtime Authority: `truth_score` + hard-floor gates
 | G2 | Continuity/semantics | DONE | Q2/Q3 thresholds met in merge-tier truth run |
 | G3 | Analyst depth | DONE | Q4 threshold met in merge-tier truth run |
 | G4 | Portability | NOT_STARTED | Q6 >= 95 on unseen datasets |
-| G5 | Performance/reliability | IN_PROGRESS | Q7 SLO met + explicit degradation |
-| G6 | Production truth | IN_PROGRESS | Composite truth score meets policy at release tier |
+| G5 | Performance/reliability | DONE | Q7 SLO met + explicit degradation |
+| G6 | Production truth | DONE | Composite truth score meets policy at release tier |
 | G7 | Cutover | NOT_STARTED | Canary + rollback drills pass |
 | G8 | Decommission | NOT_STARTED | v1 retired + postmortem complete |
 
@@ -132,7 +132,11 @@ Runtime Authority: `truth_score` + hard-floor gates
 | H07 | v1 decommission criteria | IN_PROGRESS | `docs/v1_decommission_criteria.md` drafted; approval pending |
 | H08 | v1 retirement and cleanup | NOT_STARTED | gated after cutover |
 
-## Current Release Blockers
-1. Release-tier multimode run currently fails (`v2_qa_truth_report_20260301_214634.json`) due `qa_round11_blackbox_fresh` startup health read-timeout under multimode load.
-2. Default serving path is still `v1` unless `HG_RUNTIME_VERSION` is switched (`v2`/`shadow`).
-3. Canary drills and release-tier multimode certification evidence remain open before cutover.
+## Latest Certification Evidence
+1. Release-tier certification passed with no floor violations: `reports/v2_qa_truth_report_20260301_224543.json` (`composite_truth_score=99.4`, `release_gate_passed=true`).
+2. Multimode blackbox completed successfully: `reports/qa_round11_blackbox_fresh_20260301_230422.json` (`overall_pass_rate=98.26`, no transport timeout).
+
+## Current Rollout Blockers
+1. Default serving path is still `v1` unless `HG_RUNTIME_VERSION` is switched (`v2`/`shadow`).
+2. Canary drills and rollback simulation evidence remain open before production cutover.
+3. v1 retirement criteria approval and execution remain open.

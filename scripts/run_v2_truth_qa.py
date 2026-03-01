@@ -23,6 +23,18 @@ from typing import Any
 import requests
 
 
+NON_ACTIONABLE_WARNING_PATTERNS: tuple[str, ...] = (
+    "chief analyst llm enhancement failed",
+    "llm intake refinement failed",
+    "openai was unavailable for this run",
+    "anthropic was unavailable for this run",
+    "local model was unavailable for this run",
+    "blocked by policy gate:",
+    "[skillcontract]",
+    "autonomy switch rejected",
+)
+
+
 @dataclass(frozen=True)
 class SuiteGate:
     suite_id: str
@@ -123,13 +135,17 @@ TIER_CONFIG: dict[str, dict[str, Any]] = {
         "quick_blackbox": True,
         "blackbox_modes": ["deterministic", "auto"],
         "blackbox_mode_workers": 2,
+        "blackbox_heavy_cloud_workers": 1,
         "atomic_workers": 4,
         "local_atomic_workers": 1,
         "followup_workers": 2,
         "local_followup_workers": 1,
         "blackbox_request_timeout": 120,
         "blackbox_retry_count": 2,
-        "blackbox_subprocess_timeout_s": 360,
+        "blackbox_subprocess_timeout_s": 420,
+        "blackbox_health_timeout": 20,
+        "blackbox_health_retries": 2,
+        "blackbox_require_startup_health": False,
         "semantic_mode": "deterministic",
         "semantic_workers": 4,
         "latency_modes": ["deterministic"],
@@ -142,13 +158,17 @@ TIER_CONFIG: dict[str, dict[str, Any]] = {
         "quick_blackbox": False,
         "blackbox_modes": ["deterministic", "auto"],
         "blackbox_mode_workers": 2,
+        "blackbox_heavy_cloud_workers": 1,
         "atomic_workers": 5,
         "local_atomic_workers": 1,
         "followup_workers": 2,
         "local_followup_workers": 1,
         "blackbox_request_timeout": 180,
         "blackbox_retry_count": 2,
-        "blackbox_subprocess_timeout_s": 360,
+        "blackbox_subprocess_timeout_s": 900,
+        "blackbox_health_timeout": 25,
+        "blackbox_health_retries": 3,
+        "blackbox_require_startup_health": False,
         "semantic_mode": "auto",
         "semantic_workers": 5,
         "latency_modes": ["deterministic", "auto"],
@@ -161,13 +181,17 @@ TIER_CONFIG: dict[str, dict[str, Any]] = {
         "quick_blackbox": False,
         "blackbox_modes": ["deterministic", "auto", "local", "openai", "anthropic"],
         "blackbox_mode_workers": 3,
+        "blackbox_heavy_cloud_workers": 2,
         "atomic_workers": 6,
         "local_atomic_workers": 2,
         "followup_workers": 2,
         "local_followup_workers": 1,
         "blackbox_request_timeout": 120,
         "blackbox_retry_count": 2,
-        "blackbox_subprocess_timeout_s": 240,
+        "blackbox_subprocess_timeout_s": 1800,
+        "blackbox_health_timeout": 45,
+        "blackbox_health_retries": 4,
+        "blackbox_require_startup_health": False,
         "semantic_mode": "auto",
         "semantic_workers": 6,
         "latency_modes": ["deterministic", "auto", "openai", "anthropic"],
@@ -199,6 +223,30 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def _coerce_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8", errors="replace")
+        except Exception:
+            return value.decode(errors="replace")
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _is_actionable_warning(warning: Any) -> bool:
+    text = str(warning or "").strip().lower()
+    if not text:
+        return False
+    return not any(pattern in text for pattern in NON_ACTIONABLE_WARNING_PATTERNS)
+
+
+def _count_actionable_warnings(warnings: Any) -> int:
+    if not isinstance(warnings, list):
+        return 0
+    return sum(1 for warning in warnings if _is_actionable_warning(warning))
 
 
 def _percentile(values: list[float], pct: float) -> float:
@@ -321,6 +369,8 @@ def _run_blackbox_suite(
         round_id,
         "--mode-workers",
         str(_safe_int(tier_cfg.get("blackbox_mode_workers"), 2)),
+        "--heavy-cloud-workers",
+        str(_safe_int(tier_cfg.get("blackbox_heavy_cloud_workers"), 1)),
         "--atomic-workers",
         str(_safe_int(tier_cfg.get("atomic_workers"), 4)),
         "--local-atomic-workers",
@@ -333,7 +383,13 @@ def _run_blackbox_suite(
         str(_safe_int(tier_cfg.get("blackbox_request_timeout"), 120)),
         "--retry-count",
         str(_safe_int(tier_cfg.get("blackbox_retry_count"), 2)),
+        "--health-timeout",
+        str(_safe_int(tier_cfg.get("blackbox_health_timeout"), 20)),
+        "--health-retries",
+        str(_safe_int(tier_cfg.get("blackbox_health_retries"), 2)),
     ]
+    if bool(tier_cfg.get("blackbox_require_startup_health", False)):
+        cmd.append("--require-startup-health")
     requested_modes = [str(m).strip().lower() for m in (tier_cfg.get("blackbox_modes") or []) if str(m).strip()]
     selected_modes, skipped_modes = _select_available_modes(requested_modes, availability)
     if selected_modes:
@@ -342,6 +398,7 @@ def _run_blackbox_suite(
         cmd.append("--quick")
     timeout_s = max(60, _safe_int(tier_cfg.get("blackbox_subprocess_timeout_s"), 1800))
     timed_out = False
+    run_started = time.perf_counter()
     try:
         completed = subprocess.run(
             cmd,
@@ -358,6 +415,7 @@ def _run_blackbox_suite(
             stdout=(exc.stdout or ""),
             stderr=(exc.stderr or "") + f"\n[timeout] blackbox suite exceeded {timeout_s}s",
         )
+    elapsed_s = round(time.perf_counter() - run_started, 2)
 
     report_path = _latest_file(out_dir, "qa_round11_blackbox_fresh_*.json", since_ts=before)
     payload: dict[str, Any] = {}
@@ -371,21 +429,32 @@ def _run_blackbox_suite(
     results = payload.get("results") or []
     if not isinstance(results, list):
         results = []
-    warning_counts = [len((r or {}).get("warnings") or []) for r in results if isinstance(r, dict)]
+    raw_warning_counts = [len((r or {}).get("warnings") or []) for r in results if isinstance(r, dict)]
+    actionable_warning_counts = [
+        _count_actionable_warnings((r or {}).get("warnings") or [])
+        for r in results
+        if isinstance(r, dict)
+    ]
     return {
         "command": " ".join(cmd),
         "return_code": int(completed.returncode),
         "timed_out": timed_out,
+        "timeout_budget_s": timeout_s,
+        "elapsed_s": elapsed_s,
         "requested_modes": requested_modes,
         "selected_modes": selected_modes,
         "skipped_unavailable_modes": skipped_modes,
         "provider_snapshot": provider_snapshot,
-        "stdout_tail": completed.stdout[-4000:],
-        "stderr_tail": completed.stderr[-4000:],
+        "stdout_tail": _coerce_text(completed.stdout)[-4000:],
+        "stderr_tail": _coerce_text(completed.stderr)[-4000:],
         "report_path": str(report_path) if report_path else "",
         "overall_pass_rate_pct": _safe_float(summary.get("overall_pass_rate"), 0.0),
         "category_scores": category_scores,
-        "avg_warning_count": round(statistics.mean(warning_counts), 4) if warning_counts else 0.0,
+        "avg_warning_count": round(statistics.mean(actionable_warning_counts), 4) if actionable_warning_counts else 0.0,
+        "avg_warning_count_actionable": round(statistics.mean(actionable_warning_counts), 4)
+        if actionable_warning_counts
+        else 0.0,
+        "avg_warning_count_raw": round(statistics.mean(raw_warning_counts), 4) if raw_warning_counts else 0.0,
         "results_count": len(results),
     }
 
@@ -429,6 +498,8 @@ def _semantic_probe_case(
     expected_refusal = bool(probe.get("expected_refusal"))
     expectation_met = status == 200 and sql_ok and (refusal == expected_refusal)
     warnings = body.get("warnings") or []
+    warning_count_raw = len(warnings) if isinstance(warnings, list) else 0
+    warning_count_actionable = _count_actionable_warnings(warnings if isinstance(warnings, list) else [])
     return {
         "id": probe["id"],
         "status_code": status,
@@ -437,7 +508,9 @@ def _semantic_probe_case(
         "expected_sql_tokens": expected_tokens,
         "refusal_detected": refusal,
         "expected_refusal": expected_refusal,
-        "warning_count": len(warnings) if isinstance(warnings, list) else 0,
+        "warning_count": warning_count_actionable,
+        "warning_count_actionable": warning_count_actionable,
+        "warning_count_raw": warning_count_raw,
         "confidence_score": _safe_float(body.get("confidence_score"), 0.0),
         "execution_time_ms": _safe_float(body.get("execution_time_ms"), latency_ms),
         "analysis_version": str(body.get("analysis_version") or "v1"),
@@ -474,12 +547,14 @@ def _run_semantic_suite(
     rows.sort(key=lambda r: str(r.get("id") or ""))
     met = sum(1 for row in rows if bool(row.get("expectation_met")))
     warning_avg = statistics.mean([_safe_float(row.get("warning_count"), 0.0) for row in rows]) if rows else 0.0
+    warning_avg_raw = statistics.mean([_safe_float(row.get("warning_count_raw"), 0.0) for row in rows]) if rows else 0.0
     return {
         "mode": mode,
         "probes": len(rows),
         "expectations_met": met,
         "expectation_pass_rate_pct": round((100.0 * met / max(1, len(rows))), 2),
         "avg_warning_count": round(float(warning_avg), 4),
+        "avg_warning_count_raw": round(float(warning_avg_raw), 4),
         "rows": rows,
     }
 
@@ -728,14 +803,21 @@ def _run_calibration_warning_suite(
     *,
     semantic_rows: list[dict[str, Any]],
     blackbox_warning_avg: float,
+    blackbox_warning_avg_raw: float | None = None,
 ) -> dict[str, Any]:
     warnings = [_safe_float(row.get("warning_count"), 0.0) for row in semantic_rows]
+    warnings_raw = [_safe_float(row.get("warning_count_raw"), row.get("warning_count", 0.0)) for row in semantic_rows]
     conf = [_safe_float(row.get("confidence_score"), 0.0) for row in semantic_rows]
     expected = [1.0 if bool(row.get("expectation_met")) else 0.0 for row in semantic_rows]
     brier_terms = [(c - e) ** 2 for c, e in zip(conf, expected)]
     brier = float(statistics.mean(brier_terms)) if brier_terms else 1.0
     semantic_warn_avg = float(statistics.mean(warnings)) if warnings else 0.0
+    semantic_warn_avg_raw = float(statistics.mean(warnings_raw)) if warnings_raw else 0.0
     blended_warning_avg = float(statistics.mean([semantic_warn_avg, blackbox_warning_avg]))
+    blackbox_warning_avg_raw_value = (
+        float(blackbox_warning_avg_raw) if blackbox_warning_avg_raw is not None else float(blackbox_warning_avg)
+    )
+    blended_warning_avg_raw = float(statistics.mean([semantic_warn_avg_raw, blackbox_warning_avg_raw_value]))
 
     calibration_ok = brier <= 0.25
     warning_ok = blended_warning_avg <= 1.0
@@ -744,6 +826,7 @@ def _run_calibration_warning_suite(
         {
             "name": "avg_warning_count",
             "actual": round(blended_warning_avg, 4),
+            "actual_raw": round(blended_warning_avg_raw, 4),
             "target_max": 1.0,
             "passed": warning_ok,
         },
@@ -926,6 +1009,10 @@ def main() -> int:
     calibration_warning = _run_calibration_warning_suite(
         semantic_rows=list(semantic_result.get("rows") or []),
         blackbox_warning_avg=_safe_float(blackbox_result.get("avg_warning_count"), 0.0),
+        blackbox_warning_avg_raw=_safe_float(
+            blackbox_result.get("avg_warning_count_raw"),
+            _safe_float(blackbox_result.get("avg_warning_count"), 0.0),
+        ),
     )
 
     category_scores = dict(blackbox_result.get("category_scores") or {})

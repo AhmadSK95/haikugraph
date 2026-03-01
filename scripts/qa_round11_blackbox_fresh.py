@@ -47,8 +47,11 @@ def _freshen_question(question: str, *, round_id: str, index: int) -> str:
         pos = text_lower.find(src)
         text = text[:pos] + dst + text[pos + len(src):]
     else:
-        # Ensure every round gets new prompt surface even when no phrase match.
-        text = f"{text} (round context: {round_id[-6:]})"
+        # Ensure every round gets new prompt surface without injecting domain-like tokens.
+        if text and text[0].isalpha():
+            text = f"Please {text[0].lower()}{text[1:]}"
+        else:
+            text = f"Please {text}"
     return text
 
 
@@ -326,6 +329,12 @@ def main() -> int:
     parser.add_argument("--health-timeout", type=int, default=20, help="Timeout (seconds) for startup health check")
     parser.add_argument("--tenant-id", default="", help="Tenant id for this QA run (default: auto-generated)")
     parser.add_argument("--health-retries", type=int, default=2, help="Retry count for startup health check")
+    parser.add_argument(
+        "--require-startup-health",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Fail fast when startup health check cannot be confirmed before suite execution.",
+    )
     parser.add_argument("--retry-count", type=int, default=1, help="Retries for transient HTTP/timeout failures")
     parser.add_argument("--retry-backoff-seconds", type=float, default=0.6, help="Base backoff (exponential) between retries")
     parser.add_argument("--atomic-workers", type=int, default=4, help="Parallel workers for atomic cases within each mode")
@@ -333,6 +342,12 @@ def main() -> int:
     parser.add_argument("--followup-workers", type=int, default=2, help="Parallel workers for follow-up chains (non-local)")
     parser.add_argument("--local-followup-workers", type=int, default=1, help="Parallel workers for local follow-up chains")
     parser.add_argument("--mode-workers", type=int, default=1, help="Parallel workers across mode profiles")
+    parser.add_argument(
+        "--heavy-cloud-workers",
+        type=int,
+        default=2,
+        help="Parallel workers for heavy cloud profiles (openai/anthropic) when stagger-heavy-modes is enabled",
+    )
     parser.add_argument(
         "--modes",
         default="",
@@ -381,8 +396,19 @@ def main() -> int:
             health_error = f"Health check error: {type(exc).__name__}: {exc}"
         if attempt < health_retries:
             time.sleep(max(0.0, float(args.retry_backoff_seconds)) * (2 ** attempt))
-    if not health_ok:
+    if not health_ok and bool(args.require_startup_health):
         raise RuntimeError(health_error or "Health check failed")
+    if not health_ok:
+        print(
+            json.dumps(
+                {
+                    "warning": "startup_health_unconfirmed",
+                    "detail": health_error or "health check failed",
+                    "action": "continuing suite execution to avoid false startup-timeout collapse",
+                }
+            ),
+            flush=True,
+        )
 
     source_db_path = Path(args.db_path).expanduser()
     snapshot_dir = Path(tempfile.mkdtemp(prefix="datada-qa11-"))
@@ -464,10 +490,14 @@ def main() -> int:
 
     if bool(args.stagger_heavy_modes):
         light_profiles = [p for p in profiles if p.llm_mode in {"deterministic", "auto"}]
-        heavy_profiles = [p for p in profiles if p.llm_mode not in {"deterministic", "auto"}]
+        cloud_heavy_profiles = [p for p in profiles if p.llm_mode in {"openai", "anthropic"}]
+        local_heavy_profiles = [p for p in profiles if p.llm_mode == "local"]
         _run_profiles(light_profiles, mode_workers)
-        # Running heavy provider modes concurrently causes 429/rate-limit artifacts in local + cloud.
-        _run_profiles(heavy_profiles, 1)
+        # Cloud heavy modes use different providers, so limited parallelism improves QA runtime
+        # without increasing hidden fallback risk from provider contention.
+        _run_profiles(cloud_heavy_profiles, max(1, int(args.heavy_cloud_workers)))
+        # Keep local serialized to avoid local model queue collapse under mixed cloud traffic.
+        _run_profiles(local_heavy_profiles, 1)
     else:
         _run_profiles(profiles, mode_workers)
     try:

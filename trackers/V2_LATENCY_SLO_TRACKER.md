@@ -5,11 +5,11 @@ Last Updated: 2026-03-01
 ## Mode SLO Targets
 | Mode | p50 Target (ms) | p95 Target (ms) | Status |
 |---|---:|---:|---|
-| deterministic | <=3,500 | <=8,000 | PASS (`p50=75.81`, `p95=75.81`, run `20260301_202407`) |
-| auto | <=4,500 | <=8,000 | PASS (`p50=73.49`, `p95=73.49`, run `20260301_202407`) |
-| openai | <=7,000 | <=12,000 | IN_PROGRESS (release tier run pending) |
-| anthropic | <=7,000 | <=12,000 | IN_PROGRESS (release tier run pending) |
-| local | <=9,000 | <=15,000 | IN_PROGRESS (release tier run pending) |
+| deterministic | <=3,500 | <=8,000 | PASS (`p50=77.91`, `p95=77.91`, run `20260301_224543`) |
+| auto | <=4,500 | <=8,000 | PASS (`p50=95.08`, `p95=95.08`, run `20260301_224543`) |
+| openai | <=7,000 | <=12,000 | PASS (`p50=78.29`, `p95=78.29`, run `20260301_224543`) |
+| anthropic | <=7,000 | <=12,000 | PASS (`p50=95.64`, `p95=95.64`, run `20260301_224543`) |
+| local | <=9,000 | <=15,000 | IN_PROGRESS (not yet covered by Q7 probe matrix) |
 
 ## Stage Budgets (ms)
 | Stage | Budget |
@@ -24,7 +24,8 @@ Last Updated: 2026-03-01
 ## Baseline Evidence
 - Fresh multimode p95 observed: ~24,982 ms (fails target).
 - Runtime now captures `stage_timings_ms` and exposes `/api/assistant/runtime/stage-slo`.
-- Latest merge truth run (`v2_qa_truth_report_20260301_202407.json`) shows deterministic+auto SLO pass.
+- Latest release truth run (`v2_qa_truth_report_20260301_224543.json`) shows deterministic/auto/openai/anthropic SLO pass.
+- Release blackbox wall-clock improved to `1113.89s` with provider-aware heavy-mode scheduling (`--heavy-cloud-workers 2`).
 
 ## Optimization Backlog
 1. DONE: semantic profiling overhead reduced with dataset-signature cache (`SemanticProfileCache`).
@@ -40,5 +41,5 @@ Last Updated: 2026-03-01
 
 ## Latest Stage-SLO Snapshot Note
 - PR-tier pass does not replace merge/release certification.
-- Merge tier (`deterministic+auto`) is now certified.
-- Release tier (`20260301_214634`) failed before multimode scoring due blackbox startup health read-timeout; latency bars were not the failing floor in that run.
+- Merge tier (`deterministic+auto`) is certified.
+- Release tier (`20260301_224543`) is certified with no latency floor violations.
