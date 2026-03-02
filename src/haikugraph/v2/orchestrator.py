@@ -65,6 +65,8 @@ def _format_answer(rows: list[dict[str, Any]], *, success: bool, summary: str, d
     if "metric_value" in first and len(first.keys()) <= 3:
         metric_value = first.get("metric_value")
         secondary = first.get("secondary_metric_value")
+        if metric_value is None and secondary is None:
+            return f"**No matching rows found.**\n\n{summary}"
         if secondary is None:
             return f"**Result: {metric_value}**\n\n{summary}"
         return f"**Result: {metric_value} (secondary: {secondary})**\n\n{summary}"
@@ -77,8 +79,26 @@ def _format_answer(rows: list[dict[str, Any]], *, success: bool, summary: str, d
 
 def _is_schema_glossary_request(goal: str) -> bool:
     lower = str(goal or "").lower()
-    schema_tokens = ("schema dictionary", "glossary", "field and table", "full schema dictionary")
-    return any(token in lower for token in schema_tokens)
+    schema_tokens = (
+        "schema dictionary",
+        "full schema dictionary",
+        "glossary",
+        "data dictionary",
+        "schema glossary",
+        "field and table",
+        "tables and columns",
+        "table definitions",
+        "column definitions",
+    )
+    if any(token in lower for token in schema_tokens):
+        return True
+
+    has_schema_noun = any(token in lower for token in ("table", "tables", "column", "columns", "field", "schema"))
+    has_definition_intent = any(
+        token in lower
+        for token in ("definition", "definitions", "meaning", "meanings", "describe", "description", "explain")
+    )
+    return bool(has_schema_noun and has_definition_intent)
 
 
 def _schema_glossary_markdown() -> str:

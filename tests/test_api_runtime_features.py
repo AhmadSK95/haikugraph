@@ -777,6 +777,23 @@ def test_schema_glossary_includes_business_purpose_and_metric_meanings(client):
     assert "| Metric | SQL expression | Business meaning |" in answer
 
 
+def test_schema_glossary_detects_table_column_definition_phrasing(client):
+    resp = client.post(
+        "/api/assistant/query",
+        json={
+            "goal": "Give me detailed definitions of tables, columns and their meaning",
+            "llm_mode": "deterministic",
+        },
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["success"] is True
+    answer = payload.get("answer_markdown") or ""
+    assert "Full Schema Dictionary" in answer
+    assert "datada_mart_transactions" in answer
+    assert "| Field | Meaning | Notes |" in answer
+
+
 def test_explicit_provider_failure_returns_hard_error(client, monkeypatch):
     runtime = RuntimeSelection(
         requested_mode="anthropic",
