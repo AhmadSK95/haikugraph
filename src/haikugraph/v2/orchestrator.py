@@ -14,6 +14,7 @@ from haikugraph.agents.contracts import (
     EvidenceItem,
     SanityCheck,
 )
+from haikugraph.llm.router import call_llm
 from haikugraph.v2.contradiction_engine import detect_contradictions
 from haikugraph.v2.event_bus import StageEventBusV2
 from haikugraph.v2.evaluator import evaluate_quality
@@ -290,20 +291,47 @@ class V2Orchestrator:
         )
         provider_payload = {
             "provider": str(getattr(runtime, "provider", "") or "deterministic"),
-            "llm_effective": False,
-            "llm_degraded": bool(getattr(runtime, "use_llm", False)),
-            "llm_degraded_reason": (
-                "native v2 deterministic pipeline currently bypasses provider LLM calls"
-                if bool(getattr(runtime, "use_llm", False))
-                else ""
-            ),
+            "llm_effective": not bool(getattr(runtime, "use_llm", False)),
+            "llm_degraded": False,
+            "llm_degraded_reason": "",
         }
+        if bool(getattr(runtime, "use_llm", False)):
+            try:
+                call_llm(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a runtime provider probe. "
+                                "Return exactly one token: OK."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Validate mode={str(getattr(runtime, 'mode', ''))} "
+                                f"for goal: {str(goal or '')[:120]}"
+                            ),
+                        },
+                    ],
+                    role="intent",
+                    provider=str(getattr(runtime, "provider", "") or ""),
+                    model=str(getattr(runtime, "intent_model", "") or "") or None,
+                    max_tokens=8,
+                    timeout=20,
+                    temperature_override=0.0,
+                )
+                provider_payload["llm_effective"] = True
+            except Exception as exc:
+                provider_payload["llm_effective"] = False
+                provider_payload["llm_degraded"] = True
+                provider_payload["llm_degraded_reason"] = f"{type(exc).__name__}: {exc}"
         provider_outcome = ensure_provider_integrity(
             requested_mode=str(getattr(runtime, "mode", "deterministic") or "deterministic"),
             use_llm=bool(getattr(runtime, "use_llm", False)),
             requested_provider=getattr(runtime, "provider", None),
             runtime_payload=provider_payload,
-            strict=False,
+            strict=True,
         )
         quality = _run_stage(
             "evaluator",
@@ -414,9 +442,9 @@ class V2Orchestrator:
         runtime_payload = {
             "mode": str(getattr(runtime, "mode", "deterministic") or "deterministic"),
             "provider": str(getattr(runtime, "provider", "") or "deterministic"),
-            "llm_effective": False,
-            "llm_degraded": bool(getattr(runtime, "use_llm", False)),
-            "llm_degraded_reason": str(provider_outcome.fallback_used.get("reason") or ""),
+            "llm_effective": bool(provider_payload.get("llm_effective")),
+            "llm_degraded": bool(provider_payload.get("llm_degraded")),
+            "llm_degraded_reason": str(provider_payload.get("llm_degraded_reason") or ""),
             "blackboard_entries": 3,
             "skills_runtime": {"enforceable_agents": 8},
             "glossary_seed_stats": {"terms": 24},

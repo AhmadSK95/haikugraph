@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import haikugraph.api.server as server_module
-import haikugraph.poc.agentic_team as team_module
+import haikugraph.v2.orchestrator as v2_orchestrator_module
 from haikugraph.api.server import create_app
 from haikugraph.io.document_ingest import ingest_documents_to_duckdb
 from haikugraph.poc import RuntimeSelection
@@ -483,7 +483,12 @@ def test_scenario_set_persistence_and_query_replay(client):
 
 
 def test_trust_dashboard_includes_parity_summary(client):
-    for mode in ("deterministic", "auto"):
+    modes = ["deterministic"]
+    providers = client.get("/api/assistant/providers").json().get("checks") or {}
+    if any(bool((providers.get(name) or {}).get("available")) for name in ("openai", "anthropic", "ollama")):
+        modes.append("auto")
+
+    for mode in modes:
         response = client.post(
             "/api/assistant/query",
             json={
@@ -772,7 +777,7 @@ def test_schema_glossary_includes_business_purpose_and_metric_meanings(client):
     assert "| Metric | SQL expression | Business meaning |" in answer
 
 
-def test_explicit_provider_failure_is_shown_as_runtime_notice(client, monkeypatch):
+def test_explicit_provider_failure_returns_hard_error(client, monkeypatch):
     runtime = RuntimeSelection(
         requested_mode="anthropic",
         mode="anthropic",
@@ -787,7 +792,7 @@ def test_explicit_provider_failure_is_shown_as_runtime_notice(client, monkeypatc
     def _raise_llm(*_args, **_kwargs):
         raise RuntimeError("401 invalid_api_key")
 
-    monkeypatch.setattr(team_module, "call_llm", _raise_llm)
+    monkeypatch.setattr(v2_orchestrator_module, "call_llm", _raise_llm)
 
     resp = client.post(
         "/api/assistant/query",
@@ -798,12 +803,14 @@ def test_explicit_provider_failure_is_shown_as_runtime_notice(client, monkeypatc
     )
     assert resp.status_code == 200
     payload = resp.json()
+    assert payload["success"] is False
+    assert "unavailable" in str(payload.get("error") or "").lower()
     runtime_payload = payload.get("runtime") or {}
     assert runtime_payload.get("llm_degraded") is True
     assert runtime_payload.get("llm_degraded_provider") == "anthropic"
-    assert "provider notice" in (payload.get("answer_markdown") or "").lower()
+    assert "requested mode failed" in (payload.get("answer_markdown") or "").lower()
     warnings = [str(w).lower() for w in (payload.get("warnings") or [])]
-    assert any("unavailable for this run" in w for w in warnings)
+    assert any("unavailable" in w for w in warnings)
 
 
 def test_data_overview_uses_discovery_agents(client):
@@ -994,15 +1001,46 @@ def test_auto_fast_path_prefers_deterministic_for_simple_metric_goal():
     )
 
 
-def test_resolve_runtime_auto_uses_deterministic_fast_path(monkeypatch):
-    monkeypatch.setenv("HG_AUTO_DETERMINISTIC_FAST_PATH", "true")
+def test_resolve_runtime_auto_prefers_available_provider(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "_providers_snapshot",
+        lambda force_refresh=False: server_module.ProvidersResponse(
+            default_mode=server_module.LLMMode.AUTO,
+            recommended_mode=server_module.LLMMode.OPENAI,
+            checks={
+                "ollama": server_module.ProviderCheck(available=False, reason="down"),
+                "openai": server_module.ProviderCheck(available=True, reason="up"),
+                "anthropic": server_module.ProviderCheck(available=False, reason="down"),
+            },
+        ),
+    )
     runtime = server_module._resolve_runtime(
         server_module.LLMMode.AUTO,
         goal="show total bookings count by month",
     )
-    assert runtime.mode == "deterministic"
-    assert runtime.use_llm is False
-    assert "fast-path deterministic" in runtime.reason
+    assert runtime.mode == "openai"
+    assert runtime.provider == "openai"
+    assert runtime.use_llm is True
+
+
+def test_resolve_runtime_auto_raises_when_no_provider_available(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "_providers_snapshot",
+        lambda force_refresh=False: server_module.ProvidersResponse(
+            default_mode=server_module.LLMMode.AUTO,
+            recommended_mode=server_module.LLMMode.DETERMINISTIC,
+            checks={
+                "ollama": server_module.ProviderCheck(available=False, reason="down"),
+                "openai": server_module.ProviderCheck(available=False, reason="down"),
+                "anthropic": server_module.ProviderCheck(available=False, reason="down"),
+            },
+        ),
+    )
+    with pytest.raises(server_module.HTTPException) as exc:
+        server_module._resolve_runtime(server_module.LLMMode.AUTO, goal="show total bookings count by month")
+    assert exc.value.status_code == 503
 
 
 def test_provider_snapshot_uses_cache(monkeypatch):

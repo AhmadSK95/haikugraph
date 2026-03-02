@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from haikugraph.api.connection_registry import ConnectionRegistry
 from haikugraph.api.runtime_store import RuntimeStore
-from haikugraph.agents.contracts import AssistantQueryResponse
+from haikugraph.agents.contracts import AssistantQueryResponse, ConfidenceLevel
 from haikugraph.io.document_ingest import ingest_documents_to_duckdb
 from haikugraph.io.onboarding_profile import load_or_create_onboarding_profile
 from haikugraph.io.stream_snapshot import ingest_stream_snapshot_to_duckdb
@@ -61,6 +61,9 @@ DEFAULT_DB_CANDIDATES = (
 _PROVIDER_SNAPSHOT_LOCK = threading.Lock()
 _PROVIDER_SNAPSHOT_CACHE: ProvidersResponse | None = None
 _PROVIDER_SNAPSHOT_CACHE_TS = 0.0
+_OPENAI_MODEL_DISCOVERY_LOCK = threading.Lock()
+_OPENAI_MODEL_DISCOVERY_CACHE: list[str] = []
+_OPENAI_MODEL_DISCOVERY_CACHE_TS = 0.0
 
 
 class LLMMode(str, Enum):
@@ -773,6 +776,9 @@ def _filter_supported_local_models(models: list[str]) -> list[str]:
     return [m for m in models if _is_supported_local_model(m)]
 
 OPENAI_MODEL_HINTS: dict[str, tuple[str, str]] = {
+    "gpt-5.3": ("high", "latest high-depth reasoning + executive narrative"),
+    "gpt-5.3-mini": ("balanced", "fast, lower-cost GPT-5.3 variant"),
+    "gpt-5.3-nano": ("fast", "ultra-fast lightweight GPT-5.3 variant"),
     "gpt-4o": ("high", "best quality for difficult query decomposition"),
     "gpt-4.1": ("high", "strong reasoning and longer context handling"),
     "gpt-4o-mini": ("balanced", "cost-efficient default for most analytics prompts"),
@@ -835,6 +841,67 @@ def _build_cloud_model_options(hints: dict[str, tuple[str, str]]) -> list[CloudM
         )
         for name, (tier, recommended_for) in hints.items()
     ]
+
+
+def _openai_model_tier(model_name: str) -> str:
+    lower = str(model_name or "").lower()
+    if any(token in lower for token in ("nano", "mini")):
+        return "balanced" if "mini" in lower else "fast"
+    if lower.startswith("gpt-5") or lower.startswith("o"):
+        return "high"
+    return "balanced"
+
+
+def _is_chat_openai_model(model_name: str) -> bool:
+    lower = str(model_name or "").strip().lower()
+    if not lower:
+        return False
+    return (
+        lower.startswith("gpt-")
+        or lower.startswith("o1")
+        or lower.startswith("o3")
+        or lower.startswith("o4")
+        or lower.startswith("chatgpt-")
+    )
+
+
+def _discover_openai_models() -> list[str]:
+    global _OPENAI_MODEL_DISCOVERY_CACHE
+    global _OPENAI_MODEL_DISCOVERY_CACHE_TS
+
+    ttl_seconds = max(0.0, float(os.environ.get("HG_OPENAI_MODEL_DISCOVERY_TTL_SECONDS", "300") or 300.0))
+    now = time.time()
+    with _OPENAI_MODEL_DISCOVERY_LOCK:
+        if _OPENAI_MODEL_DISCOVERY_CACHE and (now - _OPENAI_MODEL_DISCOVERY_CACHE_TS) <= ttl_seconds:
+            return list(_OPENAI_MODEL_DISCOVERY_CACHE)
+
+    if not _has_module("openai"):
+        return []
+    key = os.environ.get("HG_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not key:
+        return []
+
+    discovered: list[str] = []
+    try:
+        import importlib
+
+        openai_module = importlib.import_module("openai")
+        client = openai_module.OpenAI(api_key=key, timeout=8)
+        model_page = client.models.list()
+        rows = list(getattr(model_page, "data", []) or [])
+        names = {
+            str(getattr(row, "id", "") or "").strip()
+            for row in rows
+            if _is_chat_openai_model(str(getattr(row, "id", "") or ""))
+        }
+        discovered = sorted(name for name in names if name)
+    except Exception:
+        discovered = []
+
+    with _OPENAI_MODEL_DISCOVERY_LOCK:
+        _OPENAI_MODEL_DISCOVERY_CACHE = list(discovered)
+        _OPENAI_MODEL_DISCOVERY_CACHE_TS = time.time()
+    return discovered
 
 
 def _fetch_ollama_models(base_url: str) -> list[str]:
@@ -948,13 +1015,22 @@ def _get_openai_models_state() -> CloudModelsResponse:
     check = _openai_check()
     default_intent = DEFAULT_MODELS.get("openai", {}).get("intent", "gpt-4o-mini")
     default_narrator = DEFAULT_MODELS.get("openai", {}).get("narrator", "gpt-4o-mini")
+    merged_hints = OrderedDict(OPENAI_MODEL_HINTS)
+    if check.available:
+        for discovered in _discover_openai_models():
+            if discovered in merged_hints:
+                continue
+            merged_hints[discovered] = (
+                _openai_model_tier(discovered),
+                "available in your OpenAI account",
+            )
     return CloudModelsResponse(
         provider="openai",
         available=check.available,
         reason=check.reason,
         active_intent_model=(os.environ.get("HG_OPENAI_INTENT_MODEL") or default_intent),
         active_narrator_model=(os.environ.get("HG_OPENAI_NARRATOR_MODEL") or default_narrator),
-        options=_build_cloud_model_options(OPENAI_MODEL_HINTS),
+        options=_build_cloud_model_options(dict(merged_hints)),
     )
 
 
@@ -2291,12 +2367,9 @@ def _execute_query_request(
                 quality_flags=["runtime_exception_untyped"],
                 analysis_version="v2",
             )
-        if response.success:
-            _query_cache_set(app, cache_key, response.model_dump())
-
-    # Explicit-mode safety: if selected provider did not produce any effective
-    # LLM step, surface a clear user-facing degradation notice.
-    if request.llm_mode in {LLMMode.LOCAL, LLMMode.OPENAI, LLMMode.ANTHROPIC} and runtime.use_llm:
+    # LLM-mode safety: never mask unavailable provider execution with a
+    # deterministic success response.
+    if runtime.use_llm:
         rt_payload = dict(response.runtime or {})
         llm_effective = bool(rt_payload.get("llm_effective"))
         if not llm_effective:
@@ -2305,27 +2378,32 @@ def _execute_query_request(
                 "openai": "OpenAI",
                 "anthropic": "Anthropic",
             }.get(str(runtime.provider or "").lower(), str(runtime.provider or "Selected provider"))
-            last_error = str(rt_payload.get("llm_last_error") or "").strip()
-            reason = last_error or "provider returned no usable response."
-            notice = (
-                f"{provider_label} was unavailable for this run ({reason}). "
-                "Answered with deterministic fallback."
-            )
-            warnings = list(response.warnings or [])
-            if notice not in warnings:
-                warnings.append(notice)
-            response.warnings = warnings
-            if not str(response.answer_markdown or "").lower().startswith("**provider notice:**"):
-                response.answer_markdown = (
-                    f"**Provider notice:** {provider_label} is resting right now, so I used deterministic mode.\n\n"
-                    f"{response.answer_markdown}"
-                )
+            reason = str(rt_payload.get("llm_last_error") or rt_payload.get("llm_degraded_reason") or "").strip()
+            if not reason:
+                reason = "provider returned no usable response."
+            response.success = False
+            response.error = f"{provider_label} unavailable: {reason}"
+            response.answer_markdown = f"Requested mode failed: {provider_label} unavailable ({reason})."
+            response.confidence = ConfidenceLevel.LOW
+            response.confidence_score = 0.2
+            response.warnings = [f"{provider_label} unavailable: {reason}"]
+            response.quality_flags = sorted(set(list(response.quality_flags or []) + ["provider_unavailable"]))
+            response.fallback_used = {
+                "used": False,
+                "reason": reason,
+                "requested_mode": str(request.llm_mode.value),
+                "requested_provider": str(runtime.provider or ""),
+            }
             response.runtime = {
                 **rt_payload,
                 "llm_degraded": True,
                 "llm_degraded_provider": str(runtime.provider or ""),
                 "llm_degraded_reason": reason,
             }
+        elif response.success:
+            _query_cache_set(app, cache_key, response.model_dump())
+    elif response.success:
+        _query_cache_set(app, cache_key, response.model_dump())
 
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
 
@@ -2454,12 +2532,13 @@ def _execute_query_request(
     degraded_used = bool(runtime_payload.get("llm_degraded"))
     degraded_reason = str(runtime_payload.get("llm_degraded_reason") or "")
     normalized_fallback = dict(response.fallback_used or {})
-    if degraded_used and not bool(normalized_fallback.get("used")):
+    # Only classify as fallback when a successful answer was actually served.
+    if degraded_used and bool(response.success) and not bool(normalized_fallback.get("used")):
         normalized_fallback["used"] = True
     if degraded_reason and not str(normalized_fallback.get("reason") or "").strip():
         normalized_fallback["reason"] = degraded_reason
     if not normalized_fallback:
-        normalized_fallback = {"used": degraded_used, "reason": degraded_reason}
+        normalized_fallback = {"used": bool(degraded_used and response.success), "reason": degraded_reason}
     response.fallback_used = normalized_fallback
     if response.stage_timings_ms is None:
         response.stage_timings_ms = {}
@@ -2690,18 +2769,7 @@ def _resolve_runtime(
             ),
         )
 
-    # auto mode — policy-controlled provider preference.
-    if _auto_prefers_deterministic_fast_path(goal or ""):
-        return RuntimeSelection(
-            requested_mode=mode.value,
-            mode=LLMMode.DETERMINISTIC.value,
-            use_llm=False,
-            provider=None,
-            reason="auto fast-path deterministic (simple metric ask)",
-            intent_model=None,
-            narrator_model=None,
-        )
-
+    # auto mode — policy-controlled provider preference with strict no-fallback.
     pref_raw = os.environ.get("HG_AUTO_MODE_PRIORITY", "openai,anthropic,ollama")
     pref = [p.strip().lower() for p in pref_raw.split(",") if p.strip()]
     options = {
@@ -2728,14 +2796,12 @@ def _resolve_runtime(
                 narrator_model=narrator_m,
             )
 
-    return RuntimeSelection(
-        requested_mode=mode.value,
-        mode=LLMMode.DETERMINISTIC.value,
-        use_llm=False,
-        provider=None,
-        reason="auto fallback to deterministic (no provider available)",
-        intent_model=None,
-        narrator_model=None,
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            "No LLM providers are currently available for auto mode. "
+            "Fix provider availability or run deterministic mode explicitly."
+        ),
     )
 
 
