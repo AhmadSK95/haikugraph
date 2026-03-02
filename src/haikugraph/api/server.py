@@ -999,10 +999,10 @@ def _repo_root_path() -> Path:
 
 
 def _runtime_version() -> str:
-    raw = str(os.environ.get("HG_RUNTIME_VERSION", "v1")).strip().lower()
+    raw = str(os.environ.get("HG_RUNTIME_VERSION", "v2")).strip().lower()
     if raw in {"v1", "v2", "shadow"}:
         return raw
-    return "v1"
+    return "v2"
 
 
 def _latest_report_file(pattern: str) -> Path | None:
@@ -1273,11 +1273,26 @@ def _quality_run_by_id(run_id: str) -> dict[str, Any] | None:
 
 def _cutover_artifacts() -> list[CutoverArtifactStatus]:
     root = _repo_root_path()
+    latest_baseline = _latest_report_file("v2_baseline_lock_*.json")
+    latest_cutover_drill = _latest_report_file("v2_cutover_drill_*.json")
+    latest_drift_alarm = _latest_report_file("v2_quality_drift_alarm_*.json")
     rows = [
         ("cutover_runbook", root / "docs" / "v2_cutover_runbook.md"),
         ("incident_playbook", root / "docs" / "v2_incident_playbook.md"),
         ("quality_review_cadence", root / "docs" / "v2_quality_review_cadence.md"),
         ("v1_decommission_criteria", root / "docs" / "v1_decommission_criteria.md"),
+        (
+            "baseline_lock_manifest",
+            latest_baseline or (root / "reports" / "v2_baseline_lock_*.json"),
+        ),
+        (
+            "cutover_drill_report",
+            latest_cutover_drill or (root / "reports" / "v2_cutover_drill_*.json"),
+        ),
+        (
+            "quality_drift_alarm_report",
+            latest_drift_alarm or (root / "reports" / "v2_quality_drift_alarm_*.json"),
+        ),
     ]
     return [
         CutoverArtifactStatus(name=name, path=str(path), exists=path.exists())
@@ -2385,11 +2400,17 @@ def _execute_query_request(
         response.provider_effective = str(
             (response.runtime or {}).get("provider") or runtime.provider or "deterministic"
         )
-    if not response.fallback_used:
-        response.fallback_used = {
-            "used": bool((response.runtime or {}).get("llm_degraded")),
-            "reason": str((response.runtime or {}).get("llm_degraded_reason") or ""),
-        }
+    runtime_payload = dict(response.runtime or {})
+    degraded_used = bool(runtime_payload.get("llm_degraded"))
+    degraded_reason = str(runtime_payload.get("llm_degraded_reason") or "")
+    normalized_fallback = dict(response.fallback_used or {})
+    if degraded_used and not bool(normalized_fallback.get("used")):
+        normalized_fallback["used"] = True
+    if degraded_reason and not str(normalized_fallback.get("reason") or "").strip():
+        normalized_fallback["reason"] = degraded_reason
+    if not normalized_fallback:
+        normalized_fallback = {"used": degraded_used, "reason": degraded_reason}
+    response.fallback_used = normalized_fallback
     if response.stage_timings_ms is None:
         response.stage_timings_ms = {}
     if response.quality_flags is None:

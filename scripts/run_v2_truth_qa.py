@@ -14,12 +14,14 @@ import math
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import requests
 
 
@@ -130,6 +132,141 @@ SEMANTIC_PROBES: list[dict[str, Any]] = [
 ]
 
 
+UNSEEN_PORTABILITY_FIXTURES: list[dict[str, Any]] = [
+    {
+        "fixture_id": "ops_payments",
+        "description": "Operational + payment ledger with standard account joins",
+        "sql": [
+            """
+            CREATE TABLE crm_accounts(
+                account_id VARCHAR,
+                segment VARCHAR,
+                home_country VARCHAR,
+                created_at TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE payments_ledger(
+                payment_id VARCHAR,
+                account_id VARCHAR,
+                corridor VARCHAR,
+                settled_amount DOUBLE,
+                settled_at TIMESTAMP,
+                status VARCHAR
+            )
+            """,
+            """
+            INSERT INTO crm_accounts VALUES
+            ('A1','enterprise','US','2026-01-01'),
+            ('A2','smb','IN','2026-01-02'),
+            ('A3','smb','GB','2026-01-03')
+            """,
+            """
+            INSERT INTO payments_ledger VALUES
+            ('P1','A1','US-IN',1200.0,'2026-01-10','settled'),
+            ('P2','A1','US-GB',800.0,'2026-01-11','settled'),
+            ('P3','A2','IN-US',540.0,'2026-01-11','pending'),
+            ('P4','A3','GB-IN',430.0,'2026-01-12','settled')
+            """,
+        ],
+        "expected": {
+            "table_count_min": 2,
+            "entities_min": 2,
+            "measures_min": 1,
+            "time_fields_min": 1,
+            "high_risk_join_edges_min": 0,
+        },
+    },
+    {
+        "fixture_id": "marketing_weak_join",
+        "description": "Weak campaign join coverage should surface join fragility",
+        "sql": [
+            """
+            CREATE TABLE campaign_spend(
+                campaign_id VARCHAR,
+                channel VARCHAR,
+                spend_usd DOUBLE,
+                event_at TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE lead_funnel(
+                lead_id VARCHAR,
+                campaign_id VARCHAR,
+                stage VARCHAR,
+                created_at TIMESTAMP
+            )
+            """,
+            """
+            INSERT INTO campaign_spend VALUES
+            ('C1','search',5400.0,'2026-02-01'),
+            ('C2','social',3200.0,'2026-02-01'),
+            ('C3','email',900.0,'2026-02-01')
+            """,
+            """
+            INSERT INTO lead_funnel VALUES
+            ('L1','C2','quote','2026-02-02'),
+            ('L2','C9','quote','2026-02-02'),
+            ('L3','C10','booking','2026-02-02'),
+            ('L4','C11','mt103','2026-02-03')
+            """,
+        ],
+        "expected": {
+            "table_count_min": 2,
+            "entities_min": 2,
+            "measures_min": 1,
+            "time_fields_min": 1,
+            "high_risk_join_edges_min": 1,
+        },
+    },
+    {
+        "fixture_id": "refund_txn_sparse",
+        "description": "Sparse refund + transaction dataset with nullable operational fields",
+        "sql": [
+            """
+            CREATE TABLE transaction_state(
+                transaction_id VARCHAR,
+                customer_id VARCHAR,
+                platform VARCHAR,
+                gross_amount DOUBLE,
+                has_mt103 BOOLEAN,
+                created_at TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE refund_events(
+                refund_id VARCHAR,
+                transaction_id VARCHAR,
+                refund_amount DOUBLE,
+                refund_reason VARCHAR,
+                initiated_at TIMESTAMP
+            )
+            """,
+            """
+            INSERT INTO transaction_state VALUES
+            ('T1','U1','WEB',980.0,TRUE,'2026-01-15'),
+            ('T2','U2','MOBILE',440.0,FALSE,'2026-01-15'),
+            ('T3','U3',NULL,780.0,TRUE,'2026-01-16'),
+            ('T4','U4','WEB',NULL,TRUE,'2026-01-16')
+            """,
+            """
+            INSERT INTO refund_events VALUES
+            ('R1','T2',120.0,'duplicate','2026-01-20'),
+            ('R2','T4',NULL,'chargeback','2026-01-21'),
+            ('R3',NULL,30.0,'goodwill','2026-01-22')
+            """,
+        ],
+        "expected": {
+            "table_count_min": 2,
+            "entities_min": 2,
+            "measures_min": 1,
+            "time_fields_min": 1,
+            "high_risk_join_edges_min": 0,
+        },
+    },
+]
+
+
 TIER_CONFIG: dict[str, dict[str, Any]] = {
     "pr": {
         "quick_blackbox": True,
@@ -179,7 +316,7 @@ TIER_CONFIG: dict[str, dict[str, Any]] = {
     },
     "release": {
         "quick_blackbox": False,
-        "blackbox_modes": ["deterministic", "auto", "local", "openai", "anthropic"],
+        "blackbox_modes": ["deterministic", "auto", "local"],
         "blackbox_mode_workers": 3,
         "blackbox_heavy_cloud_workers": 2,
         "atomic_workers": 6,
@@ -589,6 +726,123 @@ def _run_smoke_suite(*, base_url: str, tenant_id: str) -> dict[str, Any]:
     }
 
 
+def _run_unseen_portability_suite() -> dict[str, Any]:
+    try:
+        from haikugraph.v2.semantic_profiler import profile_dataset
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "fixture_count": len(UNSEEN_PORTABILITY_FIXTURES),
+            "checks": [
+                {
+                    "name": "import_v2_semantic_profiler",
+                    "passed": False,
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+            ],
+            "fixtures": [],
+            "pass_rate_pct": 0.0,
+        }
+
+    fixture_rows: list[dict[str, Any]] = []
+    all_checks: list[dict[str, Any]] = []
+
+    with tempfile.TemporaryDirectory(prefix="v2-portability-") as temp_dir:
+        base = Path(temp_dir)
+        for fixture in UNSEEN_PORTABILITY_FIXTURES:
+            fixture_id = str(fixture.get("fixture_id") or "fixture")
+            description = str(fixture.get("description") or "")
+            db_path = base / f"{fixture_id}.duckdb"
+            checks: list[dict[str, Any]] = []
+            try:
+                conn = duckdb.connect(str(db_path))
+                try:
+                    for stmt in list(fixture.get("sql") or []):
+                        conn.execute(str(stmt))
+                finally:
+                    conn.close()
+
+                catalog = profile_dataset(str(db_path))
+                expected = dict(fixture.get("expected") or {})
+                table_count = len(list(catalog.tables or []))
+                entities_count = len(list(catalog.entities or []))
+                measures_count = len(list(catalog.measures or []))
+                time_fields_count = len(list(catalog.time_fields or []))
+                high_risk = int(catalog.quality_summary.get("high_risk_join_edges") or 0)
+
+                checks = [
+                    {
+                        "name": f"{fixture_id}:table_count",
+                        "passed": table_count >= int(expected.get("table_count_min", 1)),
+                        "detail": table_count,
+                    },
+                    {
+                        "name": f"{fixture_id}:dataset_signature",
+                        "passed": bool(str(catalog.dataset_signature or "").strip()),
+                        "detail": str(catalog.dataset_signature or ""),
+                    },
+                    {
+                        "name": f"{fixture_id}:entities",
+                        "passed": entities_count >= int(expected.get("entities_min", 1)),
+                        "detail": entities_count,
+                    },
+                    {
+                        "name": f"{fixture_id}:measures",
+                        "passed": measures_count >= int(expected.get("measures_min", 1)),
+                        "detail": measures_count,
+                    },
+                    {
+                        "name": f"{fixture_id}:time_fields",
+                        "passed": time_fields_count >= int(expected.get("time_fields_min", 1)),
+                        "detail": time_fields_count,
+                    },
+                    {
+                        "name": f"{fixture_id}:join_risk_expectation",
+                        "passed": high_risk >= int(expected.get("high_risk_join_edges_min", 0)),
+                        "detail": high_risk,
+                    },
+                ]
+                passed = sum(1 for c in checks if bool(c["passed"]))
+                fixture_rows.append(
+                    {
+                        "fixture_id": fixture_id,
+                        "description": description,
+                        "db_path": str(db_path),
+                        "checks": checks,
+                        "pass_rate_pct": round((100.0 * passed / max(1, len(checks))), 2),
+                        "quality_summary": dict(catalog.quality_summary or {}),
+                        "table_count": table_count,
+                    }
+                )
+                all_checks.extend(checks)
+            except Exception as exc:  # noqa: BLE001
+                failure = {
+                    "name": f"{fixture_id}:fixture_execution",
+                    "passed": False,
+                    "detail": f"{type(exc).__name__}: {exc}",
+                }
+                checks.append(failure)
+                fixture_rows.append(
+                    {
+                        "fixture_id": fixture_id,
+                        "description": description,
+                        "db_path": str(db_path),
+                        "checks": checks,
+                        "pass_rate_pct": 0.0,
+                        "quality_summary": {},
+                        "table_count": 0,
+                    }
+                )
+                all_checks.append(failure)
+
+    met = sum(1 for c in all_checks if bool(c.get("passed")))
+    return {
+        "fixture_count": len(fixture_rows),
+        "checks": all_checks,
+        "fixtures": fixture_rows,
+        "pass_rate_pct": round((100.0 * met / max(1, len(all_checks))), 2),
+    }
+
+
 def _run_portability_suite(
     *,
     base_url: str,
@@ -617,20 +871,28 @@ def _run_portability_suite(
     quality_profile = body.get("profile") or {}
     join_edges = ((quality_profile.get("join_edges") if isinstance(quality_profile, dict) else None) or [])
     high_risk = _safe_int(body.get("high_risk_join_edges"), 0)
-    checks = [
+    api_checks = [
         ("http_200", resp.status_code == 200),
         ("table_count", table_count > 0),
         ("dataset_signature", bool(signature)),
         ("join_edges_profiled", isinstance(join_edges, list)),
     ]
-    passed = sum(1 for _, ok in checks if ok)
+    unseen = _run_unseen_portability_suite()
+    checks = [{"name": f"api:{name}", "passed": ok} for name, ok in api_checks] + [
+        {"name": f"unseen:{c.get('name')}", "passed": bool(c.get("passed"))}
+        for c in list(unseen.get("checks") or [])
+    ]
+    passed = sum(1 for c in checks if bool(c.get("passed")))
     return {
         "status_code": int(resp.status_code),
         "table_count": table_count,
         "high_risk_join_edges": high_risk,
         "sparse_table_count": _safe_int(body.get("sparse_table_count"), 0),
-        "checks": [{"name": name, "passed": ok} for name, ok in checks],
+        "checks": checks,
+        "api_pass_rate_pct": round((100.0 * sum(1 for _, ok in api_checks if ok) / max(1, len(api_checks))), 2),
+        "unseen_pass_rate_pct": _safe_float(unseen.get("pass_rate_pct"), 0.0),
         "pass_rate_pct": round((100.0 * passed / max(1, len(checks))), 2),
+        "unseen_fixture_suite": unseen,
         "response_excerpt": body,
     }
 

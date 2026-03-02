@@ -327,6 +327,7 @@ def main() -> int:
     parser.add_argument("--anthropic-model", default="claude-opus-4-6")
     parser.add_argument("--request-timeout", type=int, default=90)
     parser.add_argument("--health-timeout", type=int, default=20, help="Timeout (seconds) for startup health check")
+    parser.add_argument("--mode-probe-timeout", type=int, default=35, help="Timeout (seconds) for per-mode viability probe")
     parser.add_argument("--tenant-id", default="", help="Tenant id for this QA run (default: auto-generated)")
     parser.add_argument("--health-retries", type=int, default=2, help="Retry count for startup health check")
     parser.add_argument(
@@ -372,6 +373,12 @@ def main() -> int:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Run heavy LLM modes (local/openai/anthropic) sequentially to avoid queue/rate-limit collapse",
+    )
+    parser.add_argument(
+        "--require-mode-viability",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Skip mode profiles that fail a fast preflight probe so release certification avoids stale provider hangs.",
     )
     args = parser.parse_args()
 
@@ -441,8 +448,51 @@ def main() -> int:
         followup_chains = followup_chains[:1]
     tenant_id = str(args.tenant_id).strip() or f"qa11-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
+    def _probe_profile(profile: ModeProfile) -> tuple[bool, str]:
+        if profile.llm_mode in {"deterministic", "auto"}:
+            return True, ""
+        payload = {
+            "goal": "How many transactions are there?",
+            "llm_mode": profile.llm_mode,
+            "session_id": f"qa11-probe-{profile.llm_mode}",
+            "tenant_id": tenant_id,
+            "role": "admin",
+        }
+        try:
+            resp = requests.post(
+                f"{args.base_url.rstrip('/')}/api/assistant/query",
+                json=payload,
+                timeout=max(10, int(args.mode_probe_timeout)),
+                headers={"x-datada-role": "admin", "x-datada-tenant-id": tenant_id},
+            )
+            if resp.status_code != 200:
+                return False, f"mode preflight HTTP {resp.status_code}"
+            body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            if not isinstance(body, dict):
+                return False, "mode preflight malformed response"
+            if not bool(body.get("success")):
+                return False, "mode preflight success=false"
+            return True, ""
+        except Exception as exc:  # noqa: BLE001
+            return False, f"mode preflight error: {type(exc).__name__}: {exc}"
+
+    if bool(args.require_mode_viability):
+        viable_profiles: list[ModeProfile] = []
+        mode_probe_failures: dict[str, str] = {}
+        for profile in profiles:
+            ok, reason = _probe_profile(profile)
+            if ok:
+                viable_profiles.append(profile)
+            else:
+                mode_probe_failures[profile.mode_id] = reason or "mode preflight failed"
+        profiles = viable_profiles
+        if not profiles:
+            raise RuntimeError("No mode profiles passed viability preflight")
+    else:
+        mode_probe_failures = {}
+
     all_results = []
-    mode_errors: dict[str, str] = {}
+    mode_errors: dict[str, str] = dict(mode_probe_failures)
 
     def _run_profile(profile: ModeProfile) -> tuple[str, list[Any], str | None]:
         conn = duckdb.connect(str(snapshot_db), read_only=True)

@@ -1,36 +1,26 @@
 # V2 UI Reliability Tracker
 
-Last Updated: 2026-03-01
-Scope: Stabilize current UI shell while backend v2 matures.
+Last Updated: 2026-03-02
+Scope: Stabilize current UI shell while v2 runtime is release-gated.
 
-## Reliability Objectives
-1. Surface continuity and quality diagnostics in primary workflow.
-2. Make provider degradation explicit and inspectable.
-3. Keep explainability available without opening raw backend logs.
-4. Prepare for modularization without blocking current UX.
+## Objectives
+1. Expose continuity and quality diagnostics in main analyst workflow.
+2. Make provider degradation explicit.
+3. Keep explainability data accessible without backend log access.
+4. Preserve current UI shell while improving maintainability.
 
-## Task Tracker
+## Task Status
 | ID | Task | Status | Evidence |
 |---|---|---|---|
-| E01 | Split monolithic `ui.html` into modules | DONE | `ui.html` now references `/ui/assets/ui.css` + `/ui/assets/ui.js`; assets served by API |
-| E02 | Add typed API client | DONE | `ui.js` now uses centralized `apiClient` with payload validation + timeout handling |
-| E03 | Continuity diagnostics panel | IN_PROGRESS | slice signature chip displayed |
-| E04 | Quality flags + assumptions in result cards | DONE | new chips + assumptions block |
-| E05 | Provider/degradation transparency | DONE | provider/fallback chips visible |
-| E06 | Explainability modal stage timeline and contract checks | IN_PROGRESS | diagnostics payload expanded + runtime stage events emitted from v2 adapter |
-| E07 | Rule UX validation and preview | IN_PROGRESS | existing controls; stricter validation pending |
-| E08 | Accessibility/responsive/perf pass | NOT_STARTED | lighthouse baseline pending |
+| E01 | Split monolithic UI into modular JS/CSS | DONE | `/ui/assets/ui.js`, `/ui/assets/ui.css` |
+| E02 | Typed API client layer | DONE | `apiClient` request/response shape checks |
+| E03 | Continuity diagnostics panel | DONE | slice signature and carry-forward diagnostics surfaced |
+| E04 | Quality flags + assumptions in result cards | DONE | flags/assumptions visible in cards |
+| E05 | Provider/degradation transparency | DONE | effective provider + fallback reason chips |
+| E06 | Explainability modal timeline + contract checks | IN_PROGRESS | stage diagnostics surfaced, UX refinement pending |
+| E07 | Rule management UX validation/previews | IN_PROGRESS | validation hardening pending |
+| E08 | Accessibility/responsive/perf pass | IN_PROGRESS | final lighthouse pass pending |
 
-## Defect Watchlist
-| Priority | Item | Status |
-|---|---|---|
-| P1 | UI still single-file and difficult to safely evolve | CLOSED |
-| P1 | No strict runtime schema validation in browser | CLOSED (core endpoints now validated through typed client layer) |
-| P2 | Large explain payload rendering cost on long traces | OPEN |
-| P2 | Missing stage timeline visual budget indicators | OPEN |
-
-## Acceptance Criteria (Pre-Cutover)
-- Diagnostics present for every response (`analysis_version`, `slice_signature`, `quality_flags`, `truth_score`).
-- Explicit provider degradation visible for all fallback scenarios.
-- Explain modal shows stage diagnostics without errors.
-- No regression in async query flow and fix workflow.
+## UAT Notes
+1. Core diagnostics visibility goals are met for analyst UAT.
+2. Remaining UI work is polish and accessibility/performance hardening, not functional blockers.
