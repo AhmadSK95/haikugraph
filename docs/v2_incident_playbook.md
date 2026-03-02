@@ -1,6 +1,6 @@
 # dataDa v2 Incident Playbook
 
-Last Updated: 2026-03-01
+Last Updated: 2026-03-02
 Owner: Reliability Engineering
 
 ## Incident Classes
@@ -29,7 +29,7 @@ Owner: Reliability Engineering
 4. Execute mitigation:
    - provider integrity issue: pin deterministic/auto mode
    - semantic/schema issue: invalidate semantic cache and rerun `/datasets/profile`
-   - runtime regression: switch `HG_RUNTIME_VERSION=v1`
+   - runtime regression: rollback to previous certified v2 release artifact
 5. Resolve with corrective task ids and validation artifacts.
 
 ## Evidence Requirements for Closure

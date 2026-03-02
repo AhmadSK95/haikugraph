@@ -434,7 +434,7 @@
         const score = Number(r.confidence_score || 0);
         const conf = score >= .75 ? "good" : (score >= .45 ? "warn" : "");
         const mode = (r.runtime && r.runtime.mode) ? r.runtime.mode : state.mode;
-        const analysisVersion = String(r.analysis_version || "v1");
+        const analysisVersion = String(r.analysis_version || "v2");
         const sliceSignature = String(r.slice_signature || "");
         const truthScore = Number.isFinite(Number(r.truth_score)) ? Number(r.truth_score) : null;
         const qualityFlags = Array.isArray(r.quality_flags) ? r.quality_flags.slice(0, 4) : [];
@@ -677,7 +677,7 @@
         contract_validation: technicalView.contract_validation || r.contract_validation || {},
         data_quality: technicalView.data_quality || r.data_quality || {},
         contribution_map: technicalView.contribution_map || r.contribution_map || [],
-        analysis_version: r.analysis_version || "v1",
+        analysis_version: r.analysis_version || "v2",
         slice_signature: r.slice_signature || "",
         quality_flags: r.quality_flags || [],
         assumptions: r.assumptions || [],

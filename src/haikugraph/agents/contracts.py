@@ -477,8 +477,8 @@ class AssistantQueryResponse(BaseModel):
 
     # v2 additive diagnostics (kept optional for API compatibility)
     analysis_version: str = Field(
-        default="v1",
-        description="Internal analysis engine version used for this response (v1/v2).",
+        default="v2",
+        description="Internal analysis engine version used for this response (v2).",
     )
     slice_signature: str = Field(
         default="",
@@ -509,4 +509,20 @@ class AssistantQueryResponse(BaseModel):
     fallback_used: dict[str, Any] = Field(
         default_factory=dict,
         description="Fallback metadata describing degradation/failover behavior.",
+    )
+    certainty_tags: list[str] = Field(
+        default_factory=list,
+        description="Explicit certainty/uncertainty tags (evidence_backed, inferred, join_fragility, etc.).",
+    )
+    decision_memo: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured decision memo payload when memo output mode is requested.",
+    )
+    grain_signature: str = Field(
+        default="",
+        description="Signature of query grain (grouping + metric semantics).",
+    )
+    denominator_semantics: str = Field(
+        default="",
+        description="Resolved denominator semantics (per_customer, per_transaction, per_quote, etc.).",
     )

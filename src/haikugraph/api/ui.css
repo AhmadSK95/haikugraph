@@ -636,3 +636,12 @@
       .workspace{order:1;height:70vh}
       .form-grid{grid-template-columns:1fr}
     }
+    @media(max-width:640px){
+      .layout{padding:8px}
+      .workspace{height:72vh;padding:8px}
+      .top{padding:6px;gap:8px}
+      .controls{width:100%;margin-left:0}
+      .controls select{min-width:0;width:100%}
+      .user{max-width:92%}
+      .assistant-card{padding:10px}
+    }

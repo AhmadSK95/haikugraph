@@ -31,9 +31,25 @@ from haikugraph.io.document_ingest import ingest_documents_to_duckdb
 from haikugraph.io.onboarding_profile import load_or_create_onboarding_profile
 from haikugraph.io.stream_snapshot import ingest_stream_snapshot_to_duckdb
 from haikugraph.llm.router import DEFAULT_MODELS
-from haikugraph.poc import AgenticAnalyticsTeam, AutonomyConfig, RuntimeSelection, load_dotenv_file
+from haikugraph.poc import AgenticAnalyticsTeam
 from haikugraph.poc.source_truth import run_source_truth_suite
+from haikugraph.services import (
+    CorrectionsService,
+    RulesService,
+    ScenarioService,
+    ToolsmithService,
+    TrustService,
+)
+from haikugraph.v2.exceptions import (
+    ContradictionDetectedError,
+    PlanningError,
+    PolicyViolationError,
+    ProviderDegradedError,
+    QueryCompilationError,
+    QueryExecutionError,
+)
 from haikugraph.v2 import SemanticProfileCache, V2Orchestrator, apply_v2_compat_fields, profile_dataset
+from haikugraph.v2.runtime import AutonomyConfig, RuntimeSelection, load_dotenv_file
 
 
 DEFAULT_DB_CANDIDATES = (
@@ -1000,7 +1016,7 @@ def _repo_root_path() -> Path:
 
 def _runtime_version() -> str:
     raw = str(os.environ.get("HG_RUNTIME_VERSION", "v2")).strip().lower()
-    if raw in {"v1", "v2", "shadow"}:
+    if raw == "v2":
         return raw
     return "v2"
 
@@ -1133,13 +1149,19 @@ def _composite_truth_score(runs: list[QualityRunSummary]) -> float | None:
 
 
 def _stage_slo_budget_ms() -> dict[str, int]:
+    executor_budget = int(os.environ.get("HG_STAGE_BUDGET_EXECUTOR_MS", "6000"))
+    evaluator_budget = int(os.environ.get("HG_STAGE_BUDGET_EVALUATOR_MS", "1200"))
+    insight_budget = int(os.environ.get("HG_STAGE_BUDGET_INSIGHT_ENGINE_MS", "1200"))
     return {
         "semantic_profiler": int(os.environ.get("HG_STAGE_BUDGET_SEMANTIC_PROFILER_MS", "900")),
         "intent_engine": int(os.environ.get("HG_STAGE_BUDGET_INTENT_ENGINE_MS", "900")),
         "planner": int(os.environ.get("HG_STAGE_BUDGET_PLANNER_MS", "1500")),
         "query_compiler": int(os.environ.get("HG_STAGE_BUDGET_QUERY_COMPILER_MS", "1200")),
-        "executor_delegate": int(os.environ.get("HG_STAGE_BUDGET_EXECUTOR_MS", "6000")),
-        "evaluator_insight": int(os.environ.get("HG_STAGE_BUDGET_EVALUATOR_MS", "1200")),
+        "executor": executor_budget,
+        "executor_delegate": executor_budget,
+        "evaluator": evaluator_budget,
+        "insight_engine": insight_budget,
+        "evaluator_insight": evaluator_budget + insight_budget,
     }
 
 
@@ -1281,6 +1303,7 @@ def _cutover_artifacts() -> list[CutoverArtifactStatus]:
         ("incident_playbook", root / "docs" / "v2_incident_playbook.md"),
         ("quality_review_cadence", root / "docs" / "v2_quality_review_cadence.md"),
         ("v1_decommission_criteria", root / "docs" / "v1_decommission_criteria.md"),
+        ("decommission_postmortem", root / "docs" / "v2_decommission_postmortem.md"),
         (
             "baseline_lock_manifest",
             latest_baseline or (root / "reports" / "v2_baseline_lock_*.json"),
@@ -1853,10 +1876,10 @@ def _resolve_onboarding_profile_meta(app: FastAPI, *, connection_id: str, db_pat
     }
 
 
-def _resolve_team_for_connection(
+def _resolve_connection_db_for_query(
     app: FastAPI,
     connection_id: str | None,
-) -> tuple[AgenticAnalyticsTeam, Path, dict[str, Any]]:
+) -> tuple[Path, dict[str, Any]]:
     requested = (connection_id or "default").strip() or "default"
     if requested == "default":
         entry = _self_heal_default_connection(app)
@@ -1895,6 +1918,28 @@ def _resolve_team_for_connection(
         )
 
     cid = str(entry["id"])
+    default_id = app.state.connection_registry.default_connection_id()
+    if cid == default_id:
+        app.state.db_path = db_path
+
+    enriched_entry = dict(entry)
+    if stream_snapshot_meta:
+        enriched_entry["_stream_snapshot"] = stream_snapshot_meta
+    enriched_entry["_onboarding_profile"] = _resolve_onboarding_profile_meta(
+        app,
+        connection_id=cid,
+        db_path=db_path,
+    )
+    return db_path, enriched_entry
+
+
+def _resolve_team_for_connection(
+    app: FastAPI,
+    connection_id: str | None,
+) -> tuple[AgenticAnalyticsTeam, Path, dict[str, Any]]:
+    db_path, enriched_entry = _resolve_connection_db_for_query(app, connection_id)
+    cid = str(enriched_entry["id"])
+    kind = str(enriched_entry.get("kind") or "duckdb").lower()
     force_refresh = kind == "documents"
     with app.state.teams_lock:
         cached = app.state.teams.get(cid)
@@ -1917,15 +1962,6 @@ def _resolve_team_for_connection(
     if cid == default_id:
         app.state.db_path = db_path
         app.state.team = team
-
-    enriched_entry = dict(entry)
-    if stream_snapshot_meta:
-        enriched_entry["_stream_snapshot"] = stream_snapshot_meta
-    enriched_entry["_onboarding_profile"] = _resolve_onboarding_profile_meta(
-        app,
-        connection_id=cid,
-        db_path=db_path,
-    )
 
     return team, db_path, enriched_entry
 
@@ -2088,7 +2124,7 @@ def _execute_query_request(
     if not budget.get("allowed", False):
         raise HTTPException(status_code=429, detail=str(budget.get("message") or "Query budget exceeded."))
 
-    team, db_path, connection_entry = _resolve_team_for_connection(
+    db_path, connection_entry = _resolve_connection_db_for_query(
         app,
         request.db_connection_id,
     )
@@ -2186,16 +2222,14 @@ def _execute_query_request(
     )
     cache_hit = False
     cached_payload = _query_cache_get(app, cache_key)
-    runtime_version = _runtime_version()
 
     started = time.perf_counter()
     if isinstance(cached_payload, dict):
         response = AssistantQueryResponse(**cached_payload)
         cache_hit = True
     else:
-        if runtime_version == "v2":
+        try:
             v2_run = V2Orchestrator(
-                team,
                 semantic_cache=app.state.semantic_profile_cache,
             ).run(
                 goal=request.goal,
@@ -2209,50 +2243,53 @@ def _execute_query_request(
                 session_id=session_id,
             )
             response = apply_v2_compat_fields(v2_run.response, v2_run.v2_payload, analysis_version="v2")
-        elif runtime_version == "shadow":
-            primary_v1 = team.run(
-                request.goal,
-                runtime,
-                tenant_id=tenant_id,
-                conversation_context=history,
-                storyteller_mode=request.storyteller_mode,
-                autonomy=autonomy,
-                scenario_context=scenario_context,
+        except (
+            PolicyViolationError,
+            PlanningError,
+            QueryCompilationError,
+            QueryExecutionError,
+            ProviderDegradedError,
+            ContradictionDetectedError,
+        ) as exc:
+            response = AssistantQueryResponse(
+                success=False,
+                answer_markdown=f"Execution error: {type(exc).__name__}: {exc}",
+                confidence="low",
+                confidence_score=0.2,
+                definition_used="runtime_error",
+                evidence=[],
+                sanity_checks=[],
+                sql=None,
+                row_count=0,
+                columns=[],
+                sample_rows=[],
+                execution_time_ms=0.0,
+                trace_id=str(uuid.uuid4()),
+                runtime={"mode": str(runtime.mode), "provider": str(runtime.provider or "")},
+                error=f"{type(exc).__name__}: {exc}",
+                warnings=["Runtime error captured in v2 pipeline."],
+                analysis_version="v2",
             )
-            v2_run = V2Orchestrator(
-                team,
-                semantic_cache=app.state.semantic_profile_cache,
-            ).run(
-                goal=request.goal,
-                runtime=runtime,
-                db_path=str(db_path),
-                history=history,
-                tenant_id=tenant_id,
-                storyteller_mode=request.storyteller_mode,
-                autonomy=autonomy,
-                scenario_context=scenario_context,
-                session_id=session_id,
-            )
-            response = apply_v2_compat_fields(primary_v1, v2_run.v2_payload, analysis_version="shadow")
-            shadow_diff = {
-                "v1_success": bool(primary_v1.success),
-                "v2_success": bool(v2_run.response.success),
-                "sql_equal": str(primary_v1.sql or "").strip() == str(v2_run.response.sql or "").strip(),
-                "confidence_delta": round(
-                    float(v2_run.response.confidence_score or 0.0) - float(primary_v1.confidence_score or 0.0),
-                    4,
-                ),
-            }
-            response.runtime = {**(response.runtime or {}), "shadow_diff": shadow_diff}
-        else:
-            response = team.run(
-                request.goal,
-                runtime,
-                tenant_id=tenant_id,
-                conversation_context=history,
-                storyteller_mode=request.storyteller_mode,
-                autonomy=autonomy,
-                scenario_context=scenario_context,
+        except Exception as exc:
+            response = AssistantQueryResponse(
+                success=False,
+                answer_markdown=f"Unhandled runtime error: {type(exc).__name__}: {exc}",
+                confidence="uncertain",
+                confidence_score=0.1,
+                definition_used="runtime_error_untyped",
+                evidence=[],
+                sanity_checks=[],
+                sql=None,
+                row_count=0,
+                columns=[],
+                sample_rows=[],
+                execution_time_ms=0.0,
+                trace_id=str(uuid.uuid4()),
+                runtime={"mode": str(runtime.mode), "provider": str(runtime.provider or "")},
+                error=f"{type(exc).__name__}: {exc}",
+                warnings=["Unhandled runtime exception."],
+                quality_flags=["runtime_exception_untyped"],
+                analysis_version="v2",
             )
         if response.success:
             _query_cache_set(app, cache_key, response.model_dump())
@@ -2322,10 +2359,20 @@ def _execute_query_request(
             "user_id": request.user_id or "",
             "tenant_id": tenant_id,
             "role": request.role or "",
-            "analysis_version": str(response.analysis_version or "v1"),
+            "analysis_version": str(response.analysis_version or "v2"),
             "slice_signature": str(response.slice_signature or ""),
             "stage_timings_ms": dict(response.stage_timings_ms or {}),
             "quality_flags": list(response.quality_flags or []),
+            "metric": str((response.contract_spec or {}).get("metric") or ""),
+            "secondary_metric": (
+                "secondary_metric_value"
+                if "secondary_metric_value" in (response.columns or [])
+                else ""
+            ),
+            "group_dimensions": list((response.contract_spec or {}).get("dimensions") or []),
+            "time_scope": str((response.contract_spec or {}).get("time_scope") or ""),
+            "denominator": str(response.denominator_semantics or ""),
+            "grain_signature": str(response.grain_signature or ""),
         },
     )
     conversation_turns = len(history) + 1
@@ -2349,7 +2396,7 @@ def _execute_query_request(
             "goal": request.goal,
             "trace_id": response.trace_id,
             "scenario_set_id": str(request.scenario_set_id or ""),
-            "analysis_version": str(response.analysis_version or "v1"),
+            "analysis_version": str(response.analysis_version or "v2"),
             "contract_signature": json.dumps(
                 {
                     "metric": str((response.contract_spec or {}).get("metric") or ""),
@@ -2364,6 +2411,9 @@ def _execute_query_request(
             "quality_flags": list(response.quality_flags or []),
             "provider_effective": str(response.provider_effective or runtime.provider or ""),
             "fallback_used": dict(response.fallback_used or {}),
+            "certainty_tags": list(response.certainty_tags or []),
+            "grain_signature": str(response.grain_signature or ""),
+            "denominator_semantics": str(response.denominator_semantics or ""),
             "warning_terms": warning_terms if isinstance(warning_terms, list) else [],
             "dataset_signature": dataset_signature,
             "schema_signature": schema_signature,
@@ -3472,11 +3522,10 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "viewer")
-        team, db_path, connection_entry = _resolve_team_for_connection(
+        db_path, connection_entry = _resolve_connection_db_for_query(
             app,
             request.db_connection_id,
         )
-        del team
         profile, cache_meta = _profile_dataset_cached(app, db_path=db_path)
         drift = _record_schema_drift_if_any(
             app,
@@ -3534,6 +3583,7 @@ def _register_routes(app: FastAPI) -> None:
             observed_p95_ms=dict(snapshot.get("observed_p95_ms") or {}),
         )
 
+    @app.get("/api/assistant/runtime/readiness", response_model=CutoverReadinessResponse)
     @app.get("/api/assistant/runtime/cutover/readiness", response_model=CutoverReadinessResponse)
     async def runtime_cutover_readiness(
         x_datada_api_key: str | None = Header(default=None),
@@ -3632,22 +3682,25 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "analyst")
-        team, _, connection_entry = _resolve_team_for_connection(
+        backend, _, connection_entry = _resolve_team_for_connection(
             app,
             request.db_connection_id,
         )
-        saved = team.record_feedback(
+        corrections_service = CorrectionsService(backend)
+        saved = corrections_service.record_feedback(
+            {
+                "trace_id": request.trace_id,
+                "session_id": request.session_id,
+                "goal": request.goal,
+                "issue": request.issue,
+                "suggested_fix": request.suggested_fix,
+                "severity": request.severity,
+                "keyword": request.keyword,
+                "target_table": request.target_table,
+                "target_metric": request.target_metric,
+                "target_dimensions": request.target_dimensions,
+            },
             tenant_id=access["tenant_id"],
-            trace_id=request.trace_id,
-            session_id=request.session_id,
-            goal=request.goal,
-            issue=request.issue,
-            suggested_fix=request.suggested_fix,
-            severity=request.severity,
-            keyword=request.keyword,
-            target_table=request.target_table,
-            target_metric=request.target_metric,
-            target_dimensions=request.target_dimensions,
         )
         has_rule = bool(saved.get("correction_id"))
         return FeedbackResponse(
@@ -3688,12 +3741,14 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "viewer")
-        team, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
-        rows = team.list_corrections(
+        backend, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        corrections_service = CorrectionsService(backend)
+        rows = corrections_service.list_corrections(
             tenant_id=access["tenant_id"],
             limit=limit,
-            include_disabled=include_disabled,
         )
+        if not include_disabled:
+            rows = [row for row in rows if bool(row.get("enabled", True))]
         rules = [CorrectionRuleInfo(**row) for row in rows]
         return CorrectionsResponse(
             db_connection_id=str(connection_entry.get("id") or db_connection_id),
@@ -3722,13 +3777,14 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "analyst")
-        team, _, connection_entry = _resolve_team_for_connection(
+        backend, _, connection_entry = _resolve_team_for_connection(
             app,
             request.db_connection_id,
         )
-        ok = team.set_correction_enabled(
-            request.correction_id,
-            request.enabled,
+        corrections_service = CorrectionsService(backend)
+        ok = corrections_service.set_correction_enabled(
+            correction_id=request.correction_id,
+            enabled=request.enabled,
             tenant_id=access["tenant_id"],
         )
         if not ok:
@@ -3767,11 +3823,12 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "analyst")
-        team, _, connection_entry = _resolve_team_for_connection(
+        backend, _, connection_entry = _resolve_team_for_connection(
             app,
             request.db_connection_id,
         )
-        result = team.rollback_correction(request.correction_id, tenant_id=access["tenant_id"])
+        corrections_service = CorrectionsService(backend)
+        result = corrections_service.rollback_correction(request.correction_id, tenant_id=access["tenant_id"])
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=str(result.get("message") or "Rollback failed."))
         return CorrectionToggleResponse(
@@ -3807,13 +3864,16 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, entry = _resolve_team_for_connection(app, db_connection_id)
-        rows = team.list_business_rules(
+        backend, _, entry = _resolve_team_for_connection(app, db_connection_id)
+        rules_service = RulesService(backend)
+        rows = rules_service.list_rules(
             tenant_id=access["tenant_id"],
-            status=status,
-            domain=domain,
             limit=limit,
         )
+        if status:
+            rows = [row for row in rows if str(row.get("status") or "").lower() == str(status).lower()]
+        if domain:
+            rows = [row for row in rows if str(row.get("domain") or "").lower() == str(domain).lower()]
         return BusinessRulesResponse(
             db_connection_id=str(entry.get("id") or db_connection_id),
             rules=[BusinessRuleInfo(**row) for row in rows],
@@ -3841,20 +3901,23 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
-        rule_id = team.create_business_rule(
+        backend, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        rules_service = RulesService(backend)
+        rule_id = rules_service.create_rule(
+            {
+                "domain": request.domain,
+                "name": request.name,
+                "rule_type": request.rule_type,
+                "triggers": request.triggers,
+                "action_payload": request.action_payload,
+                "notes": request.notes,
+                "priority": request.priority,
+                "status": request.status,
+                "source": "admin_ui",
+                "approved_by": access["user_id"] if request.status.lower() == "active" else "",
+            },
             tenant_id=access["tenant_id"],
-            domain=request.domain,
-            name=request.name,
-            rule_type=request.rule_type,
-            triggers=request.triggers,
-            action_payload=request.action_payload,
-            notes=request.notes,
-            priority=request.priority,
-            status=request.status,
-            source="admin_ui",
             created_by=access["user_id"],
-            approved_by=access["user_id"] if request.status.lower() == "active" else "",
         )
         if not rule_id:
             raise HTTPException(status_code=400, detail="Rule creation failed or duplicate active rule exists.")
@@ -3888,13 +3951,14 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
-        result = team.set_business_rule_status(
-            request.rule_id,
-            tenant_id=access["tenant_id"],
+        backend, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        rules_service = RulesService(backend)
+        result = rules_service.set_rule_status(
+            rule_id=request.rule_id,
             status=request.status,
-            actor=access["user_id"],
             note=request.note,
+            tenant_id=access["tenant_id"],
+            approved_by=access["user_id"],
         )
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=str(result.get("message") or "Rule status update failed."))
@@ -3928,20 +3992,23 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
-        result = team.update_business_rule(
-            request.rule_id,
+        backend, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        rules_service = RulesService(backend)
+        result = rules_service.update_rule(
+            {
+                "rule_id": request.rule_id,
+                "domain": request.domain,
+                "name": request.name,
+                "rule_type": request.rule_type,
+                "triggers": request.triggers,
+                "action_payload": request.action_payload,
+                "notes": request.notes,
+                "priority": request.priority,
+                "status": request.status,
+                "note": request.note,
+            },
             tenant_id=access["tenant_id"],
-            domain=request.domain,
-            name=request.name,
-            rule_type=request.rule_type,
-            triggers=request.triggers,
-            action_payload=request.action_payload,
-            notes=request.notes,
-            priority=request.priority,
-            status=request.status,
-            actor=access["user_id"],
-            note=request.note,
+            updated_by=access["user_id"],
         )
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=str(result.get("message") or "Rule update failed."))
@@ -3975,11 +4042,12 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
-        result = team.rollback_business_rule(
+        backend, _, entry = _resolve_team_for_connection(app, request.db_connection_id)
+        rules_service = RulesService(backend)
+        result = rules_service.rollback_rule(
             request.rule_id,
             tenant_id=access["tenant_id"],
-            actor=access["user_id"],
+            rolled_back_by=access["user_id"],
         )
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=str(result.get("message") or "Rule rollback failed."))
@@ -4015,9 +4083,10 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "viewer")
-        _, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        _, connection_entry = _resolve_connection_db_for_query(app, db_connection_id)
         connection_id = str(connection_entry.get("id") or db_connection_id)
-        rows = app.state.runtime_store.list_scenario_sets(
+        scenario_service = ScenarioService(app.state.runtime_store)
+        rows = scenario_service.list_scenarios(
             tenant_id=access["tenant_id"],
             connection_id=connection_id,
             status=status,
@@ -4050,15 +4119,18 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "analyst")
-        _, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        _, connection_entry = _resolve_connection_db_for_query(app, request.db_connection_id)
         connection_id = str(connection_entry.get("id") or request.db_connection_id)
-        saved = app.state.runtime_store.upsert_scenario_set(
+        scenario_service = ScenarioService(app.state.runtime_store)
+        saved = scenario_service.upsert_scenario(
+            {
+                "name": request.name,
+                "assumptions": request.assumptions,
+                "scenario_set_id": request.scenario_set_id,
+                "status": request.status,
+            },
             tenant_id=access["tenant_id"],
             connection_id=connection_id,
-            name=request.name,
-            assumptions=request.assumptions,
-            scenario_set_id=request.scenario_set_id,
-            status=request.status,
         )
         return ScenarioSetActionResponse(
             success=True,
@@ -4090,9 +4162,10 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "viewer")
-        _, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        _, connection_entry = _resolve_connection_db_for_query(app, db_connection_id)
         connection_id = str(connection_entry.get("id") or db_connection_id)
-        row = app.state.runtime_store.get_scenario_set(
+        scenario_service = ScenarioService(app.state.runtime_store)
+        row = scenario_service.get_scenario(
             scenario_set_id=scenario_set_id,
             tenant_id=access["tenant_id"],
         )
@@ -4127,20 +4200,23 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, _ = _resolve_team_for_connection(app, request.db_connection_id)
-        saved = team.record_fix(
+        backend, _, _ = _resolve_team_for_connection(app, request.db_connection_id)
+        toolsmith_service = ToolsmithService(backend)
+        saved = toolsmith_service.record_fix(
+            {
+                "trace_id": request.trace_id,
+                "session_id": request.session_id,
+                "goal": request.goal,
+                "issue": request.issue,
+                "keyword": request.keyword,
+                "domain": request.domain,
+                "target_table": request.target_table,
+                "target_metric": request.target_metric,
+                "target_dimensions": request.target_dimensions,
+                "notes": request.notes,
+                "actor": access["user_id"],
+            },
             tenant_id=access["tenant_id"],
-            trace_id=request.trace_id,
-            session_id=request.session_id,
-            goal=request.goal,
-            issue=request.issue,
-            keyword=request.keyword,
-            domain=request.domain,
-            target_table=request.target_table,
-            target_metric=request.target_metric,
-            target_dimensions=request.target_dimensions,
-            notes=request.notes,
-            actor=access["user_id"],
         )
         return FixResponse(
             success=True,
@@ -4174,12 +4250,14 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "viewer")
-        team, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
-        rows = team.list_tool_candidates(
+        backend, _, connection_entry = _resolve_team_for_connection(app, db_connection_id)
+        toolsmith_service = ToolsmithService(backend)
+        rows = toolsmith_service.list_tool_candidates(
             tenant_id=access["tenant_id"],
-            status=status,
             limit=limit,
         )
+        if status:
+            rows = [row for row in rows if str(row.get("status") or "").lower() == str(status).lower()]
         tools = [ToolCandidateInfo(**row) for row in rows]
         return ToolCandidatesResponse(
             db_connection_id=str(connection_entry.get("id") or db_connection_id),
@@ -4208,8 +4286,9 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "analyst")
-        team, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
-        result = team.stage_tool_candidate(request.tool_id, tenant_id=access["tenant_id"])
+        backend, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        toolsmith_service = ToolsmithService(backend)
+        result = toolsmith_service.stage_tool_candidate(request.tool_id, tenant_id=access["tenant_id"])
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=str(result.get("message") or "Stage failed."))
         return ToolCandidateActionResponse(
@@ -4242,8 +4321,9 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
-        result = team.promote_tool_candidate(request.tool_id, tenant_id=access["tenant_id"])
+        backend, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        toolsmith_service = ToolsmithService(backend)
+        result = toolsmith_service.promote_tool_candidate(request.tool_id, tenant_id=access["tenant_id"])
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=str(result.get("message") or "Promote failed."))
         return ToolCandidateActionResponse(
@@ -4276,12 +4356,11 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "admin")
-        team, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
-        result = team.rollback_tool_candidate(
-            request.tool_id,
-            tenant_id=access["tenant_id"],
-            reason=request.reason,
-        )
+        backend, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        toolsmith_service = ToolsmithService(backend)
+        result = toolsmith_service.rollback_tool_candidate(request.tool_id, tenant_id=access["tenant_id"])
+        if request.reason and result and not str(result.get("reason") or ""):
+            result["reason"] = request.reason
         if not result.get("success"):
             raise HTTPException(status_code=400, detail=str(result.get("message") or "Rollback failed."))
         return ToolCandidateActionResponse(
@@ -4302,8 +4381,9 @@ def _register_routes(app: FastAPI) -> None:
         x_datada_tenant_id: str | None = Header(default=None),
     ):
         tid = (tenant_id or x_datada_tenant_id or "public").strip() or "public"
-        team, _, _ = _resolve_team_for_connection(app, None)
-        terms = team.list_glossary(tenant_id=tid)
+        backend, _, _ = _resolve_team_for_connection(app, None)
+        toolsmith_service = ToolsmithService(backend)
+        terms = toolsmith_service.list_glossary(tenant_id=tid)
         return {"terms": terms, "count": len(terms)}
 
     @app.post("/api/assistant/glossary")
@@ -4313,15 +4393,18 @@ def _register_routes(app: FastAPI) -> None:
     ):
         body = await request.json()
         tid = (body.get("tenant_id") or x_datada_tenant_id or "public").strip() or "public"
-        team, _, _ = _resolve_team_for_connection(app, body.get("db_connection_id"))
-        result = team.upsert_glossary_term(
-            term=body.get("term", ""),
-            definition=body.get("definition", ""),
-            sql_expression=body.get("sql_expression", ""),
-            target_table=body.get("target_table", ""),
-            target_column=body.get("target_column", ""),
-            examples=body.get("examples"),
-            contributed_by=body.get("contributed_by", "user"),
+        backend, _, _ = _resolve_team_for_connection(app, body.get("db_connection_id"))
+        toolsmith_service = ToolsmithService(backend)
+        result = toolsmith_service.upsert_glossary_term(
+            {
+                "term": body.get("term", ""),
+                "definition": body.get("definition", ""),
+                "sql_expression": body.get("sql_expression", ""),
+                "target_table": body.get("target_table", ""),
+                "target_column": body.get("target_column", ""),
+                "examples": body.get("examples"),
+                "contributed_by": body.get("contributed_by", "user"),
+            },
             tenant_id=tid,
         )
         return result
@@ -4336,8 +4419,9 @@ def _register_routes(app: FastAPI) -> None:
         x_datada_tenant_id: str | None = Header(default=None),
     ):
         tid = (tenant_id or x_datada_tenant_id or "public").strip() or "public"
-        team, _, _ = _resolve_team_for_connection(app, None)
-        teachings = team.list_teachings(tenant_id=tid)
+        backend, _, _ = _resolve_team_for_connection(app, None)
+        toolsmith_service = ToolsmithService(backend)
+        teachings = toolsmith_service.list_teachings(tenant_id=tid)
         return {"teachings": teachings, "count": len(teachings)}
 
     @app.post("/api/assistant/teach")
@@ -4347,14 +4431,17 @@ def _register_routes(app: FastAPI) -> None:
     ):
         body = await request.json()
         tid = (body.get("tenant_id") or x_datada_tenant_id or "public").strip() or "public"
-        team, _, _ = _resolve_team_for_connection(app, body.get("db_connection_id"))
-        result = team.add_teaching(
-            teaching_text=body.get("teaching_text", ""),
-            expert_name=body.get("expert_name", "anonymous"),
-            keyword=body.get("keyword", ""),
-            target_table=body.get("target_table", ""),
-            target_metric=body.get("target_metric", ""),
-            target_dimensions=body.get("target_dimensions"),
+        backend, _, _ = _resolve_team_for_connection(app, body.get("db_connection_id"))
+        toolsmith_service = ToolsmithService(backend)
+        result = toolsmith_service.add_teaching(
+            {
+                "teaching_text": body.get("teaching_text", ""),
+                "expert_name": body.get("expert_name", "anonymous"),
+                "keyword": body.get("keyword", ""),
+                "target_table": body.get("target_table", ""),
+                "target_metric": body.get("target_metric", ""),
+                "target_dimensions": body.get("target_dimensions"),
+            },
             tenant_id=tid,
         )
         return result
@@ -4387,7 +4474,8 @@ def _register_routes(app: FastAPI) -> None:
             if requested_tenant and requested_tenant != access["tenant_id"]:
                 raise HTTPException(status_code=403, detail="Cross-tenant trust view requires admin role.")
             requested_tenant = access["tenant_id"]
-        payload = app.state.runtime_store.trust_dashboard(tenant_id=requested_tenant or None, hours=hours)
+        trust_service = TrustService(app.state.runtime_store)
+        payload = trust_service.trust_dashboard(tenant_id=requested_tenant or None, hours=hours)
         return TrustDashboardResponse(
             generated_at=str(payload.get("generated_at") or ""),
             tenant_id=str(payload.get("tenant_id") or "all"),
@@ -4433,7 +4521,8 @@ def _register_routes(app: FastAPI) -> None:
                 raise HTTPException(status_code=403, detail="Cross-tenant SLO evaluation requires admin role.")
             requested_tenant = access["tenant_id"]
 
-        payload = app.state.runtime_store.evaluate_slo(
+        trust_service = TrustService(app.state.runtime_store)
+        payload = trust_service.evaluate_slo(
             tenant_id=requested_tenant or None,
             hours=int(hours or app.state.slo_window_hours),
             success_rate_target=float(app.state.slo_success_rate_target),
@@ -4485,11 +4574,13 @@ def _register_routes(app: FastAPI) -> None:
                 raise HTTPException(status_code=403, detail="Cross-tenant incident view requires admin role.")
             requested_tenant = access["tenant_id"]
 
-        rows = app.state.runtime_store.list_incidents(
+        trust_service = TrustService(app.state.runtime_store)
+        rows = trust_service.list_incidents(
             tenant_id=requested_tenant or None,
-            status=status,
             limit=limit,
         )
+        if status:
+            rows = [row for row in rows if str(row.get("status") or "").lower() == str(status).lower()]
         return IncidentsResponse(incidents=[IncidentEvent(**row) for row in rows])
 
     @app.post("/api/assistant/incidents/ack", response_model=ConnectionActionResponse)
@@ -4514,24 +4605,25 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "analyst")
+        trust_service = TrustService(app.state.runtime_store)
         # Tenant boundary enforcement for non-admin roles.
         if access["role"] != "admin":
-            matched = app.state.runtime_store.list_incidents(
+            matched = trust_service.list_incidents(
                 tenant_id=access["tenant_id"],
-                status=None,
                 limit=500,
             )
             if not any(str(item.get("incident_id") or "") == request.incident_id for item in matched):
                 raise HTTPException(status_code=403, detail="Cannot acknowledge incidents outside your tenant.")
 
-        result = app.state.runtime_store.update_incident_status(
+        ok = trust_service.update_incident_status(
             incident_id=request.incident_id,
             status=request.status,
             note=request.note,
+            acknowledged_by=access["user_id"],
         )
-        if not result.get("success"):
-            raise HTTPException(status_code=400, detail=str(result.get("message") or "Incident update failed."))
-        return ConnectionActionResponse(success=True, message=str(result.get("message") or "Incident updated."))
+        if not ok:
+            raise HTTPException(status_code=400, detail="Incident update failed.")
+        return ConnectionActionResponse(success=True, message="Incident updated.")
 
     @app.get("/api/assistant/source-truth/check", response_model=SourceTruthResponse)
     async def source_truth_check(
@@ -4738,7 +4830,7 @@ def _register_routes(app: FastAPI) -> None:
             authorization_header=authorization,
         )
         _require_min_role(access["role"], "viewer")
-        _, _, connection_entry = _resolve_team_for_connection(app, request.db_connection_id)
+        _, connection_entry = _resolve_connection_db_for_query(app, request.db_connection_id)
         connection_id = str(connection_entry.get("id") or request.db_connection_id)
         scope = _tenant_session_scope(access["tenant_id"], connection_id, request.session_id)
         deleted = app.state.runtime_store.clear_session(scope)

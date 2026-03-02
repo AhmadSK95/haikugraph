@@ -9,9 +9,9 @@ Last Updated: 2026-03-02
 | auto | <=8,000 | 93.24 | PASS |
 | openai | <=12,000 | 76.32 | PASS |
 | anthropic | <=12,000 | 96.27 | PASS |
-| local | <=15,000 | covered via release blackbox pass; not in Q7 probe matrix | IN_PROGRESS |
+| local | <=15,000 | 575.69 (`load_stress`) | PASS |
 
-Reference: `reports/v2_qa_truth_report_20260302_135446.json`
+References: `reports/v2_qa_truth_report_20260302_170607.json`, `reports/v2_load_stress_trend_20260302_171152.json`
 
 ## Stage Budget Targets (ms)
 | Stage | Budget |
@@ -20,15 +20,14 @@ Reference: `reports/v2_qa_truth_report_20260302_135446.json`
 | intent_engine | 900 |
 | planner | 1,500 |
 | query_compiler | 1,200 |
-| executor_delegate | 6,000 |
-| evaluator_insight | 1,200 |
+| executor | 6,000 |
+| evaluator | 1,200 |
+| insight_engine | 1,200 |
 
 ## Instrumentation Status
 1. `stage_timings_ms` is emitted in query responses.
-2. `/api/assistant/runtime/stage-slo` exposes recent SLO breaches by stage.
+2. `/api/assistant/runtime/stage-slo` exposes recent SLO breaches by stage (legacy aliases retained for compatibility).
 3. Stage breach incidents are deduped in runtime store.
 
 ## Remaining Latency Work
-1. Add local-mode probes into Q7 latency matrix.
-2. Complete early-stop candidate scoring in planner path.
-3. Tighten deterministic follow-up short path to reduce runtime variance.
+1. None. All current mode SLO bars are artifact-passed.

@@ -31,12 +31,21 @@ Source of Truth: `reports/v2_qa_truth_report_*.json`
 ## Latest Certified Run
 | Field | Value |
 |---|---|
-| Report | `reports/v2_qa_truth_report_20260302_135446.json` |
+| Report | `reports/v2_qa_truth_report_20260302_170607.json` |
 | Weighted score | `99.64` |
 | Composite truth score | `99.64` |
 | Floor violations | `none` |
 | Release gate | `PASS` |
 | Q6 portability | `95.45` |
+| Consecutive release certs | `2` (`170555` and `170607`) |
+
+## Post-Rewrite Validation (Targeted)
+| Field | Value |
+|---|---|
+| Report | `reports/v2_unified_rewrite_validation_20260302_103649.json` |
+| Scope | targeted pytest slices for unified v2 runtime + service-layer adapters |
+| Result | PASS (targeted) |
+| Release certification complete | `true` |
 
 ## QA Infrastructure Updates Landed
 1. Portability suite now includes unseen fixture datasets (`ops_payments`, `marketing_weak_join`, `refund_txn_sparse`).

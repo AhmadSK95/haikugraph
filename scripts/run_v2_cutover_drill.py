@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run local canary + shadow + rollback drill for runtime cutover evidence.
+"""Run local unified-v2 readiness drill for runtime cutover evidence.
 
 Uses in-process FastAPI TestClient to avoid socket/port constraints while still
 executing full API behavior.
@@ -52,7 +52,6 @@ def _run_mode_probe(client: TestClient, runtime_mode: str) -> dict[str, Any]:
                 "execution_time_ms": float(body.get("execution_time_ms") or elapsed_ms),
                 "analysis_version": str(body.get("analysis_version") or ""),
                 "provider_effective": str(body.get("provider_effective") or ""),
-                "shadow_diff_present": bool(((body.get("runtime") or {}).get("shadow_diff"))),
                 "slice_signature_present": bool(str(body.get("slice_signature") or "").strip()),
             }
         )
@@ -77,7 +76,6 @@ def _run_mode_probe(client: TestClient, runtime_mode: str) -> dict[str, Any]:
             "execution_time_ms": float(body.get("execution_time_ms") or elapsed_ms),
             "analysis_version": str(body.get("analysis_version") or ""),
             "provider_effective": str(body.get("provider_effective") or ""),
-            "shadow_diff_present": bool(((body.get("runtime") or {}).get("shadow_diff"))),
             "slice_signature_present": bool(str(body.get("slice_signature") or "").strip()),
         }
     )
@@ -91,12 +89,12 @@ def _run_mode_probe(client: TestClient, runtime_mode: str) -> dict[str, Any]:
     }
 
 
-def _run_stage(stage_name: str, runtime_mode: str, db_path: Path) -> dict[str, Any]:
-    os.environ["HG_RUNTIME_VERSION"] = runtime_mode
+def _run_stage(stage_name: str, db_path: Path) -> dict[str, Any]:
+    os.environ["HG_RUNTIME_VERSION"] = "v2"
     os.environ["HG_DB_PATH"] = str(db_path.resolve())
     app = create_app(db_path=db_path)
     with TestClient(app) as client:
-        probe = _run_mode_probe(client, runtime_mode)
+        probe = _run_mode_probe(client, "v2")
     probe["stage"] = stage_name
     return probe
 
@@ -117,34 +115,27 @@ def main() -> int:
     shutil.copy2(db_path, snapshot_db)
 
     stages = [
-        ("canary_v2", "v2"),
-        ("shadow_validation", "shadow"),
-        ("rollback_v1", "v1"),
+        "release_cert_pass_1",
+        "release_cert_pass_2",
     ]
-    stage_rows = [_run_stage(stage_name, runtime_mode, snapshot_db) for stage_name, runtime_mode in stages]
+    stage_rows = [_run_stage(stage_name, snapshot_db) for stage_name in stages]
 
     stage_map = {row["stage"]: row for row in stage_rows}
-    v2_ok = float(stage_map["canary_v2"]["pass_rate_pct"]) >= 100.0
-    shadow_ok = (
-        float(stage_map["shadow_validation"]["pass_rate_pct"]) >= 100.0
-        and any(bool(r.get("shadow_diff_present")) for r in list(stage_map["shadow_validation"]["rows"] or []))
-    )
-    rollback_ok = float(stage_map["rollback_v1"]["pass_rate_pct"]) >= 100.0
-    drill_passed = bool(v2_ok and shadow_ok and rollback_ok)
+    cert1_ok = float(stage_map["release_cert_pass_1"]["pass_rate_pct"]) >= 100.0
+    cert2_ok = float(stage_map["release_cert_pass_2"]["pass_rate_pct"]) >= 100.0
+    drill_passed = bool(cert1_ok and cert2_ok)
 
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "db_path": str(db_path),
         "snapshot_db_path": str(snapshot_db),
         "criteria": {
-            "v2_canary_pass_rate_pct": 100.0,
-            "shadow_requires_diff_signal": True,
-            "rollback_v1_pass_rate_pct": 100.0,
+            "v2_release_cert_pass_1_pct": 100.0,
+            "v2_release_cert_pass_2_pct": 100.0,
         },
         "checks": {
-            "v2_canary_ok": v2_ok,
-            "shadow_validation_ok": shadow_ok,
-            "rollback_v1_ok": rollback_ok,
+            "release_cert_pass_1_ok": cert1_ok,
+            "release_cert_pass_2_ok": cert2_ok,
         },
         "drill_passed": drill_passed,
         "stages": stage_rows,

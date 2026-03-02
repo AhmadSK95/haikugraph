@@ -278,7 +278,7 @@ def test_runtime_cutover_readiness_endpoint_returns_governance_state(client):
     assert resp.status_code == 200
     payload = resp.json()
     assert "generated_at_epoch_ms" in payload
-    assert payload.get("default_runtime_version") in {"v1", "v2", "shadow"}
+    assert payload.get("default_runtime_version") == "v2"
     assert isinstance(payload.get("canary_ready"), bool)
     assert isinstance(payload.get("release_gate_passed"), bool)
     assert isinstance(payload.get("artifacts"), list)
@@ -287,6 +287,38 @@ def test_runtime_cutover_readiness_endpoint_returns_governance_state(client):
         assert "name" in first
         assert "path" in first
         assert "exists" in first
+
+
+def test_runtime_readiness_alias_endpoint_returns_governance_state(client):
+    resp = client.get(
+        "/api/assistant/runtime/readiness",
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "generated_at_epoch_ms" in payload
+    assert payload.get("default_runtime_version") == "v2"
+    assert isinstance(payload.get("canary_ready"), bool)
+    assert isinstance(payload.get("release_gate_passed"), bool)
+    assert isinstance(payload.get("artifacts"), list)
+
+
+def test_runtime_version_decommission_ignores_legacy_env_values(client, monkeypatch):
+    monkeypatch.setenv("HG_RUNTIME_VERSION", "v1")
+    v1_like = client.get(
+        "/api/assistant/runtime/readiness",
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+    )
+    assert v1_like.status_code == 200
+    assert v1_like.json().get("default_runtime_version") == "v2"
+
+    monkeypatch.setenv("HG_RUNTIME_VERSION", "shadow")
+    shadow_like = client.get(
+        "/api/assistant/runtime/readiness",
+        headers={"x-datada-role": "viewer", "x-datada-tenant-id": "public"},
+    )
+    assert shadow_like.status_code == 200
+    assert shadow_like.json().get("default_runtime_version") == "v2"
 
 
 def test_ui_shell_serves_modular_assets(client):
@@ -327,6 +359,10 @@ def test_query_response_includes_v2_additive_fields(client):
         "stage_timings_ms",
         "provider_effective",
         "fallback_used",
+        "certainty_tags",
+        "decision_memo",
+        "grain_signature",
+        "denominator_semantics",
     ]:
         assert key in payload
     runtime = payload.get("runtime") or {}

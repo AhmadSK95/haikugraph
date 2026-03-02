@@ -14,8 +14,9 @@ STAGE_ORDER: tuple[str, ...] = (
     "intent_engine",
     "planner",
     "query_compiler",
-    "executor_delegate",
-    "evaluator_insight",
+    "executor",
+    "evaluator",
+    "insight_engine",
 )
 
 
